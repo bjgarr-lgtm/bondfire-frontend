@@ -1,132 +1,98 @@
-// src/pages/MeetingDetail.jsx
+// src/pages/Meetings.jsx
 import React, { useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useStore, updateMeeting } from "../utils/store.js";
+import { useStore, addMeeting, updateMeeting } from "../utils/store.js";
 
-// tiny helper: convert file -> data URL (kept local so we don't depend on anything else)
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
+// format timestamp helper
+function fmtWhen(ts) {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return "";
+  }
 }
 
-export default function MeetingDetail() {
-  const { orgId, meetingId } = useParams();
-
-  // live meeting from store
-  const meeting = useStore(
-    (s) => (s.meetings || []).find((m) => m.id === meetingId) || null
-  );
-
-  const files = useMemo(() => meeting?.files || [], [meeting]);
-
-  if (!meeting) {
-    return (
-      <div className="card" style={{ margin: 16 }}>
-        <div className="helper">Meeting not found.</div>
-        <Link className="btn" to={`/org/${orgId}/meetings`} style={{ marginTop: 8 }}>
-          Back to Meetings
-        </Link>
-      </div>
-    );
+// derive orgId from hash
+function getOrgId() {
+  try {
+    const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
   }
+}
 
-  async function onUpload(e) {
-    const selected = Array.from(e.target.files || []);
-    if (!selected.length) return;
+export default function Meetings() {
+  const orgId = getOrgId();
+  const meetingsAll = useStore((s) => s.meetings || []);
 
-    const newFiles = [];
-    for (const f of selected) {
-      const dataUrl = await fileToDataUrl(f);
-      newFiles.push({
-        id: crypto.randomUUID(),
-        name: f.name,
-        size: f.size,
-        mime: f.type || "application/octet-stream",
-        dataUrl,
-      });
-    }
+  const meetings = useMemo(() => {
+    if (!orgId) return meetingsAll;
+    return meetingsAll.some(m => m && Object.prototype.hasOwnProperty.call(m, "org"))
+      ? meetingsAll.filter(m => m?.org === orgId)
+      : meetingsAll;
+  }, [meetingsAll, orgId]);
 
-    updateMeeting(meetingId, { files: [...(meeting.files || []), ...newFiles] });
-    // clear the file input so the same file can be re-selected if needed
-    e.target.value = "";
-  }
-
-  function onNotesChange(e) {
-    updateMeeting(meetingId, { notes: e.target.value });
-  }
-
-  function removeFile(id) {
-    const next = (meeting.files || []).filter((f) => f.id !== id);
-    updateMeeting(meetingId, { files: next });
+  function onAdd(e) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    addMeeting({
+      id: crypto.randomUUID(),
+      title: f.get("title") || "Untitled Meeting",
+      when: Date.parse(f.get("when")) || Date.now(),
+      notes: "",
+      files: [],
+      org: orgId || undefined,
+    });
+    e.currentTarget.reset();
   }
 
   return (
-    <div className="grid" style={{ gap: 12, margin: 16 }}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <Link className="btn" to={`/org/${orgId}/meetings`}>← Back</Link>
-        <div className="helper">
-          {meeting.when ? new Date(meeting.when).toLocaleString() : ""}
-        </div>
-      </div>
+    <div className="card" style={{ margin: 16 }}>
+      <h2 className="section-title">Meetings</h2>
 
-      <div className="card" style={{ padding: 12 }}>
-        <h2 className="section-title" style={{ marginTop: 0 }}>
-          {meeting.title || "(Untitled meeting)"}
-        </h2>
+      <table className="table" style={{ marginTop: 12 }}>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Date / Time</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {meetings.map((m) => (
+            <tr key={m.id}>
+              <td>
+                <input
+                  className="input"
+                  defaultValue={m.title}
+                  onBlur={(e) => updateMeeting(m.id, { title: e.target.value })}
+                />
+              </td>
+              <td>{fmtWhen(m.when)}</td>
+              <td>
+                <Link className="btn" to={`/org/${orgId}/meeting/${m.id}`}>
+                  Open
+                </Link>
+              </td>
+            </tr>
+          ))}
+          {meetings.length === 0 && (
+            <tr>
+              <td colSpan={3} className="helper">
+                No meetings yet.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
 
-        <label className="helper" style={{ display: "block", marginBottom: 6 }}>
-          Agenda & Minutes
-        </label>
-        <textarea
-          className="input"
-          style={{ minHeight: 220, width: "100%", resize: "vertical" }}
-          placeholder="Type agenda, notes, and minutes here…"
-          value={meeting.notes || ""}
-          onChange={onNotesChange}
-        />
-      </div>
-
-      <div className="card" style={{ padding: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h3 className="section-title" style={{ margin: 0 }}>Attachments</h3>
-          <label className="btn" style={{ cursor: "pointer" }}>
-            Upload file(s)
-            <input
-              type="file"
-              multiple
-              onChange={onUpload}
-              style={{ display: "none" }}
-            />
-          </label>
-        </div>
-
-        {files.length === 0 ? (
-          <div className="helper" style={{ marginTop: 8 }}>No files yet.</div>
-        ) : (
-          <ul style={{ listStyle: "none", paddingLeft: 0, marginTop: 10 }}>
-            {files.map((f) => (
-              <li
-                key={f.id}
-                className="row"
-                style={{ justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}
-              >
-                <div>
-                  <strong>{f.name}</strong>{" "}
-                  <span className="helper">({Math.round((f.size || 0) / 1024)} KB)</span>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <a className="btn" href={f.dataUrl} download={f.name}>Download</a>
-                  <button className="btn" onClick={() => removeFile(f.id)}>Remove</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <form onSubmit={onAdd} className="grid cols-2" style={{ marginTop: 12 }}>
+        <input className="input" name="title" placeholder="Meeting title" required />
+        <input className="input" name="when" type="datetime-local" />
+        <button className="btn">Add Meeting</button>
+      </form>
     </div>
   );
 }
