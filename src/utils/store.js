@@ -108,11 +108,3 @@ export function seedDemo(){
   };
   emit();
 }
-
-export {
-  useStore,
-  addMeeting,       // (meeting) => void
-  updateMeeting,    // (id, patch) => void
-  // removeMeeting, // (id) => void
-  // ...other exports
-};
