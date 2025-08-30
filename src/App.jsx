@@ -6,11 +6,9 @@ import {
   Route,
   Navigate,
   useLocation,
-  useNavigate,
 } from "react-router-dom";
 
-import AppHeader from "./components/AppHeader.jsx";
-
+// PAGES
 import OrgPublicPreview from "./pages/OrgPublicPreview.jsx";
 import PublicPage from "./pages/PublicPage.jsx";
 import Overview from "./pages/Overview.jsx";
@@ -24,11 +22,11 @@ import Settings from "./pages/Settings.jsx";
 import BambiChat from "./pages/BambiChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
 
-// If you still have this file in your repo, keep the import.
-// If not, you can safely delete this line.
-// import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
+// COMPONENTS
+import AppHeader from "./components/AppHeader.jsx";
+import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 
-/* ----------------- error boundary ----------------- */
+/* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -53,7 +51,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-/* ----------------- auth helpers ----------------- */
+/* ------------------------------ Auth helpers ------------------------------ */
 function getToken() {
   return (
     localStorage.getItem("bf_auth_token") ||
@@ -68,73 +66,79 @@ function RequireAuth({ children }) {
   return children;
 }
 
-/* ---------- global floating logout button --------- */
-function FloatingLogout() {
-  const navigate = useNavigate();
-  const token = getToken();
-  if (!token) return null;
+function logoutEverywhere() {
+  try {
+    localStorage.removeItem("bf_auth_token");
+    sessionStorage.removeItem("bf_auth_token");
+    localStorage.removeItem("demo_user");
+  } catch {}
+  // optional: nuke any cached org/session bits you use
+  window.location.hash = "#/signin";
+  window.location.reload();
+}
 
-  const doLogout = () => {
-    try {
-      localStorage.removeItem("bf_auth_token");
-      sessionStorage.removeItem("bf_auth_token");
-      // Clear any extra flags you may set
-      localStorage.removeItem("demo_user");
-    } catch {}
-    navigate("/signin", { replace: true });
+/* ------------------------------ Floating Logout ------------------------------ */
+/** Renders a small logout button near the header brand (left side),
+ *  and hides itself on pages where the header is hidden. */
+function GlobalLogoutButton() {
+  const loc = useLocation();
+  const token = getToken();
+
+  // pages where we don't show header or the button
+  const path = loc.pathname || "/";
+  const hide =
+    path === "/" || path === "/orgs" || path.startsWith("/p/") || path === "/signin";
+
+  if (!token || hide) return null;
+
+  // Nudge to the right of the brand area so it doesn't overlap the logo
+  const btnStyle = {
+    position: "fixed",
+    top: 10,
+    left: 140, // <- adjust if your brand is wider/narrower
+    zIndex: 1000,
+    padding: "6px 10px",
+    fontSize: 12,
+    borderRadius: 8,
+    background: "#111",
+    color: "#eee",
+    border: "1px solid #333",
+    cursor: "pointer",
+    opacity: 0.9,
   };
 
   return (
-    <button
-      onClick={doLogout}
-      style={{
-        position: "fixed",
-        top: 10,
-        right: 10,
-        zIndex: 1000,
-        padding: "6px 10px",
-        borderRadius: 8,
-        border: "1px solid #333",
-        background: "#111",
-        color: "#fff",
-        cursor: "pointer",
-        opacity: 0.9,
-      }}
-      aria-label="Log out"
-      title="Log out"
-    >
+    <button title="Logout" style={btnStyle} onClick={logoutEverywhere}>
       Logout
     </button>
   );
 }
 
-/* -------------------- shell ---------------------- */
-/** We keep your header visibility rules, but add the floating logout so
- * it’s available even on routes where the header is hidden. */
+/* ---------------------------------- Shell ---------------------------------- */
 function Shell() {
   const loc = useLocation();
   const path = loc.pathname || "/";
-  const hideHeader = path === "/" || path === "/orgs" || path.startsWith("/p/");
+
+  // Hide the header on landing/public routes (keeps your old behavior)
+  const hideHeader =
+    path === "/" || path === "/orgs" || path.startsWith("/p/") || path === "/signin";
 
   return (
     <>
       {!hideHeader && <AppHeader />}
-      <FloatingLogout />
+      <GlobalLogoutButton />
 
       <Routes>
-        {/* PUBLIC (no auth) */}
+        {/* PUBLIC */}
         <Route path="/p/:slug" element={<PublicPage />} />
         <Route path="/p/*" element={<PublicPage />} />
-
-        {/* Sign in */}
         <Route path="/signin" element={<SignIn />} />
 
-        {/* Landing / Orgs list
-            If you want the landing to be SignIn when no token,
-            we’ll redirect “/” accordingly below in RootGate. */}
+        {/* Landing / Orgs list */}
+        <Route path="/" element={<OrgDash />} />
         <Route path="/orgs" element={<OrgDash />} />
 
-        {/* Org space (auth-gated) */}
+        {/* ORG SPACE (auth-gated) */}
         <Route
           path="/org/:orgId/*"
           element={
@@ -152,38 +156,23 @@ function Shell() {
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
           <Route path="chat" element={<BambiChat />} />
+          {/* Secret guard stays available as you had it */}
+          <Route path="guard/*" element={<OrgSecretGuard />} />
         </Route>
 
         {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/orgs" replace />} />
       </Routes>
     </>
   );
 }
 
-/* ----------- root gate (handles “/”) ------------- */
-/** If a token exists, send them into the app (OrgDash).
- *  If no token, send to /signin. */
-function RootGate() {
-  const token = getToken();
-  const demo = localStorage.getItem("demo_user");
-  if (token || demo) {
-    return <Navigate to="/orgs" replace />;
-  }
-  return <Navigate to="/signin" replace />;
-}
-
-/* --------------------- app ----------------------- */
+/* ---------------------------------- App ---------------------------------- */
 export default function App() {
   return (
     <HashRouter>
       <ErrorBoundary>
-        <Routes>
-          {/* Home route decides based on token */}
-          <Route path="/" element={<RootGate />} />
-          {/* Everything else inside the shell */}
-          <Route path="/*" element={<Shell />} />
-        </Routes>
+        <Shell />
       </ErrorBoundary>
     </HashRouter>
   );
