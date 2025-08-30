@@ -1,18 +1,21 @@
 // src/App.jsx
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+
+import AppHeader       from './components/AppHeader.jsx';
 import OrgPublicPreview from './pages/OrgPublicPreview.jsx';
-import AppHeader     from './components/AppHeader.jsx';
-import PublicPage    from './pages/PublicPage.jsx';
-import Overview      from './pages/Overview.jsx';
-import OrgDash       from './pages/OrgDash.jsx';
-import InnerSanctum  from './pages/InnerSanctum.jsx';
-import People        from './pages/People.jsx';
-import Inventory     from './pages/Inventory.jsx';
-import Meetings      from './pages/Meetings.jsx';
-import Needs         from './pages/Needs.jsx';
-import Settings      from './pages/Settings.jsx';
-import BambiChat from "./pages/BambiChat.jsx";
+import PublicPage      from './pages/PublicPage.jsx';
+import Overview        from './pages/Overview.jsx';
+import OrgDash         from './pages/OrgDash.jsx';
+import InnerSanctum    from './pages/InnerSanctum.jsx';
+import People          from './pages/People.jsx';
+import Inventory       from './pages/Inventory.jsx';
+import Meetings        from './pages/Meetings.jsx';
+import Needs           from './pages/Needs.jsx';
+import Settings        from './pages/Settings.jsx';
+import BambiChat       from './pages/BambiChat.jsx';
+import OrgSecretGuard  from './components/OrgSecretGuard.jsx'; // (import kept if used elsewhere)
+import SignIn          from './pages/SignIn.jsx';
 
 class ErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state = { error: null }; }
@@ -31,18 +34,30 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-function RequireAuth({ children }){
-  const token = localStorage.getItem('bf_auth_token') || sessionStorage.getItem('bf_auth_token');
-  const demo  = localStorage.getItem('demo_user');
-  if (!token && !demo) return <Navigate to="/orgs" replace />;
+function isAuthed() {
+  return (
+    localStorage.getItem('bf_auth_token') ||
+    sessionStorage.getItem('bf_auth_token') ||
+    localStorage.getItem('demo_user')
+  );
+}
+
+function RequireAuth({ children }) {
+  if (!isAuthed()) return <Navigate to="/signin" replace />;
   return children;
 }
 
-// Small shell so we can hide the header on landing/orgs/public
+function RedirectIfAuthed({ children }) {
+  // If already signed in and we hit /signin, bounce to /orgs
+  return isAuthed() ? <Navigate to="/orgs" replace /> : children;
+}
+
+// Small shell so we can hide the header on landing/signin/public pages
 function Shell() {
   const loc = useLocation();
-  const path = loc.pathname || "/";
-  const hideHeader = path === '/' || path === '/orgs' || path.startsWith('/p/');
+  const path = loc.pathname || '/';
+  const hideHeader =
+    path === '/' || path === '/signin' || path === '/orgs' || path.startsWith('/p/');
 
   return (
     <>
@@ -51,34 +66,46 @@ function Shell() {
       <Routes>
         {/* PUBLIC (top-level, no auth) */}
         <Route path="/p/:slug" element={<PublicPage />} />
-        {/* extra fallback to catch any /p/... variations */}
         <Route path="/p/*" element={<PublicPage />} />
 
-        {/* Landing / Orgs list */}
-        <Route path="/" element={<OrgDash />} />
-        <Route path="/orgs" element={<OrgDash />} />
+        {/* Sign in is the new home */}
+        <Route path="/" element={<Navigate to="/signin" replace />} />
+        <Route
+          path="/signin"
+          element={
+            <RedirectIfAuthed>
+              <SignIn />
+            </RedirectIfAuthed>
+          }
+        />
 
-        {/* Org space (auth-gated) */}
-        <Route path="/org/:orgId/*" element={<RequireAuth><InnerSanctum/></RequireAuth>}>
+        {/* Orgs list (requires auth) */}
+        <Route path="/orgs" element={<RequireAuth><OrgDash /></RequireAuth>} />
+
+        {/* Org space (requires auth) */}
+        <Route
+          path="/org/:orgId/*"
+          element={<RequireAuth><InnerSanctum /></RequireAuth>}
+        >
           <Route index element={<Overview />} />
-          <Route path="overview" element={<Overview />} />
-          <Route path="people" element={<People />} />
-          <Route path="inventory" element={<Inventory />} />
-          <Route path="needs" element={<Needs />} />
-          <Route path="meetings" element={<Meetings />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="public" element={<OrgPublicPreview />} />   {/* <— add this */}
-          <Route path="chat" element={<BambiChat />} />
+          <Route path="overview"   element={<Overview />} />
+          <Route path="people"     element={<People />} />
+          <Route path="inventory"  element={<Inventory />} />
+          <Route path="needs"      element={<Needs />} />
+          <Route path="meetings"   element={<Meetings />} />
+          <Route path="settings"   element={<Settings />} />
+          <Route path="public"     element={<OrgPublicPreview />} />
+          <Route path="chat"       element={<BambiChat />} />
         </Route>
 
-        {/* Catch‑all */}
-        <Route path="*" element={<Navigate to="/orgs" replace />} />
+        {/* Catch-all -> signin */}
+        <Route path="*" element={<Navigate to="/signin" replace />} />
       </Routes>
     </>
   );
 }
 
-export default function App(){
+export default function App() {
   return (
     <HashRouter>
       <ErrorBoundary>
