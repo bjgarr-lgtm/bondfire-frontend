@@ -1,124 +1,89 @@
-import React, { useMemo, useState } from 'react';
-import { getState } from '../utils_store';
-import { useAuth } from '../context/AuthContext';
-import { Link } from 'react-router-dom';
+// src/pages/SignIn.jsx
+import React, { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 
-function Stat({label, value}){
-  return (
-    <div className="card">
-      <div style={{fontSize:12, color:'var(--muted)'}}>{label}</div>
-      <div style={{fontSize:28, fontWeight:700, marginTop:6}}>{value}</div>
-    </div>
-  );
-}
+/**
+ * Minimal sign-in screen.
+ * - If you have a real backend, wire handleSubmit() to your API and
+ *   set bf_auth_token on success.
+ * - “Continue as demo” just sets demo_user so you can enter the app.
+ */
+export default function SignIn() {
+  const navigate = useNavigate();
+  const loc = useLocation();
+  const [email, setEmail] = useState("");
+  const [pass, setPass]   = useState("");
+  const [err, setErr]     = useState("");
 
-function LoginCard(){
-  const { login } = useAuth();
-  const [form, setForm] = useState({ email:'', password:'' });
-  const onSubmit = (e) => {
+  const after = new URLSearchParams(loc.search).get("next") || "/orgs";
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    if(!form.email || !form.password) return alert('Enter email & password');
-    login({ id: crypto.randomUUID(), name: form.email.split('@')[0] || 'Member', email: form.email, role: 'admin' });
-  };
+    setErr("");
+
+    try {
+      // TODO: replace with your real auth call
+      // const base = import.meta.env.VITE_API_BASE; // e.g. https://api.example.com
+      // const res  = await fetch(`${base}/auth/login`, {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({ email, password: pass })
+      // });
+      // if (!res.ok) throw new Error(await res.text());
+      // const data = await res.json();
+      // localStorage.setItem("bf_auth_token", data.token);
+
+      // Temporary: accept anything and drop a fake token
+      localStorage.setItem("bf_auth_token", "local-dev-token");
+      sessionStorage.removeItem("bf_auth_token"); // prefer localStorage
+      navigate(after, { replace: true });
+    } catch (e) {
+      setErr(typeof e === "string" ? e : (e?.message || "Login failed"));
+    }
+  }
+
+  function handleDemo() {
+    localStorage.setItem("demo_user", "true");
+    localStorage.removeItem("bf_auth_token");
+    navigate(after, { replace: true });
+  }
+
   return (
-    <div className="card">
-      <h2>Log in</h2>
-      <form onSubmit={onSubmit} className="grid" style={{gap:8}}>
-        <input placeholder="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
-        <input placeholder="password" type="password" value={form.password} onChange={e=>setForm({...form, password:e.target.value})} />
-        <button type="submit">Log in</button>
+    <div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
+      <h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
+      <p className="helper" style={{ marginTop: 0 }}>
+        Sign in to continue, or try the demo mode.
+      </p>
+
+      <form onSubmit={handleSubmit} className="grid" style={{ gap: 10 }}>
+        <input
+          className="input"
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoFocus
+        />
+        <input
+          className="input"
+          type="password"
+          placeholder="Password"
+          value={pass}
+          onChange={(e) => setPass(e.target.value)}
+          required
+        />
+        <button className="btn">Sign in</button>
       </form>
-      <p style={{marginTop:10, color:'var(--muted)', fontSize:12}}>Want real JWT? Point me at <code>/api/auth/login</code> and I'll POST the credentials and store the token.</p>
-    </div>
-  );
-}
 
-function CreateAccountCard(){
-  const { register } = useAuth();
-  const [form, setForm] = useState({ name:'', email:'', password:'' });
-  const onSubmit = (e) => {
-    e.preventDefault();
-    if(!form.name || !form.email || !form.password) return alert('Fill all fields');
-    register({ id: crypto.randomUUID(), name: form.name, email: form.email, role: 'admin' });
-  };
-  return (
-    <div className="card">
-      <h2>Create account</h2>
-      <form onSubmit={onSubmit} className="grid" style={{gap:8}}>
-        <input placeholder="name" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} />
-        <input placeholder="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
-        <input placeholder="password" type="password" value={form.password} onChange={e=>setForm({...form, password:e.target.value})} />
-        <button type="submit">Create account</button>
-      </form>
-      <p style={{marginTop:10, color:'var(--muted)', fontSize:12}}>No email is sent in demo mode; we just store a user locally.</p>
-    </div>
-  );
-}
-
-export default function Home(){
-  const s = getState();
-  const stats = useMemo(()=>{
-    const pubInv = s.inventory.filter(i=>i.public);
-    const openNeeds = s.needs.filter(n=>n.status==='open');
-    return {
-      orgs: s.orgs?.length || 0,
-      people: s.people?.length || 0,
-      items: s.inventory?.length || 0,
-      publicItems: pubInv.length,
-      openNeeds: openNeeds.length,
-      meetings: s.meetings?.length || 0
-    };
-  }, [s]);
-
-  return (
-    <div className="grid" style={{gap:12}}>
-      <div className="card">
-        <h1 style={{margin:'4px 0 8px'}}>Bondfire</h1>
-        <p style={{color:'var(--muted)'}}>Mutual aid ops in one place. Keep people, inventory, needs, and meetings tight—then share only what you want on your org’s public page.</p>
-      </div>
-
-      <div className="grid cols-3">
-        <Stat label="Orgs" value={stats.orgs} />
-        <Stat label="People" value={stats.people} />
-        <Stat label="Inventory items" value={stats.items} />
-        <Stat label="Public items" value={stats.publicItems} />
-        <Stat label="Open needs" value={stats.openNeeds} />
-        <Stat label="Meetings" value={stats.meetings} />
-      </div>
-
-      <div className="grid cols-2">
-        <div className="card">
-          <h2>Why join</h2>
-          <ul style={{lineHeight:1.6, marginTop:8}}>
-            <li>Track people, roles, and skills</li>
-            <li>Inventory with low-stock alerts</li>
-            <li>Post needs and close them out</li>
-            <li>Public org page for sharing needs & offerings</li>
-          </ul>
+      {err && (
+        <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
+          {err}
         </div>
-        <div className="card">
-          <h2>Features</h2>
-          <ul style={{lineHeight:1.6, marginTop:8}}>
-            <li>Org-scoped data and permissions</li>
-            <li>CSV export for public inventory</li>
-            <li>Fast local-first demo mode</li>
-            <li>JWT-ready hooks for real auth</li>
-          </ul>
-        </div>
-      </div>
+      )}
 
-      <div className="grid cols-2">
-        <CreateAccountCard/>
-        <LoginCard/>
-      </div>
-
-      <div className="card">
-        <h3>Already have an org?</h3>
-        <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-          {s.orgs.map(o => (
-            <a key={o.id} className="linkbtn" href={`#/o/${o.id}/public`}>Visit {o.name} public page</a>
-          ))}
-        </div>
+      <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+        <button className="btn" onClick={handleDemo}>Continue as demo</button>
       </div>
     </div>
   );
