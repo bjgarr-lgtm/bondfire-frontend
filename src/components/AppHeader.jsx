@@ -35,6 +35,26 @@ function OrgNav() {
   if (!orgId) return null;
 
   const base = `/org/${orgId}`;
+  const navStyle = {
+    padding: "8px 12px",
+    borderRadius: 8,
+    background: "#a40b12",
+    color: "#fff",
+    border: "1px solid #7a0c12",
+    textDecoration: "none",
+    fontWeight: 500,
+    transition: "background 0.2s ease, transform 0.1s ease",
+  };
+
+  const hoverStyle = {
+    background: "#8e0a10",
+  };
+
+  const activeStyle = {
+    background: "#cc0f1a",
+    fontWeight: 700,
+  };
+
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginRight: 12 }}>
       {[
@@ -50,18 +70,13 @@ function OrgNav() {
         <NavLink
           key={to}
           to={to}
-          className={({ isActive }) =>
-            "btn" + (isActive ? " active" : "")
-          }
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            background: "#a40b12",
-            color: "#fff",
-            border: "1px solid #7a0c12",
-            textDecoration: "none",
-            fontWeight: 500,
-          }}
+          className="btn"
+          style={({ isActive }) => ({
+            ...navStyle,
+            ...(isActive ? activeStyle : {}),
+          })}
+          onMouseEnter={(e) => Object.assign(e.currentTarget.style, hoverStyle)}
+          onMouseLeave={(e) => Object.assign(e.currentTarget.style, navStyle)}
         >
           {label}
         </NavLink>
@@ -98,8 +113,11 @@ export default function AppHeader({ onLogout, showLogout }) {
               background: "#a40b12",
               color: "#fff",
               border: "1px solid #7a0c12",
-              cursor: "pointer"
+              cursor: "pointer",
+              transition: "background 0.2s ease, transform 0.1s ease",
             }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "#8e0a10"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "#a40b12"}
             title="Logout"
           >
             Logout
