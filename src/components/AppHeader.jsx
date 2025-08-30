@@ -2,17 +2,13 @@
 import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
-// --- helpers ---
 function useOrgIdFromPath() {
   const { pathname = "" } = useLocation();
   const m = pathname.match(/\/org\/([^/]+)/i);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-// Use Vite's BASE_URL so assets work under sub-paths too.
-const LOGO_URL = `${import.meta.env.BASE_URL || "/"}logo-bondfire.png`;
-
-const Brand = ({ logoSrc = LOGO_URL }) => {
+const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgIdFromPath();
   const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
   return (
@@ -26,9 +22,8 @@ const Brand = ({ logoSrc = LOGO_URL }) => {
         alt="Bondfire"
         width={28}
         height={28}
-        // If it 404s, show a simple fallback dot so you know it failed.
-        onError={(e) => { e.currentTarget.src = "data:image/gif;base64,R0lGODlhAQABAAAAACw="; }}
-        style={{ display: "block", borderRadius: 6 }}
+        onError={(e) => { e.currentTarget.style.display = "none"; }}
+        style={{ display: "block" }}
       />
       <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
     </Link>
@@ -40,10 +35,8 @@ function OrgNav() {
   if (!orgId) return null;
 
   const base = `/org/${orgId}`;
-  const linkStyle = { padding: "8px 12px", borderRadius: 10, textDecoration: "none" };
-
   return (
-    <nav style={{ display: "flex", gap: 8, marginLeft: 12, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginRight: 12 }}>
       {[
         ["Dashboard", `${base}/overview`],
         ["People", `${base}/people`],
@@ -57,13 +50,23 @@ function OrgNav() {
         <NavLink
           key={to}
           to={to}
-          className={({ isActive }) => "btn" + (isActive ? " active" : "")}
-          style={linkStyle}
+          className={({ isActive }) =>
+            "btn" + (isActive ? " active" : "")
+          }
+          style={{
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: "#a40b12",
+            color: "#fff",
+            border: "1px solid #7a0c12",
+            textDecoration: "none",
+            fontWeight: 500,
+          }}
         >
           {label}
         </NavLink>
       ))}
-    </nav>
+    </div>
   );
 }
 
@@ -76,15 +79,15 @@ export default function AppHeader({ onLogout, showLogout }) {
         zIndex: 30,
         display: "flex",
         alignItems: "center",
-        gap: 12,
+        justifyContent: "space-between",
         padding: "10px 14px",
         borderBottom: "1px solid #1f2937",
         background: "#0f0f10"
       }}
     >
       <Brand />
-      <OrgNav />
-      <div style={{ marginLeft: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <OrgNav />
         {showLogout && (
           <button
             onClick={onLogout}
