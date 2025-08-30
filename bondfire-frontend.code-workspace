@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../bondfire-stable-v6/Auth v1 stable/Auth v1 stable/Auth v1 stable/frontend/src"
+		},
+		{
+			"path": "../bondfire-stable-v6/Auth v1 stable/Auth v1 stable/Auth v1 stable/frontend/node_modules"
+		},
+		{
+			"path": "../bondfire-stable-v6/Auth v1 stable/Auth v1 stable/Auth v1 stable/frontend/public"
+		},
+		{
+			"path": "../bondfire-stable-v6/Auth v1 stable/Auth v1 stable/Auth v1 stable/frontend/dist"
+		}
+	],
+	"settings": {}
+}
