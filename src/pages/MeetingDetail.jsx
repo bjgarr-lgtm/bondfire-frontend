@@ -1,104 +1,120 @@
-// src/pages/Meetings.jsx
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useStore, addMeeting, updateMeeting } from "../utils/store.js";
+import { useStore, updateMeeting } from "../utils/store.js";
 
-function fmtWhen(w) {
-  try {
-    return new Date(w).toLocaleString();
-  } catch {
-    return "";
+export default function MeetingDetail() {
+  const { orgId, meetingId } = useParams();
+  const meetings = useStore((s) => s.meetings || []);
+
+  const meeting = useMemo(() => meetings.find((m) => m.id === meetingId) || null, [meetings, meetingId]);
+
+  if (!meeting) {
+    return (
+      <div className="card" style={{ margin: 16 }}>
+        <div>Meeting not found.</div>
+        <div style={{ marginTop: 8 }}>
+          <Link className="btn" to={`/org/${orgId}/meetings`}>Back to Meetings</Link>
+        </div>
+      </div>
+    );
   }
-}
 
-export default function Meetings() {
-  const { orgId } = useParams();
-  const meetingsAll = useStore((s) => s.meetings || []);
-
-  const meetings = useMemo(() => {
-    if (!orgId) return meetingsAll;
-    return meetingsAll.some((m) => m && Object.prototype.hasOwnProperty.call(m, "org"))
-      ? meetingsAll.filter((m) => m?.org === orgId)
-      : meetingsAll;
-  }, [meetingsAll, orgId]);
-
-  const titleRef = useRef();
-  const [when, setWhen] = useState("");
-
-  function onAdd(e) {
-    e.preventDefault();
-    const t = titleRef.current?.value.trim();
-    if (!t) return;
-    addMeeting({
-      id: crypto.randomUUID(),
-      title: t,
-      when: when || new Date().toISOString(),
-      notes: "",
-      files: [],
-      org: orgId || undefined,
-    });
-    e.target.reset();
-    setWhen("");
-  }
+  // helpers
+  const setField = (patch) => updateMeeting(meeting.id, patch);
 
   return (
-    <div>
-      <div className="card" style={{ margin: 16 }}>
-        <h2 className="section-title">Meetings</h2>
+    <div style={{ padding: 16 }}>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h2 className="section-title" style={{ marginBottom: 8 }}>Meeting</h2>
 
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>When</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {meetings.map((m) => (
-              <tr key={m.id}>
-                <td>
-                  <input
-                    className="input"
-                    defaultValue={m.title}
-                    onBlur={(e) => updateMeeting(m.id, { title: e.target.value })}
-                  />
-                </td>
-                <td>{fmtWhen(m.when)}</td>
-                <td>
-                  <Link className="btn" to={`/org/${orgId}/meetings/${m.id}`}>
-                    Open
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {meetings.length === 0 && (
-              <tr>
-                <td colSpan={3} className="helper">
-                  No meetings yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="grid cols-2" style={{ gap: 8 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span className="helper">Title</span>
+            <input
+              className="input"
+              defaultValue={meeting.title || ""}
+              onBlur={(e) => setField({ title: e.target.value })}
+            />
+          </label>
 
-        <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
-          <input
-            className="input"
-            placeholder="Meeting title"
-            name="title"
-            ref={titleRef}
-            required
-          />
-          <input
-            className="input"
-            type="datetime-local"
-            name="when"
-            value={when}
-            onChange={(e) => setWhen(e.target.value)}
-          />
-          <button className="btn">Add Meeting</button>
-        </form>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span className="helper">When</span>
+            <input
+              className="input"
+              defaultValue={meeting.when || ""}
+              onBlur={(e) => {
+                const raw = e.target.value.trim();
+                const d = new Date(raw);
+                setField({ when: isNaN(d) ? raw : d.toISOString() });
+              }}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3 className="section-title" style={{ marginBottom: 8 }}>Agenda & Minutes</h3>
+        <textarea
+          className="input"
+          style={{ minHeight: 260 }}
+          defaultValue={meeting.notes || ""}
+          onBlur={(e) => setField({ notes: e.target.value })}
+          placeholder="Type agenda and minutes here..."
+        />
+      </div>
+
+      <div className="card">
+        <h3 className="section-title" style={{ marginBottom: 8 }}>Files</h3>
+        <input
+          type="file"
+          multiple
+          onChange={async (e) => {
+            const files = Array.from(e.target.files || []);
+            if (!files.length) return;
+
+            // light-weight: store small files as data URLs
+            const toDataUrl = (file) =>
+              new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onload = () => res(r.result);
+                r.onerror = rej;
+                r.readAsDataURL(file);
+              });
+
+            const existing = Array.isArray(meeting.files) ? meeting.files : [];
+            const newOnes = await Promise.all(files.map(async (f) => ({
+              id: crypto.randomUUID(),
+              name: f.name,
+              size: f.size,
+              mime: f.type,
+              dataUrl: await toDataUrl(f),
+            })));
+            setField({ files: [...existing, ...newOnes] });
+            e.target.value = "";
+          }}
+        />
+
+        <div className="list" style={{ marginTop: 10 }}>
+          {Array.isArray(meeting.files) && meeting.files.length ? (
+            meeting.files.map((f) => (
+              <div key={f.id} className="row" style={{ justifyContent: "space-between" }}>
+                <div>
+                  {f.name}{" "}
+                  <span className="tag">
+                    {Math.round((f.size || 0) / 1024)} KB
+                  </span>
+                </div>
+                <a className="btn" href={f.dataUrl} download={f.name}>Download</a>
+              </div>
+            ))
+          ) : (
+            <div className="helper">No files yet.</div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <Link className="btn" to={`/org/${orgId}/meetings`}>Back to Meetings</Link>
+        </div>
       </div>
     </div>
   );

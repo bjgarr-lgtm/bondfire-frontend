@@ -154,7 +154,6 @@ function Shell() {
           <Route path="inventory" element={<Inventory />} />
           <Route path="needs" element={<Needs />} />
           <Route path="meetings" element={<Meetings />} />
-          <Route path="meetings" element={<Meetings />} />
           <Route path="meetings/:meetingId" element={<MeetingDetail />} />
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
