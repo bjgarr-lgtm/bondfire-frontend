@@ -91,10 +91,17 @@ export default function AppHeader() {
   );
 }
 
-// filepath: c:\Users\bjgar\Downloads\bondfire-frontend\src\components\AppHeader.jsx
-// ...existing code...
-<div className="brand" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-  <Brand />
-  {orgName && <span style={{ opacity: 0.9 }}>— {orgName}</span>}
-</div>
-// ...existing code...
+// Put a logo file at: public/bondfire-logo.svg  (or .png)  — see notes below.
+const Brand = ({ logoSrc = "/logo-bondfire.png" }) => (
+  <Link to="/orgs" className="brand" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+    <img
+      src={logoSrc}
+      alt="Bondfire"
+      width={28}
+      height={28}
+      onError={(e) => { e.currentTarget.style.display = "none"; }} // hide if missing
+      style={{ display: "block" }}
+    />
+    <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
+  </Link>
+);
