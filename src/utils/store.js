@@ -29,6 +29,13 @@ export function getState(){ return state; }
 export function subscribe(fn){ listeners.add(fn); return () => listeners.delete(fn); }
 function emit(){ for(const fn of listeners) fn(state); save(state); }
 
+// --- add near your other meeting helpers in src/utils/store.js ---
+export function deleteMeeting(id) {
+  set((s) => ({
+    meetings: (s.meetings || []).filter((m) => m.id !== id),
+  }));
+}
+
 // Org
 export function setOrgMeta(partial){ state.org = { ...state.org, ...partial }; emit(); }
 export function setOrgLogoFromDataUrl(dataUrl){ state.org = { ...state.org, logoDataUrl: dataUrl }; emit(); }
