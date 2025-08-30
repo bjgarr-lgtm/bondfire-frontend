@@ -1,5 +1,5 @@
 // src/pages/Inventory.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { useStore, addItem, updateItem, deleteItem } from "../utils/store.js";
 
 // derive orgId from hash; no extra deps
@@ -12,14 +12,19 @@ function getOrgId() {
 
 export default function Inventory() {
   const orgId = getOrgId();
+
+  // NOTE: some store impls mutate arrays in place (no new reference),
+  // which can prevent subscribed components from re-rendering.
+  // We use a tiny "rev" bump to force a render after we call actions.
+  const [rev, setRev] = useState(0);
+
   const inventoryAll = useStore((s) => s.inventory || []);
   const inventory = useMemo(() => {
-    // scope to org when items have .org
     if (!orgId) return inventoryAll;
     return inventoryAll.some(i => i && Object.prototype.hasOwnProperty.call(i, "org"))
       ? inventoryAll.filter(i => i?.org === orgId)
       : inventoryAll;
-  }, [inventoryAll, orgId]);
+  }, [inventoryAll, orgId, rev]);
 
   const [q, setQ] = useState("");
   const list = useMemo(() => {
@@ -28,6 +33,8 @@ export default function Inventory() {
       [p.name, p.category, p.location].filter(Boolean).join(" ").toLowerCase().includes(needle)
     );
   }, [inventory, q]);
+
+  const bump = useCallback(() => setRev((r) => r + 1), []);
 
   function onAdd(e) {
     e.preventDefault();
@@ -44,7 +51,18 @@ export default function Inventory() {
       org: orgId || undefined,
     });
     e.currentTarget.reset();
+    bump(); // ensure UI shows the new row immediately
   }
+
+  const onUpdate = (id, patch) => {
+    updateItem(id, patch);
+    bump();
+  };
+
+  const onDelete = (id) => {
+    deleteItem(id);
+    bump();
+  };
 
   return (
     <div>
@@ -58,65 +76,101 @@ export default function Inventory() {
           placeholder="Search by name, category, location"
         />
 
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Name</th><th>Qty</th><th>Unit</th><th>Category</th>
-              <th>Location</th><th>Public</th><th>Low</th><th />
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((i) => (
-              <tr key={i.id}>
-                <td>
-                  <input className="input" defaultValue={i.name}
-                    onBlur={(e) => updateItem(i.id, { name: e.target.value })} />
-                </td>
-                <td>
-                  <input className="input" type="number" defaultValue={i.qty}
-                    onBlur={(e) => updateItem(i.id, { qty: +e.target.value })} />
-                </td>
-                <td>
-                  <input className="input" defaultValue={i.unit}
-                    onBlur={(e) => updateItem(i.id, { unit: e.target.value })} />
-                </td>
-                <td>
-                  <input className="input" defaultValue={i.category}
-                    onBlur={(e) => updateItem(i.id, { category: e.target.value })} />
-                </td>
-                <td>
-                  <input className="input" defaultValue={i.location}
-                    onBlur={(e) => updateItem(i.id, { location: e.target.value })} />
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    defaultChecked={!!i.public}
-                    onChange={(e) => updateItem(i.id, { public: e.target.checked })}
-                  />
-                </td>
-                <td>
-                  <input className="input" type="number" defaultValue={i.low}
-                    onBlur={(e) => updateItem(i.id, { low: +e.target.value })} />
-                </td>
-                <td>
-                  <button className="btn" onClick={() => deleteItem(i.id)}>Delete</button>
-                </td>
+        {/* Prevent horizontal overflow */}
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th>Name</th><th>Qty</th><th>Unit</th><th>Category</th>
+                <th>Location</th><th>Public</th><th>Low</th><th />
               </tr>
-            ))}
-            {list.length === 0 && (
-              <tr><td colSpan={8} className="helper">No items match.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.map((i) => (
+                <tr key={i.id}>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={i.name}
+                      onBlur={(e) => onUpdate(i.id, { name: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      defaultValue={i.qty}
+                      onBlur={(e) => onUpdate(i.id, { qty: +e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={i.unit}
+                      onBlur={(e) => onUpdate(i.id, { unit: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={i.category}
+                      onBlur={(e) => onUpdate(i.id, { category: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={i.location}
+                      onBlur={(e) => onUpdate(i.id, { location: e.target.value })}
+                    />
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      defaultChecked={!!i.public}
+                      onChange={(e) => onUpdate(i.id, { public: e.target.checked })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      defaultValue={i.low}
+                      onBlur={(e) => onUpdate(i.id, { low: +e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn" onClick={() => onDelete(i.id)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 && (
+                <tr><td colSpan={8} className="helper">No items match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
+        {/* Responsive grid: wraps instead of overflowing */}
+        <form
+          onSubmit={onAdd}
+          className="grid"
+          style={{
+            marginTop: 12,
+            display: "grid",
+            gap: 8,
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            alignItems: "center",
+          }}
+        >
           <input className="input" name="name" placeholder="Name" required />
           <input className="input" name="qty" type="number" placeholder="Qty" required />
           <input className="input" name="unit" placeholder="Unit" />
           <input className="input" name="category" placeholder="Category" />
           <input className="input" name="location" placeholder="Location" />
-          <label><input type="checkbox" name="public" /> Public</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" name="public" /> Public
+          </label>
           <input className="input" name="low" type="number" placeholder="Low threshold" />
           <div />
           <button className="btn">Add Item</button>

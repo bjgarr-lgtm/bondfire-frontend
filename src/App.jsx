@@ -17,6 +17,7 @@ import InnerSanctum from "./pages/InnerSanctum.jsx";
 import People from "./pages/People.jsx";
 import Inventory from "./pages/Inventory.jsx";
 import Meetings from "./pages/Meetings.jsx";
+import MeetingDetail from "./pages/MeetingDetail.jsx";
 import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
 import BambiChat from "./pages/BambiChat.jsx";
@@ -153,6 +154,8 @@ function Shell() {
           <Route path="inventory" element={<Inventory />} />
           <Route path="needs" element={<Needs />} />
           <Route path="meetings" element={<Meetings />} />
+          <Route path="meetings" element={<Meetings />} />
+          <Route path="meetings/:meetingId" element={<MeetingDetail />} />
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
           <Route path="chat" element={<BambiChat />} />

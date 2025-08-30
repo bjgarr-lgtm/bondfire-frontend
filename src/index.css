@@ -78,3 +78,38 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   color: #fff;
 }
 
+/* --- responsive list shells --- */
+.scroll-x {
+  overflow-x: auto;
+}
+
+/* Ensure wide rows don’t smash layout */
+.table-like {
+  min-width: 880px;            /* prevents cramped columns */
+}
+
+/* Grid row: name, qty, unit, category, location, public, low */
+.inventory-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(160px, 2fr) /* Name  */
+    minmax(70px, 0.8fr)/* Qty   */
+    minmax(90px, 1fr)  /* Unit  */
+    minmax(120px, 1.5fr)/* Cat  */
+    minmax(140px, 1.6fr)/* Loc  */
+    70px               /* Public checkbox cell */
+    80px;              /* Low numeric cell */
+  gap: 10px;
+  align-items: center;
+}
+
+/* Inputs should shrink nicely instead of forcing overflow */
+.inventory-grid > input,
+.inventory-grid > select {
+  min-width: 0;  /* allows inputs to shrink inside grid */
+}
+
+/* Checkbox column centering */
+.cell-center {
+  display: flex; align-items: center; justify-content: center;
+}
