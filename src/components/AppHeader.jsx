@@ -2,15 +2,19 @@
 import React from "react";
 import { Link } from "react-router-dom";
 
-// Put a logo file at: public/bondfire-logo.svg  (or .png)  — see notes below.
+// Put /public/logo-bondfire.png in your repo (case-sensitive on Pages)
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => (
-  <Link to="/orgs" className="brand" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+  <Link
+    to="/orgs"
+    className="brand"
+    style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}
+  >
     <img
       src={logoSrc}
       alt="Bondfire"
       width={28}
       height={28}
-      onError={(e) => { e.currentTarget.style.display = "none"; }} // hide if missing
+      onError={(e) => { e.currentTarget.style.display = "none"; }}
       style={{ display: "block" }}
     />
     <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
@@ -29,16 +33,11 @@ export default function AppHeader({ onLogout, showLogout }) {
         gap: 12,
         padding: "10px 14px",
         borderBottom: "1px solid #1f2937",
-        background: "#0f0f10"
+        background: "#0f0f10",
       }}
     >
       <Brand />
-
-      {/* spacer before nav */}
-      <nav style={{ display: "flex", gap: 8, marginLeft: 10 }}>
-        {/* Your existing header nav buttons/links remain as-is in the page shells */}
-      </nav>
-
+      {/* space for your page-level nav (tabs in InnerSanctum etc.) */}
       <div style={{ marginLeft: "auto" }}>
         {showLogout && (
           <button
@@ -50,7 +49,7 @@ export default function AppHeader({ onLogout, showLogout }) {
               background: "#a40b12",
               color: "#fff",
               border: "1px solid #7a0c12",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
             title="Logout"
           >
