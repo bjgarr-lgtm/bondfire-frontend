@@ -1,7 +1,7 @@
 // src/pages/MeetingDetail.jsx
 import React, { useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useStore, updateMeeting, deleteMeeting } from "../store";
+import { useStore, updateMeeting, deleteMeeting } from "../utils/store.js";
 
 function fmtWhen(w) {
   if (!w) return "";
