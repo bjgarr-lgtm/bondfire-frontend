@@ -1,107 +1,108 @@
 // src/components/AppHeader.jsx
-import { useMemo } from "react";
-import { useOrg } from "../context/OrgContext";
-import { getState } from "../utils_store";
-import { NavLink, Link } from "react-router-dom";
+import React from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
-export default function AppHeader() {
-  const ctx = (typeof useOrg === "function" ? useOrg() : null) || {};
-  const orgName = ctx.orgName || null;
+// --- helpers ---
+function useOrgIdFromPath() {
+  const { pathname = "" } = useLocation();
+  const m = pathname.match(/\/org\/([^/]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
-  const orgId = useMemo(() => {
-    try {
-      const hash = window.location.hash || "#/org/org-demo-a";
-      const m = hash.match(/#\/org\/([^/]+)/);
-      if (m && m[1]) return decodeURIComponent(m[1]);
-      const s = getState();
-      return s.currentOrgId || (s.orgs && s.orgs[0]?.id) || "org-demo-a";
-    } catch {
-      const s = getState();
-      return s.currentOrgId || "org-demo-a";
-    }
-  }, []);
+// Use Vite's BASE_URL so assets work under sub-paths too.
+const LOGO_URL = `${import.meta.env.BASE_URL || "/"}logo-bondfire.png`;
 
-  const bar = {
-    position: "sticky",
-    top: 0,
-    zIndex: 1000,
-    background: "var(--bg)",
-    borderBottom: "1px solid var(--border)",
-    padding: "8px 12px",
-  };
+const Brand = ({ logoSrc = LOGO_URL }) => {
+  const orgId = useOrgIdFromPath();
+  const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
+  return (
+    <Link
+      to={homeHref}
+      className="brand"
+      style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}
+    >
+      <img
+        src={logoSrc}
+        alt="Bondfire"
+        width={28}
+        height={28}
+        // If it 404s, show a simple fallback dot so you know it failed.
+        onError={(e) => { e.currentTarget.src = "data:image/gif;base64,R0lGODlhAQABAAAAACw="; }}
+        style={{ display: "block", borderRadius: 6 }}
+      />
+      <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
+    </Link>
+  );
+};
 
-  const row = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    maxWidth: 1100,
-    margin: "0 auto",
-  };
+function OrgNav() {
+  const orgId = useOrgIdFromPath();
+  if (!orgId) return null;
+
+  const base = `/org/${orgId}`;
+  const linkStyle = { padding: "8px 12px", borderRadius: 10, textDecoration: "none" };
 
   return (
-    <header style={bar} data-app-header>
-      <div style={row}>
-        {/* Brand links back to all orgs */}
-        <div className="brand" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Link
-            to="/orgs"
-            style={{ textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: 8 }}
-            title="Back to all orgs"
-          >
-            <img
-              src="/logo.png"
-              alt="Bondfire"
-              style={{ height: 28, width: 28, objectFit: "contain", borderRadius: 6 }}
-            />
-            <strong>Bondfire</strong>
-          </Link>
-          {orgName && <span style={{ opacity: 0.9 }}>— {orgName}</span>}
-        </div>
+    <nav style={{ display: "flex", gap: 8, marginLeft: 12, flexWrap: "wrap" }}>
+      {[
+        ["Dashboard", `${base}/overview`],
+        ["People", `${base}/people`],
+        ["Inventory", `${base}/inventory`],
+        ["Needs", `${base}/needs`],
+        ["Meetings", `${base}/meetings`],
+        ["Settings", `${base}/settings`],
+        ["Public", `${base}/public`],
+        ["Bambi", `${base}/chat`],
+      ].map(([label, to]) => (
+        <NavLink
+          key={to}
+          to={to}
+          className={({ isActive }) => "btn" + (isActive ? " active" : "")}
+          style={linkStyle}
+        >
+          {label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
 
-        {/* Top navigation */}
-        <nav className="topnav" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to={`/org/${orgId}`} end className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Dashboard
-          </NavLink>
-          <NavLink to={`/org/${orgId}/people`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            People
-          </NavLink>
-          <NavLink to={`/org/${orgId}/inventory`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Inventory
-          </NavLink>
-          <NavLink to={`/org/${orgId}/needs`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Needs
-          </NavLink>
-          <NavLink to={`/org/${orgId}/meetings`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Meetings
-          </NavLink>
-          <NavLink to={`/org/${orgId}/settings`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Settings
-          </NavLink>
-          <NavLink to={`/org/${orgId}/public`} className={({ isActive }) => (isActive ? "btn-red active" : "btn-red")}>
-            Public
-          </NavLink>
-          <NavLink to={`/org/${orgId}/chat`} className={({isActive}) => isActive ? "btn-red active" : "btn-red"}>
-  BambiChat
-          </NavLink>
-        </nav>
+export default function AppHeader({ onLogout, showLogout }) {
+  return (
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 30,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 14px",
+        borderBottom: "1px solid #1f2937",
+        background: "#0f0f10"
+      }}
+    >
+      <Brand />
+      <OrgNav />
+      <div style={{ marginLeft: "auto" }}>
+        {showLogout && (
+          <button
+            onClick={onLogout}
+            className="btn"
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: "#a40b12",
+              color: "#fff",
+              border: "1px solid #7a0c12",
+              cursor: "pointer"
+            }}
+            title="Logout"
+          >
+            Logout
+          </button>
+        )}
       </div>
     </header>
   );
 }
-
-// Put a logo file at: public/bondfire-logo.svg  (or .png)  — see notes below.
-const Brand = ({ logoSrc = "/logo-bondfire.png" }) => (
-  <Link to="/orgs" className="brand" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-    <img
-      src={logoSrc}
-      alt="Bondfire"
-      width={28}
-      height={28}
-      onError={(e) => { e.currentTarget.style.display = "none"; }} // hide if missing
-      style={{ display: "block" }}
-    />
-    <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
-  </Link>
-);
