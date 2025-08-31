@@ -1,41 +1,55 @@
 // src/pages/People.jsx
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  getState,
-  subscribe,
-  addPerson,
-  updatePerson,
-  deletePerson,
-} from "../utils/store.js";
+import React, { useMemo, useState } from "react";
+import { useStore, addPerson, updatePerson, deletePerson } from "../utils/store.js";
+
+// derive orgId from hash (matches your other pages)
+function getOrgId() {
+  try {
+    const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function People() {
-  // keep local state in sync with the store without useStore()
-  const [people, setPeople] = useState(() => getState().people || []);
+  const orgId = getOrgId();
+
+  // full list from store
+  const peopleAll = useStore((s) => s.people || []);
+
+  // scope to org if records contain an `org` field
+  const people = useMemo(() => {
+    if (!orgId) return peopleAll;
+    return peopleAll.some(p => p && Object.prototype.hasOwnProperty.call(p, "org"))
+      ? peopleAll.filter((p) => p?.org === orgId)
+      : peopleAll;
+  }, [peopleAll, orgId]);
+
+  // search
   const [q, setQ] = useState("");
-
-  useEffect(() => {
-    // subscribe returns an unsubscribe function
-    const unsub = subscribe((s) => setPeople(s.people || []));
-    // make sure we’re in sync immediately (in case subscribe fires only on changes)
-    setPeople(getState().people || []);
-    return unsub;
-  }, []);
-
   const list = useMemo(() => {
     const needle = q.toLowerCase();
-    return (people || []).filter((p) =>
-      [p.name, p.role, p.skills].filter(Boolean).join(" ").toLowerCase().includes(needle)
+    return people.filter((p) =>
+      [p.name, p.role, p.skills, p.phone]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
     );
   }, [people, q]);
 
+  // add
   function onAdd(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     addPerson({
+      id: crypto.randomUUID(),
       name: f.get("name"),
-      role: f.get("role"),
-      phone: f.get("phone"),
-      skills: f.get("skills"),
+      role: f.get("role") || "",
+      phone: f.get("phone") || "",
+      skills: f.get("skills") || "",
+      org: orgId || undefined,
     });
     e.currentTarget.reset();
   }
@@ -49,7 +63,7 @@ export default function People() {
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, role, skills"
+          placeholder="Search by name, role, phone, skills"
         />
 
         <table className="table" style={{ marginTop: 12 }}>
@@ -103,7 +117,7 @@ export default function People() {
             {list.length === 0 && (
               <tr>
                 <td colSpan={5} className="helper">
-                  No people yet.
+                  No people match.
                 </td>
               </tr>
             )}
@@ -115,12 +129,11 @@ export default function People() {
           <input className="input" name="role" placeholder="Role" />
           <input className="input" name="phone" placeholder="Phone" />
           <input className="input" name="skills" placeholder="Skills" />
-          <div />
-          <div />
+          <div></div>
+          <div></div>
           <button className="btn">Add Person</button>
         </form>
       </div>
     </div>
   );
 }
- 
