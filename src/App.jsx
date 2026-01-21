@@ -160,6 +160,7 @@ function Shell() {
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
           <Route path="chat" element={<BondfireChat />} />
+          <Route path="/signup" element={<SignUp />} />
           {/* Secret guard stays available as you had it */}
           <Route path="guard/*" element={<OrgSecretGuard />} />
         </Route>

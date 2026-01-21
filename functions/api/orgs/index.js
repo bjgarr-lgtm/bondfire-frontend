@@ -1,37 +1,30 @@
-import { json, bad, now, uuid } from "../_lib/http.js";
-import { requireUser } from "../_lib/auth.js";
+// functions/api/orgs/index.js
+import { json, bad } from "../_lib/http.js";
+import { verifyJwt } from "../_lib/jwt.js";
 
-export async function onRequestGet({ env, request }) {
-  const u = await requireUser({ env, request });
-  if (!u.ok) return u.resp;
-
-  const res = await env.BF_DB.prepare(
-    `SELECT o.id, o.name, m.role
-     FROM orgs o
-     JOIN org_memberships m ON m.org_id = o.id
-     WHERE m.user_id = ?
-     ORDER BY o.created_at DESC`
-  ).bind(u.user.sub).all();
-
-  return json({ ok: true, orgs: res.results || [] });
+function getToken(request) {
+  const h = request.headers.get("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
 }
 
-export async function onRequestPost({ env, request }) {
-  const u = await requireUser({ env, request });
-  if (!u.ok) return u.resp;
+export async function onRequestGet({ env, request }) {
+  const token = getToken(request);
+  if (!token) return bad(401, "NO_TOKEN");
+  if (!env.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
+  if (!env.BF_DB) return bad(500, "BF_DB_MISSING");
 
-  const body = await request.json().catch(() => ({}));
-  const name = String(body.name || "").trim();
-  if (!name) return bad(400, "MISSING_NAME");
+  const payload = await verifyJwt(env.JWT_SECRET, token).catch(() => null);
+  const userId = payload?.sub;
+  if (!userId) return bad(401, "BAD_TOKEN");
 
-  const orgId = uuid();
-  await env.BF_DB.prepare(
-    "INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)"
-  ).bind(orgId, name, now()).run();
+  const res = await env.BF_DB.prepare(
+    `SELECT o.id as id, o.name as name, m.role as role
+     FROM org_memberships m
+     JOIN orgs o ON o.id = m.org_id
+     WHERE m.user_id = ?
+     ORDER BY o.created_at DESC`
+  ).bind(userId).all();
 
-  await env.BF_DB.prepare(
-    "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
-  ).bind(orgId, u.user.sub, "owner", now()).run();
-
-  return json({ ok: true, org: { id: orgId, name }, role: "owner" });
+  return json({ ok: true, orgs: res.results || [] });
 }

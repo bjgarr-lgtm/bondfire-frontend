@@ -19,85 +19,41 @@ export default function SignIn() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setErr("");
-    setBusy(true);
+async function handleSubmit(e) {
+  e.preventDefault();
+  setErr("");
 
-    try {
-      if (mode === "login") {
-        const res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password: pass }),
-        });
+  try {
+    const res = await fetch(`/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: pass }),
+    });
 
-          const raw = await res.text();
-          let data = {};
-          try { data = JSON.parse(raw); } catch { /* ignore */ }
-
-          if (!res.ok || !data?.ok || !data?.token) {
-            const msg = data?.error || raw || "Register failed";
-            throw new Error(msg);
-          }
-
-
-        localStorage.setItem("bf_auth_token", data.token);
-        sessionStorage.removeItem("bf_auth_token");
-        localStorage.removeItem("demo_user");
-
-        navigate(after, { replace: true });
-        return;
-      }
-
-      // register
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password: pass,
-          name,
-          orgName,
-        }),
-      });
-
-      const raw = await res.text();
-      let data = {};
-      try { data = JSON.parse(raw); } catch { /* ignore */ }
-
-      if (!res.ok || !data?.ok || !data?.token) {
-        const msg = data?.error || raw || "Register failed";
-        throw new Error(msg);
-      }
-
-
-      localStorage.setItem("bf_auth_token", data.token);
-      sessionStorage.removeItem("bf_auth_token");
-      localStorage.removeItem("demo_user");
-
-      // persist org list for org picker pages
-      if (data?.org?.id) {
-        const orgObj = {
-          id: data.org.id,
-          name: data.org.name || orgName || "Org",
-          role: data.org.role || "owner",
-        };
-
-        localStorage.setItem("bf_orgs", JSON.stringify([orgObj]));
-        localStorage.setItem(
-          `bf_org_settings_${orgObj.id}`,
-          JSON.stringify({ name: orgObj.name })
-        );
-      }
-
-      navigate(after, { replace: true });
-    } catch (e2) {
-      setErr(typeof e2 === "string" ? e2 : (e2?.message || "Failed"));
-    } finally {
-      setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok || !data?.token) {
+      throw new Error(data?.error || "Login failed");
     }
+
+    localStorage.setItem("bf_auth_token", data.token);
+    sessionStorage.removeItem("bf_auth_token");
+    localStorage.removeItem("demo_user");
+
+    // load org memberships
+    const orgsRes = await fetch("/api/orgs", {
+      headers: { Authorization: `Bearer ${data.token}` },
+    });
+    const orgsData = await orgsRes.json().catch(() => ({}));
+    if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {
+      localStorage.setItem("bf_orgs", JSON.stringify(orgsData.orgs));
+    }
+
+    navigate("/orgs", { replace: true });
+  } catch (e) {
+    setErr(typeof e === "string" ? e : (e?.message || "Login failed"));
   }
+}
+
 
   function handleDemo() {
     localStorage.setItem("demo_user", "true");
