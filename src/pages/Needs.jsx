@@ -1,6 +1,6 @@
 // src/pages/Needs.jsx
-import React, { useMemo, useState } from "react";
-import { useStore, addNeed, updateNeed, deleteNeed } from "../utils/store.js";
+import React, { useMemo, useEffect, useState } from "react";
+import { api } from "../utils/api.js";
 
 function getOrgId() {
   try {
@@ -13,13 +13,23 @@ function getOrgId() {
 
 export default function Needs() {
   const orgId = getOrgId();
-  const needsAll = useStore((s) => s.needs || []);
+  const [needs, setNeeds] = useState([]);
+
+  async function refreshNeeds() {
+    if (!orgId) return;
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+    setNeeds(data.needs || []);
+  }
+
+useEffect(() => {
+  refreshNeeds().catch(console.error);
+}, [orgId]);
 
   // ---- tiny "version" tick to reflect mutations immediately (no page refresh) ----
   const [, setVer] = useState(0);
   const bump = () => setVer((v) => v + 1);
 
-  const needs = useMemo(() => {
+  const filteredNeeds = useMemo(() => {
     if (!orgId) return needsAll;
     return needsAll.some(
       (n) => n && Object.prototype.hasOwnProperty.call(n, "org")
@@ -32,29 +42,32 @@ export default function Needs() {
   const [q, setQ] = useState("");
   const list = useMemo(() => {
     const needle = q.toLowerCase();
-    return needs.filter((n) =>
+    return filteredNeeds.filter((n) =>
       [n.title, n.description, n.urgency, n.status]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(needle)
     );
-  }, [needs, q]);
+  }, [filteredNeeds, q]);
 
-  function onAdd(e) {
+  async function onAdd(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    addNeed({
-      id: crypto.randomUUID(),
-      title: f.get("title"),
-      description: f.get("description") || "",
-      urgency: f.get("urgency") || "",
-      status: f.get("status") || "open",
-      public: f.get("public") === "on",
-      created: Date.now(),
-      org: orgId || undefined,
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: f.get("title"),
+        description: f.get("description") || "",
+        status: f.get("status") || "open",
+        priority: Number(f.get("priority") || 0),
+        is_public: String(f.get("is_public") || "") === "on"
+      }),
     });
+
     e.currentTarget.reset();
+    refreshNeeds().catch(console.error);
     bump();
   }
 
@@ -101,10 +114,11 @@ export default function Needs() {
                       className="input"
                       defaultValue={n.title}
                       style={cellInputStyle}
-                      onBlur={(e) => {
-                        updateNeed(n.id, { title: e.target.value });
-                        bump();
-                      }}
+                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: n.id, title: e.target.value })
+                      }).then(() => refreshNeeds()).catch(console.error)}
                     />
                   </td>
                   <td>
@@ -112,10 +126,12 @@ export default function Needs() {
                       className="input"
                       defaultValue={n.description}
                       style={cellInputStyle}
-                      onBlur={(e) => {
-                        updateNeed(n.id, { description: e.target.value });
-                        bump();
-                      }}
+                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: n.id, title: e.target.value })
+                      }).then(() => refreshNeeds()).catch(console.error)}
+
                     />
                   </td>
                   <td>
@@ -123,10 +139,12 @@ export default function Needs() {
                       className="input"
                       defaultValue={n.urgency}
                       style={cellInputStyle}
-                      onBlur={(e) => {
-                        updateNeed(n.id, { urgency: e.target.value });
-                        bump();
-                      }}
+                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: n.id, title: e.target.value })
+                      }).then(() => refreshNeeds()).catch(console.error)}
+
                     />
                   </td>
                   <td>
@@ -157,10 +175,10 @@ export default function Needs() {
                   <td>
                     <button
                       className="btn"
-                      onClick={() => {
-                        deleteNeed(n.id);
-                        bump();
-                      }}
+                      onClick={() => api(`/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(n.id)}`, {
+                        method: "DELETE"
+                      }).then(() => refreshNeeds()).catch(console.error)}
+
                     >
                       Delete
                     </button>

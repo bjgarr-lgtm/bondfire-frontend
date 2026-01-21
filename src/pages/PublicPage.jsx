@@ -105,7 +105,7 @@ export default function PublicPage(props) {
   );
 
   // Fetch when we have a slug (public route)
-  useEffect(() => {
+  useEffect(async () => {
     if (!slug || injected) return;
     let mounted = true;
     (async () => {
@@ -122,6 +122,11 @@ export default function PublicPage(props) {
         if (mounted) setState({ loading: false, error: e.message, data: null });
       }
     })();
+    const nRes = await fetch(`/api/public/${slug}/needs`);
+    const nData = await nRes.json().catch(() => ({}));
+    setPublicNeeds(nData.needs || []);
+    const [publicNeeds, setPublicNeeds] = useState([]);
+
     return () => {
       mounted = false;
     };

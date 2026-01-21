@@ -33,10 +33,22 @@ export default function SignIn() {
       // const data = await res.json();
       // localStorage.setItem("bf_auth_token", data.token);
 
-      // Temporary: accept anything and drop a fake token
-      localStorage.setItem("bf_auth_token", "local-dev-token");
-      sessionStorage.removeItem("bf_auth_token"); // prefer localStorage
+      const res = await fetch(`/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: pass }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok || !data?.token) {
+        throw new Error(data?.error || "Login failed");
+      }
+
+      localStorage.setItem("bf_auth_token", data.token);
+      sessionStorage.removeItem("bf_auth_token");
+      localStorage.removeItem("demo_user");
+
       navigate(after, { replace: true });
+
     } catch (e) {
       setErr(typeof e === "string" ? e : (e?.message || "Login failed"));
     }
@@ -82,9 +94,7 @@ export default function SignIn() {
         </div>
       )}
 
-      <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-        <button className="btn" onClick={handleDemo}>Continue as demo</button>
-      </div>
+      <div style={{ marginTop: 14, display: "flex", gap: 8 }} />
     </div>
   );
 }

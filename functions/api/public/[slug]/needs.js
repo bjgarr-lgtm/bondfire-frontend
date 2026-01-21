@@ -2,6 +2,7 @@ import { json } from "../../_lib/http.js";
 
 export async function onRequestGet({ env, params }) {
   const slug = params.slug;
+
   const orgId = await env.BF_PUBLIC.get(`slug:${slug}`);
   if (!orgId) return json({ ok: false, needs: [] }, { status: 404 });
 

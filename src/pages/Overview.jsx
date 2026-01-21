@@ -1,14 +1,15 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useOrg } from "../context/OrgContext";
 import { getState } from "../utils_store";
+import { api } from "../utils/api.js";
 
 // helper to pull settings from localStorage
 function readOrgInfo(orgId) {
   try {
     const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
     const orgs = JSON.parse(localStorage.getItem("bf_orgs") || "[]");
-    const o = orgs.find(x => x?.id === orgId) || {};
+    const o = orgs.find((x) => x?.id === orgId) || {};
     return {
       name: s.name || o.name || "Org",
       logo: s.logoDataUrl || s.logoUrl || o.logoDataUrl || o.logoUrl || null,
@@ -22,7 +23,7 @@ export default function Overview() {
   const ctx = (typeof useOrg === "function" ? useOrg() : null) || {};
   const orgNameCtx = ctx.orgName || null;
 
-  // derive orgId
+  // derive orgId (keep your existing behavior)
   const orgId = useMemo(() => {
     try {
       const hash = window.location.hash || "#/org/org-demo-a";
@@ -38,19 +39,40 @@ export default function Overview() {
 
   const { name: orgName, logo } = readOrgInfo(orgId);
 
-  // snapshot state
-  const state = getState() || {};
-  const asArr = (x) => (Array.isArray(x) ? x : []);
-  const people    = asArr(state.people).filter(x => !x.org || x.org === orgId);
-  const inventory = asArr(state.inventory).filter(x => !x.org || x.org === orgId);
-  const needs     = asArr(state.needs).filter(x => !x.org || x.org === orgId);
-  const meetings  = asArr(state.meetings).filter(x => !x.org || x.org === orgId);
-  const activity  = asArr(state.activity).filter(x => !x.org || x.org === orgId);
+  // server-backed data
+  const [counts, setCounts] = useState({ people: 0, needsOpen: 0, needsAll: 0 });
+  const [peoplePreview, setPeoplePreview] = useState([]);
+  const [needsPreview, setNeedsPreview] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const dash = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
+      setCounts(dash.counts || { people: 0, needsOpen: 0, needsAll: 0 });
+
+      const ppl = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+      setPeoplePreview((ppl.people || []).slice(0, 5));
+
+      const nds = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+      setNeedsPreview((nds.needs || []).slice(0, 5));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh().catch(console.error);
+  }, [orgId]);
 
   const gridStyle = {
-    display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-    gap: 12, margin: 16,
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+    gap: 12,
+    margin: 16,
   };
+
   const Card = ({ title, right, children }) => (
     <div className="card" style={{ padding: 12 }}>
       <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
@@ -63,25 +85,22 @@ export default function Overview() {
 
   return (
     <>
-            {/* Top card with Announcements */}
+      {/* Top card with Announcements */}
       <div className="card" style={{ margin: 16, padding: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* Logo moved here, aligned right of title */}
           {logo && (
             <img
               src={logo}
               alt="Org Logo"
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 12,
-                objectFit: "cover",
-              }}
+              style={{ width: 80, height: 80, borderRadius: 12, objectFit: "cover" }}
             />
           )}
           <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
-            {orgNameCtx || orgName} — Dashboard
+            {orgNameCtx || orgName} {" "}Dashboard
           </h2>
+          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+            {loading ? "Loading" : "Refresh"}
+          </button>
         </div>
 
         <div style={{ marginTop: 8 }}>
@@ -94,46 +113,40 @@ export default function Overview() {
 
       {/* Cards grid */}
       <div style={gridStyle}>
-        <Card
-          title="People"
-          right={<Link className="btn-red" to={`/org/${orgId}/people`}>View all</Link>}
-        >
-          <div className="helper">{people.length} member{people.length === 1 ? "" : "s"}</div>
+        <Card title="People" right={<Link className="btn-red" to={`/org/${orgId}/people`}>View all</Link>}>
+          <div className="helper">{counts.people} member{counts.people === 1 ? "" : "s"}</div>
           <ul style={{ marginTop: 6, paddingLeft: 16 }}>
-            {people.slice(0, 5).map((p, i) => (
+            {peoplePreview.map((p, i) => (
               <li key={p?.id || p?.name || i}>
                 {(p?.name ?? "Unnamed")}{p?.role ? ` — ${p.role}` : ""}
               </li>
             ))}
-            {!people.length && <li>No people yet.</li>}
+            {!peoplePreview.length && <li>No people yet.</li>}
           </ul>
         </Card>
 
-        <Card
-          title="Inventory"
-          right={<Link className="btn-red" to={`/org/${orgId}/inventory`}>View all</Link>}
-        >
-          <div className="helper">{inventory.length} item{inventory.length === 1 ? "" : "s"}</div>
-          {!inventory.length && <p className="helper">No items yet.</p>}
+        <Card title="Inventory" right={<Link className="btn-red" to={`/org/${orgId}/inventory`}>View all</Link>}>
+          <p className="helper">Inventory is still on demo storage until we port it to D1.</p>
         </Card>
 
-        <Card
-          title="Needs"
-          right={<Link className="btn-red" to={`/org/${orgId}/needs`}>View all</Link>}
-        >
-          <div className="helper">{needs.length} total</div>
-          {!needs.length && <p className="helper">No needs yet.</p>}
+        <Card title="Needs" right={<Link className="btn-red" to={`/org/${orgId}/needs`}>View all</Link>}>
+          <div className="helper">{counts.needsAll} total, {counts.needsOpen} open</div>
+          <ul style={{ marginTop: 6, paddingLeft: 16 }}>
+            {needsPreview.map((n, i) => (
+              <li key={n?.id || n?.title || i}>
+                {(n?.title ?? "Untitled")}{n?.status ? ` — ${n.status}` : ""}
+              </li>
+            ))}
+            {!needsPreview.length && <li>No needs yet.</li>}
+          </ul>
         </Card>
 
-        <Card
-          title="Meetings"
-          right={<Link className="btn-red" to={`/org/${orgId}/meetings`}>View all</Link>}
-        >
-          {!meetings.length && <p className="helper">No meetings scheduled.</p>}
+        <Card title="Meetings" right={<Link className="btn-red" to={`/org/${orgId}/meetings`}>View all</Link>}>
+          <p className="helper">Meetings is still on demo storage until we port it to D1.</p>
         </Card>
 
         <Card title="Recent Activity">
-          {!activity.length && <p className="helper">No recent activity.</p>}
+          <p className="helper">Activity feed is still on demo storage until we port it to D1.</p>
         </Card>
       </div>
     </>

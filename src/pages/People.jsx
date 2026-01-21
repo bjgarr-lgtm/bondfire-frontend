@@ -1,6 +1,6 @@
 // src/pages/People.jsx
-import React, { useMemo, useState } from "react";
-import { useStore, addPerson, updatePerson, deletePerson } from "../utils/store.js";
+import React, { useMemo, useEffect, useState } from "react";
+import { api } from "../utils/api.js";
 
 // derive orgId from hash (matches your other pages)
 function getOrgId() {
@@ -15,16 +15,18 @@ function getOrgId() {
 export default function People() {
   const orgId = getOrgId();
 
-  // full list from store
-  const peopleAll = useStore((s) => s.people || []);
+  const [people, setPeople] = useState([]);
 
-  // scope to org if records contain an `org` field
-  const people = useMemo(() => {
-    if (!orgId) return peopleAll;
-    return peopleAll.some(p => p && Object.prototype.hasOwnProperty.call(p, "org"))
-      ? peopleAll.filter((p) => p?.org === orgId)
-      : peopleAll;
-  }, [peopleAll, orgId]);
+  async function refresh() {
+    if (!orgId) return;
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+    setPeople(data.people || []);
+  }
+
+  useEffect(() => {
+    refresh().catch(console.error);
+  }, [orgId]);
+
 
   // search
   const [q, setQ] = useState("");
@@ -40,18 +42,23 @@ export default function People() {
   }, [people, q]);
 
   // add
-  function onAdd(e) {
+  async function onAdd(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    addPerson({
-      id: crypto.randomUUID(),
-      name: f.get("name"),
-      role: f.get("role") || "",
-      phone: f.get("phone") || "",
-      skills: f.get("skills") || "",
-      org: orgId || undefined,
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: f.get("name"),
+        role: f.get("role") || "",
+        phone: f.get("phone") || "",
+        skills: f.get("skills") || ""
+      }),
     });
     e.currentTarget.reset();
+    refreshPeople().catch(console.error);
+    refresh().catch(console.error);
+
   }
 
   return (
@@ -83,32 +90,51 @@ export default function People() {
                   <input
                     className="input"
                     defaultValue={p.name}
-                    onBlur={(e) => updatePerson(p.id, { name: e.target.value })}
+                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: p.id, name: e.target.value })
+                    }).then(() => refresh()).catch(console.error)}
                   />
                 </td>
                 <td>
                   <input
                     className="input"
                     defaultValue={p.role}
-                    onBlur={(e) => updatePerson(p.id, { role: e.target.value })}
+                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: p.id, role: e.target.value })
+                    }).then(() => refreshPeople()).catch(console.error)}
                   />
                 </td>
                 <td>
                   <input
                     className="input"
                     defaultValue={p.phone}
-                    onBlur={(e) => updatePerson(p.id, { phone: e.target.value })}
+                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: p.id, phone: e.target.value })
+                    }).then(() => refreshPeople()).catch(console.error)}
+
                   />
                 </td>
                 <td>
                   <input
                     className="input"
                     defaultValue={p.skills}
-                    onBlur={(e) => updatePerson(p.id, { skills: e.target.value })}
+                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: p.id, skills: e.target.value })
+                    }).then(() => refreshPeople()).catch(console.error)}
                   />
                 </td>
                 <td>
-                  <button className="btn" onClick={() => deletePerson(p.id)}>
+                  <button className="btn" onClick={() => api(`/api/orgs/${encodeURIComponent(orgId)}/people?id=${encodeURIComponent(p.id)}`, {
+                    method: "DELETE"
+                  }).then(() => refresh()).catch(console.error)}>
                     Delete
                   </button>
                 </td>
