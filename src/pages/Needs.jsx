@@ -13,65 +13,78 @@ function getOrgId() {
 
 export default function Needs() {
   const orgId = getOrgId();
+
   const [needs, setNeeds] = useState([]);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function refreshNeeds() {
     if (!orgId) return;
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-    setNeeds(data.needs || []);
+    setLoading(true);
+    try {
+      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+      setNeeds(Array.isArray(data.needs) ? data.needs : []);
+    } finally {
+      setLoading(false);
+    }
   }
 
-useEffect(() => {
-  refreshNeeds().catch(console.error);
-}, [orgId]);
+  useEffect(() => {
+    refreshNeeds().catch(console.error);
+  }, [orgId]);
 
-  // ---- tiny "version" tick to reflect mutations immediately (no page refresh) ----
-  const [, setVer] = useState(0);
-  const bump = () => setVer((v) => v + 1);
-
-  const filteredNeeds = useMemo(() => {
-    if (!orgId) return needsAll;
-    return needsAll.some(
-      (n) => n && Object.prototype.hasOwnProperty.call(n, "org")
-    )
-      ? needsAll.filter((n) => n?.org === orgId)
-      : needsAll;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsAll, orgId]); // derived from global store + org
-
-  const [q, setQ] = useState("");
   const list = useMemo(() => {
     const needle = q.toLowerCase();
-    return filteredNeeds.filter((n) =>
+    return needs.filter((n) =>
       [n.title, n.description, n.urgency, n.status]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(needle)
     );
-  }, [filteredNeeds, q]);
+  }, [needs, q]);
+
+  async function putNeed(id, patch) {
+    if (!orgId || !id) return;
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    refreshNeeds().catch(console.error);
+  }
+
+  async function delNeed(id) {
+    if (!orgId || !id) return;
+    await api(
+      `/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+    refreshNeeds().catch(console.error);
+  }
 
   async function onAdd(e) {
     e.preventDefault();
+    if (!orgId) return;
+
     const f = new FormData(e.currentTarget);
+
     await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: f.get("title"),
         description: f.get("description") || "",
+        urgency: f.get("urgency") || "",
         status: f.get("status") || "open",
-        priority: Number(f.get("priority") || 0),
-        is_public: String(f.get("is_public") || "") === "on"
+        is_public: String(f.get("is_public") || "") === "on",
       }),
     });
 
     e.currentTarget.reset();
     refreshNeeds().catch(console.error);
-    bump();
   }
 
-  // shared cell input style to keep table within viewport
   const cellInputStyle = {
     width: "100%",
     minWidth: 80,
@@ -81,21 +94,25 @@ useEffect(() => {
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <h2 className="section-title">Needs</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+            Needs
+          </h2>
+          <button className="btn" onClick={() => refreshNeeds().catch(console.error)} disabled={loading}>
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
 
         <input
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search needs"
+          style={{ marginTop: 12 }}
         />
 
-        {/* scroll container to prevent page overflow on narrow screens */}
         <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table
-            className="table"
-            style={{ width: "100%", tableLayout: "fixed", minWidth: 720 }}
-          >
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 760 }}>
             <thead>
               <tr>
                 <th style={{ width: "20%" }}>Title</th>
@@ -112,39 +129,34 @@ useEffect(() => {
                   <td>
                     <input
                       className="input"
-                      defaultValue={n.title}
+                      defaultValue={n.title || ""}
                       style={cellInputStyle}
-                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: n.id, title: e.target.value })
-                      }).then(() => refreshNeeds()).catch(console.error)}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (n.title || "")) putNeed(n.id, { title: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={n.description}
+                      defaultValue={n.description || ""}
                       style={cellInputStyle}
-                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: n.id, title: e.target.value })
-                      }).then(() => refreshNeeds()).catch(console.error)}
-
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (n.description || "")) putNeed(n.id, { description: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={n.urgency}
+                      defaultValue={n.urgency || ""}
                       style={cellInputStyle}
-                      onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: n.id, title: e.target.value })
-                      }).then(() => refreshNeeds()).catch(console.error)}
-
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (n.urgency || "")) putNeed(n.id, { urgency: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
@@ -152,10 +164,7 @@ useEffect(() => {
                       className="input"
                       defaultValue={n.status || "open"}
                       style={cellInputStyle}
-                      onChange={(e) => {
-                        updateNeed(n.id, { status: e.target.value });
-                        bump();
-                      }}
+                      onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
                     >
                       <option value="open">open</option>
                       <option value="in-progress">in-progress</option>
@@ -165,21 +174,12 @@ useEffect(() => {
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
-                      defaultChecked={!!n.public}
-                      onChange={(e) => {
-                        updateNeed(n.id, { public: e.target.checked });
-                        bump();
-                      }}
+                      defaultChecked={!!n.is_public}
+                      onChange={(e) => putNeed(n.id, { is_public: e.target.checked }).catch(console.error)}
                     />
                   </td>
                   <td>
-                    <button
-                      className="btn"
-                      onClick={() => api(`/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(n.id)}`, {
-                        method: "DELETE"
-                      }).then(() => refreshNeeds()).catch(console.error)}
-
-                    >
+                    <button className="btn" onClick={() => delNeed(n.id).catch(console.error)}>
                       Delete
                     </button>
                   </td>
@@ -198,23 +198,16 @@ useEffect(() => {
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
           <input className="input" name="title" placeholder="Title" required />
-          <input
-            className="input"
-            name="description"
-            placeholder="Description"
-          />
-          <input
-            className="input"
-            name="urgency"
-            placeholder="Urgency (e.g. high)"
-          />
+          <input className="input" name="description" placeholder="Description" />
+          <input className="input" name="urgency" placeholder="Urgency (e.g. high)" />
           <select className="input" name="status" defaultValue="open">
             <option value="open">open</option>
             <option value="in-progress">in-progress</option>
             <option value="resolved">resolved</option>
           </select>
-          <label>
-            <input type="checkbox" name="public" /> Public
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" name="is_public" />
+            Public
           </label>
           <div />
           <button className="btn">Add Need</button>

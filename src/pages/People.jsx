@@ -56,7 +56,6 @@ export default function People() {
       }),
     });
     e.currentTarget.reset();
-    refreshPeople().catch(console.error);
     refresh().catch(console.error);
 
   }

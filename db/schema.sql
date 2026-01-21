@@ -55,3 +55,5 @@ CREATE TABLE IF NOT EXISTS needs (
 CREATE INDEX IF NOT EXISTS idx_people_org ON people(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_org ON needs(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_public ON needs(is_public);
+ALTER TABLE needs ADD COLUMN urgency TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_needs_urgency ON needs(urgency);
