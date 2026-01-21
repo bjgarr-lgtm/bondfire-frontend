@@ -2,55 +2,90 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
-/**
- * Minimal sign-in screen.
- * - If you have a real backend, wire handleSubmit() to your API and
- *   set bf_auth_token on success.
- * - “Continue as demo” just sets demo_user so you can enter the app.
- */
 export default function SignIn() {
   const navigate = useNavigate();
   const loc = useLocation();
-  const [email, setEmail] = useState("");
-  const [pass, setPass]   = useState("");
-  const [err, setErr]     = useState("");
 
   const after = new URLSearchParams(loc.search).get("next") || "/orgs";
+
+  const [mode, setMode] = useState("login"); // "login" | "register"
+
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+
+  const [name, setName] = useState("");
+  const [orgName, setOrgName] = useState("Bondfire");
+
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setErr("");
+    setBusy(true);
 
     try {
-      // TODO: replace with your real auth call
-      // const base = import.meta.env.VITE_API_BASE; // e.g. https://api.example.com
-      // const res  = await fetch(`${base}/auth/login`, {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({ email, password: pass })
-      // });
-      // if (!res.ok) throw new Error(await res.text());
-      // const data = await res.json();
-      // localStorage.setItem("bf_auth_token", data.token);
+      if (mode === "login") {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: pass }),
+        });
 
-      const res = await fetch(`/api/auth/login`, {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok || !data?.token) {
+          throw new Error(data?.error || "Login failed");
+        }
+
+        localStorage.setItem("bf_auth_token", data.token);
+        sessionStorage.removeItem("bf_auth_token");
+        localStorage.removeItem("demo_user");
+
+        navigate(after, { replace: true });
+        return;
+      }
+
+      // register
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: pass }),
+        body: JSON.stringify({
+          email,
+          password: pass,
+          name,
+          orgName,
+        }),
       });
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok || !data?.token) {
-        throw new Error(data?.error || "Login failed");
+        throw new Error(data?.error || "Register failed");
       }
 
       localStorage.setItem("bf_auth_token", data.token);
       sessionStorage.removeItem("bf_auth_token");
       localStorage.removeItem("demo_user");
 
-      navigate(after, { replace: true });
+      // persist org list for org picker pages
+      if (data?.org?.id) {
+        const orgObj = {
+          id: data.org.id,
+          name: data.org.name || orgName || "Org",
+          role: data.org.role || "owner",
+        };
 
-    } catch (e) {
-      setErr(typeof e === "string" ? e : (e?.message || "Login failed"));
+        localStorage.setItem("bf_orgs", JSON.stringify([orgObj]));
+        localStorage.setItem(
+          `bf_org_settings_${orgObj.id}`,
+          JSON.stringify({ name: orgObj.name })
+        );
+      }
+
+      navigate(after, { replace: true });
+    } catch (e2) {
+      setErr(typeof e2 === "string" ? e2 : (e2?.message || "Failed"));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -63,11 +98,54 @@ export default function SignIn() {
   return (
     <div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
       <h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
+
       <p className="helper" style={{ marginTop: 0 }}>
-        Sign in to continue, or try the demo mode.
+        {mode === "login"
+          ? "Sign in to continue, or try the demo mode."
+          : "Create your account and your first org."}
       </p>
 
-      <form onSubmit={handleSubmit} className="grid" style={{ gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <button
+          type="button"
+          className={mode === "login" ? "btn-red" : "btn"}
+          onClick={() => { setErr(""); setMode("login"); }}
+          disabled={busy}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          className={mode === "register" ? "btn-red" : "btn"}
+          onClick={() => { setErr(""); setMode("register"); }}
+          disabled={busy}
+        >
+          Create account
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="grid" style={{ gap: 10, marginTop: 12 }}>
+        {mode === "register" && (
+          <>
+            <input
+              className="input"
+              type="text"
+              placeholder="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+            <input
+              className="input"
+              type="text"
+              placeholder="Org name"
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              required
+            />
+          </>
+        )}
+
         <input
           className="input"
           type="email"
@@ -75,8 +153,9 @@ export default function SignIn() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          autoFocus
+          autoFocus={mode === "login"}
         />
+
         <input
           className="input"
           type="password"
@@ -85,7 +164,10 @@ export default function SignIn() {
           onChange={(e) => setPass(e.target.value)}
           required
         />
-        <button className="btn">Sign in</button>
+
+        <button className="btn" disabled={busy}>
+          {busy ? "Working" : (mode === "login" ? "Sign in" : "Create account")}
+        </button>
       </form>
 
       {err && (
@@ -94,7 +176,11 @@ export default function SignIn() {
         </div>
       )}
 
-      <div style={{ marginTop: 14, display: "flex", gap: 8 }} />
+      <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+        <button type="button" className="btn" onClick={handleDemo} disabled={busy}>
+          Continue as demo
+        </button>
+      </div>
     </div>
   );
 }

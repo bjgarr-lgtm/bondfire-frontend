@@ -26,20 +26,47 @@ export async function onRequestPost({ env, request }) {
   const email = String(body.email || "").trim().toLowerCase();
   const name = String(body.name || "").trim();
   const password = String(body.password || "");
+  const orgName = String(body.orgName || "").trim() || "My Org";
 
   if (!email || !password) return bad(400, "MISSING_FIELDS");
 
   const exists = await env.BF_DB.prepare("SELECT id FROM users WHERE email = ?")
-    .bind(email).first();
+    .bind(email)
+    .first();
   if (exists) return bad(409, "EMAIL_EXISTS");
 
-  const id = uuid();
+  const userId = uuid();
   const passwordHash = await hashPass(password);
 
   await env.BF_DB.prepare(
     "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
-  ).bind(id, email, name || "", passwordHash, now()).run();
+  )
+    .bind(userId, email, name || "", passwordHash, now())
+    .run();
 
-  const token = await signJwt(env.JWT_SECRET, { sub: id, email, name: name || "" }, 3600 * 24 * 7);
-  return json({ ok: true, token, user: { id, email, name: name || "" } });
+  // bootstrap org + membership
+  const orgId = uuid();
+
+  await env.BF_DB.prepare("INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)")
+    .bind(orgId, orgName, now())
+    .run();
+
+  await env.BF_DB.prepare(
+    "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
+  )
+    .bind(orgId, userId, "owner", now())
+    .run();
+
+  const token = await signJwt(
+    env.JWT_SECRET,
+    { sub: userId, email, name: name || "" },
+    3600 * 24 * 7
+  );
+
+  return json({
+    ok: true,
+    token,
+    user: { id: userId, email, name: name || "" },
+    org: { id: orgId, name: orgName, role: "owner" }
+  });
 }
