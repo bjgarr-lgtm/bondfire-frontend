@@ -56,8 +56,7 @@ export default function People() {
       }),
     });
     e.currentTarget.reset();
-    refresh().catch(console.error);
-
+    await refresh();
   }
 
   return (
@@ -89,33 +88,48 @@ export default function People() {
                   <input
                     className="input"
                     defaultValue={p.name}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, name: e.target.value })
-                    }).then(() => refresh()).catch(console.error)}
+                    onBlur={(e) =>
+                      api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: p.id, role: e.target.value }),
+                      })
+                        .then(() => refresh())
+                        .catch(console.error)
+                    }
+
                   />
                 </td>
                 <td>
                   <input
                     className="input"
                     defaultValue={p.role}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, role: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    onBlur={(e) =>
+                      api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: p.id, role: e.target.value }),
+                      })
+                        .then(() => refresh())
+                        .catch(console.error)
+                    }
+
                   />
                 </td>
                 <td>
                   <input
                     className="input"
                     defaultValue={p.phone}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, phone: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    onBlur={(e) =>
+                      api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: p.id, role: e.target.value }),
+                      })
+                        .then(() => refresh())
+                        .catch(console.error)
+                    }
+
 
                   />
                 </td>
@@ -123,17 +137,22 @@ export default function People() {
                   <input
                     className="input"
                     defaultValue={p.skills}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, skills: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    onBlur={(e) =>
+                      api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: p.id, role: e.target.value }),
+                      })
+                        .then(() => refresh())
+                        .catch(console.error)
+                    }
+
                   />
                 </td>
                 <td>
                   <button className="btn" onClick={() => api(`/api/orgs/${encodeURIComponent(orgId)}/people?id=${encodeURIComponent(p.id)}`, {
                     method: "DELETE"
-                  }).then(() => refresh()).catch(console.error)}>
+                    }).then(() => refresh()).catch(console.error)}>
                     Delete
                   </button>
                 </td>
