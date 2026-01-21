@@ -22,6 +22,7 @@ import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
 import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
+import SignUp from "./pages/SignUp.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
@@ -136,6 +137,8 @@ function Shell() {
         <Route path="/p/:slug" element={<PublicPage />} />
         <Route path="/p/*" element={<PublicPage />} />
         <Route path="/signin" element={<SignIn />} />
+        <Route path="/signup" element={<SignUp />} />
+
 
         {/* Landing / Orgs list */}
         <Route path="/" element={<OrgDash />} />
@@ -160,7 +163,6 @@ function Shell() {
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
           <Route path="chat" element={<BondfireChat />} />
-          <Route path="/signup" element={<SignUp />} />
           {/* Secret guard stays available as you had it */}
           <Route path="guard/*" element={<OrgSecretGuard />} />
         </Route>
