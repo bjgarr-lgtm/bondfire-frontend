@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useStore, addMeeting, updateMeeting, removeMeeting } from "../utils/store.js";
+import { useStore, addMeeting, updateMeeting, deleteMeeting } from "../utils/store.js";
 
 // simple date display
 function fmtWhen(w) {
@@ -98,7 +98,7 @@ export default function Meetings() {
                 </td>
                 <td style={{ textAlign: "right" }}>
                   <Link className="btn" to={`/org/${orgId}/meetings/${m.id}`}>Open</Link>
-                  <button className="btn" style={{ marginLeft: 8 }} onClick={() => removeMeeting(m.id)}>
+                  <button className="btn" style={{ marginLeft: 8 }} onClick={() => deleteMeeting(m.id)}>
                     Delete
                   </button>
                 </td>
