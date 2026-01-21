@@ -136,7 +136,6 @@ function Shell() {
         <Route path="/p/:slug" element={<PublicPage />} />
         <Route path="/p/*" element={<PublicPage />} />
         <Route path="/signin" element={<SignIn />} />
-        <Route path="/signup" element={<SignUp />} />
 
 
         {/* Landing / Orgs list */}
