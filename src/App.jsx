@@ -22,7 +22,6 @@ import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
 import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
-import SignUp from "./pages/SignUp.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";

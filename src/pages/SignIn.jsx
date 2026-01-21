@@ -22,24 +22,41 @@ export default function SignIn() {
 async function handleSubmit(e) {
   e.preventDefault();
   setErr("");
+  setBusy(true);
 
   try {
-    const res = await fetch(`/api/auth/login`, {
+    const url = mode === "register" ? "/api/auth/register" : "/api/auth/login";
+
+    const payload =
+      mode === "register"
+        ? { email, password: pass, name, orgName }
+        : { email, password: pass };
+
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pass }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data?.ok || !data?.token) {
-      throw new Error(data?.error || "Login failed");
+      throw new Error(
+        data?.error || (mode === "register" ? "Register failed" : "Login failed")
+      );
     }
 
     localStorage.setItem("bf_auth_token", data.token);
     sessionStorage.removeItem("bf_auth_token");
     localStorage.removeItem("demo_user");
 
-    // load org memberships
+    // If register returns org, store it and go straight into that org
+    if (mode === "register" && data?.org?.id) {
+      localStorage.setItem("bf_orgs", JSON.stringify([data.org]));
+      navigate(`/org/${data.org.id}`, { replace: true });
+      return;
+    }
+
+    // Otherwise (login), load org memberships
     const orgsRes = await fetch("/api/orgs", {
       headers: { Authorization: `Bearer ${data.token}` },
     });
@@ -50,9 +67,12 @@ async function handleSubmit(e) {
 
     navigate("/orgs", { replace: true });
   } catch (e) {
-    setErr(typeof e === "string" ? e : (e?.message || "Login failed"));
+    setErr(typeof e === "string" ? e : (e?.message || "Auth failed"));
+  } finally {
+    setBusy(false);
   }
 }
+
 
 
   function handleDemo() {
@@ -142,14 +162,11 @@ async function handleSubmit(e) {
         </div>
       )}
 
-        <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "center" }}>
-          <a className="helper" href="/#/signup" style={{ textDecoration: "underline" }}>
-            Create an account
-          </a>
-        </div>
+      <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
         <button type="button" className="btn" onClick={handleDemo} disabled={busy}>
           Continue as demo
         </button>
+      </div>
     </div>
   );
 }
