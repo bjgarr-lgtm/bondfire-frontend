@@ -172,10 +172,14 @@ function deleteMeetingFile(meetingId, fileId) {
 
 // ---------- single export block (no duplicates) ----------
 export {
+  // hook
+  useStore,
+
   // inventory
   addItem,
   updateItem,
   deleteItem,
+
   // people
   addPerson,
   updatePerson,
