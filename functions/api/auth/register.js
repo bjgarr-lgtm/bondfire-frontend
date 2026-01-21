@@ -22,51 +22,72 @@ async function hashPass(pass) {
 }
 
 export async function onRequestPost({ env, request }) {
-  const body = await request.json().catch(() => ({}));
-  const email = String(body.email || "").trim().toLowerCase();
-  const name = String(body.name || "").trim();
-  const password = String(body.password || "");
-  const orgName = String(body.orgName || "").trim() || "My Org";
+  try {
+    const body = await request.json().catch(() => ({}));
+    const email = String(body.email || "").trim().toLowerCase();
+    const name = String(body.name || "").trim();
+    const password = String(body.password || "");
+    const orgName = String(body.orgName || "").trim() || "My Org";
 
-  if (!email || !password) return bad(400, "MISSING_FIELDS");
+    if (!email || !password) return bad(400, "MISSING_FIELDS");
+    if (!env.BF_DB) return bad(500, "BF_DB_MISSING");
+    if (!env.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
 
-  const exists = await env.BF_DB.prepare("SELECT id FROM users WHERE email = ?")
-    .bind(email)
-    .first();
-  if (exists) return bad(409, "EMAIL_EXISTS");
+    const exists = await env.BF_DB.prepare("SELECT id FROM users WHERE email = ?")
+      .bind(email)
+      .first();
+    if (exists) return bad(409, "EMAIL_EXISTS");
 
-  const userId = uuid();
-  const passwordHash = await hashPass(password);
+    const userId = uuid();
+    const orgId = uuid();
+    const t = now();
+    const passwordHash = await hashPass(password);
 
-  await env.BF_DB.prepare(
-    "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
-  )
-    .bind(userId, email, name || "", passwordHash, now())
-    .run();
+    // Atomic register: either user+org+membership all exist, or none do
+    await env.BF_DB.prepare("BEGIN").run();
 
-  // bootstrap org + membership
-  const orgId = uuid();
+    try {
+      await env.BF_DB.prepare(
+        "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
+      )
+        .bind(userId, email, name || "", passwordHash, t)
+        .run();
 
-  await env.BF_DB.prepare("INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)")
-    .bind(orgId, orgName, now())
-    .run();
+      await env.BF_DB.prepare(
+        "INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)"
+      )
+        .bind(orgId, orgName, t)
+        .run();
 
-  await env.BF_DB.prepare(
-    "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
-  )
-    .bind(orgId, userId, "owner", now())
-    .run();
+      await env.BF_DB.prepare(
+        "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
+      )
+        .bind(orgId, userId, "owner", t)
+        .run();
 
-  const token = await signJwt(
-    env.JWT_SECRET,
-    { sub: userId, email, name: name || "" },
-    3600 * 24 * 7
-  );
+      await env.BF_DB.prepare("COMMIT").run();
+    } catch (e) {
+      await env.BF_DB.prepare("ROLLBACK").run();
+      console.error("REGISTER_DB_ERROR", e);
+      const msg = e?.message ? String(e.message) : "REGISTER_DB_ERROR";
+      return bad(500, msg);
+    }
 
-  return json({
-    ok: true,
-    token,
-    user: { id: userId, email, name: name || "" },
-    org: { id: orgId, name: orgName, role: "owner" }
-  });
+    const token = await signJwt(
+      env.JWT_SECRET,
+      { sub: userId, email, name: name || "" },
+      3600 * 24 * 7
+    );
+
+    return json({
+      ok: true,
+      token,
+      user: { id: userId, email, name: name || "" },
+      org: { id: orgId, name: orgName, role: "owner" },
+    });
+  } catch (e) {
+    console.error("REGISTER_THROW", e);
+    const msg = e?.message ? String(e.message) : "REGISTER_FAILED";
+    return bad(500, msg);
+  }
 }
