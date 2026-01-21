@@ -32,10 +32,15 @@ export default function SignIn() {
           body: JSON.stringify({ email, password: pass }),
         });
 
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data?.ok || !data?.token) {
-          throw new Error(data?.error || "Login failed");
-        }
+          const raw = await res.text();
+          let data = {};
+          try { data = JSON.parse(raw); } catch { /* ignore */ }
+
+          if (!res.ok || !data?.ok || !data?.token) {
+            const msg = data?.error || raw || "Register failed";
+            throw new Error(msg);
+          }
+
 
         localStorage.setItem("bf_auth_token", data.token);
         sessionStorage.removeItem("bf_auth_token");
@@ -57,10 +62,15 @@ export default function SignIn() {
         }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const raw = await res.text();
+      let data = {};
+      try { data = JSON.parse(raw); } catch { /* ignore */ }
+
       if (!res.ok || !data?.ok || !data?.token) {
-        throw new Error(data?.error || "Register failed");
+        const msg = data?.error || raw || "Register failed";
+        throw new Error(msg);
       }
+
 
       localStorage.setItem("bf_auth_token", data.token);
       sessionStorage.removeItem("bf_auth_token");

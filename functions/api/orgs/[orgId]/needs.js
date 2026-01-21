@@ -34,7 +34,9 @@ export async function onRequestPost({ env, request, params }) {
     title,
     String(body.description || ""),
     String(body.urgency || ""),
-    String(body.status || "open"),
+    (["open","in-progress","resolved"].includes(String(body.status || "open")) 
+      ? String(body.status || "open") 
+      : "open"),
     body.is_public ? 1 : 0,
     t,
     t
@@ -68,7 +70,11 @@ export async function onRequestPut({ env, request, params }) {
     body.title ?? null,
     body.description ?? null,
     body.urgency ?? null,
-    body.status ?? null,
+    (body.status == null
+      ? null
+      : (["open","in-progress","resolved"].includes(String(body.status))
+          ? String(body.status)
+          : null)),
     isPublic,
     now(),
     id,
