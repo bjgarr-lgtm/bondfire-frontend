@@ -142,11 +142,14 @@ async function handleSubmit(e) {
         </div>
       )}
 
-      <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+        <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "center" }}>
+          <a className="helper" href="/#/signup" style={{ textDecoration: "underline" }}>
+            Create an account
+          </a>
+        </div>
         <button type="button" className="btn" onClick={handleDemo} disabled={busy}>
           Continue as demo
         </button>
-      </div>
     </div>
   );
 }
