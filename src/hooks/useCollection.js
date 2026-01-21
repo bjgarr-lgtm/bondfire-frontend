@@ -8,7 +8,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
  * - reload() refetches from server
  */
 export default function useCollection(endpoint, { map = (x) => x } = {}) {
-  const url = useMemo(() => endpoint.replace(/\/+$/, ""), [endpoint]);
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+  const url = useMemo(() => {
+    const clean = endpoint.replace(/\/+$/, "");
+    if (/^https?:\/\//i.test(clean)) return clean;
+    if (!API_BASE) return clean;
+    return `${API_BASE}${clean.startsWith("/") ? "" : "/"}${clean}`;
+  }, [endpoint, API_BASE]);
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

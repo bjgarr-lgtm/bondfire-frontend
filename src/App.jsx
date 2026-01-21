@@ -20,7 +20,7 @@ import Meetings from "./pages/Meetings.jsx";
 import MeetingDetail from "./pages/MeetingDetail.jsx";
 import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
-import BambiChat from "./pages/BambiChat.jsx";
+import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
 
 // COMPONENTS
@@ -157,7 +157,7 @@ function Shell() {
           <Route path="meetings/:meetingId" element={<MeetingDetail />} />
           <Route path="settings" element={<Settings />} />
           <Route path="public" element={<OrgPublicPreview />} />
-          <Route path="chat" element={<BambiChat />} />
+          <Route path="chat" element={<BondfireChat />} />
           {/* Secret guard stays available as you had it */}
           <Route path="guard/*" element={<OrgSecretGuard />} />
         </Route>
