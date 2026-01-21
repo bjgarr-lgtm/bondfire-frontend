@@ -45,28 +45,27 @@ export async function onRequestPost({ env, request }) {
     const t = now();
     const passwordHash = await hashPass(password);
 
-    // Step 1: create user
-    await env.BF_DB.prepare(
-      "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
-    ).bind(userId, email, name || "", passwordHash, t).run();
-
+    // Create user + org + membership as one batch (prevents partial state)
     try {
-      // Step 2: create org
-      await env.BF_DB.prepare(
-        "INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)"
-      ).bind(orgId, orgName, t).run();
+      await env.BF_DB.batch([
+        env.BF_DB.prepare(
+          "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
+        ).bind(userId, email, name || "", passwordHash, t),
 
-      // Step 3: create membership
-      await env.BF_DB.prepare(
-        "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
-      ).bind(orgId, userId, "owner", t).run();
+        env.BF_DB.prepare(
+          "INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)"
+        ).bind(orgId, orgName, t),
+
+        env.BF_DB.prepare(
+          "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
+        ).bind(orgId, userId, "owner", t),
+      ]);
     } catch (e) {
-      // Manual rollback: delete the user we just created so re-register works
-      console.error("REGISTER_ROLLBACK", e);
-      await env.BF_DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+      console.error("REGISTER_BATCH_FAILED", e);
       const msg = e?.message ? String(e.message) : "REGISTER_FAILED";
       return bad(500, msg);
     }
+
 
     const token = await signJwt(
       env.JWT_SECRET,
