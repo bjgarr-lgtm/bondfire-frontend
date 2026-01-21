@@ -1,4 +1,4 @@
-// src/pages/BambiChat.jsx
+// src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { createClient } from "matrix-js-sdk";
@@ -21,7 +21,7 @@ const randId = () =>
   Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 /* --------------- component --------------- */
-export default function BambiChat() {
+export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
   const saved = readJSON(`bf_matrix_${orgId}`, null);
