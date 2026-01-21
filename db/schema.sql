@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,            -- user id (uuid)
+  id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL DEFAULT '',
   password_hash TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS orgs (
-  id TEXT PRIMARY KEY,            -- org id (uuid)
+  id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS orgs (
 CREATE TABLE IF NOT EXISTS org_memberships (
   org_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  role TEXT NOT NULL,             -- owner | admin | member | viewer
+  role TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (org_id, user_id),
   FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS needs (
   org_id TEXT NOT NULL,
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'open',   -- open | in_progress | done | blocked
+  status TEXT NOT NULL DEFAULT 'open',
   priority INTEGER NOT NULL DEFAULT 0,
   is_public INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
@@ -55,5 +55,3 @@ CREATE TABLE IF NOT EXISTS needs (
 CREATE INDEX IF NOT EXISTS idx_people_org ON people(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_org ON needs(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_public ON needs(is_public);
-ALTER TABLE needs ADD COLUMN urgency TEXT NOT NULL DEFAULT '';
-CREATE INDEX IF NOT EXISTS idx_needs_urgency ON needs(urgency);
