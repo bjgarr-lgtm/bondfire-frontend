@@ -1,6 +1,8 @@
 import { json, bad, now, uuid } from "../_lib/http.js";
 import { signJwt } from "../_lib/jwt.js";
 
+const PBKDF2_ITERS = 100000;
+
 async function hashPass(pass) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey(
@@ -11,7 +13,7 @@ async function hashPass(pass) {
     ["deriveBits"]
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERS, hash: "SHA-256" },
     key,
     256
   );
@@ -21,7 +23,7 @@ async function hashPass(pass) {
   return btoa(String.fromCharCode(...out));
 }
 
-export async function onRequestPost({ env, request }) {
+export async function onRequestPost({ env, request, context }) {
   try {
     const body = await request.json().catch(() => ({}));
     const email = String(body.email || "").trim().toLowerCase();
@@ -43,10 +45,18 @@ export async function onRequestPost({ env, request }) {
     const t = now();
     const passwordHash = await hashPass(password);
 
-    // Atomic register: either user+org+membership all exist, or none do
-    await env.BF_DB.prepare("BEGIN").run();
+    // Cloudflare Pages + D1 wants transaction() instead of BEGIN/COMMIT.
+    // context.cloudflare.env is the same env; context.cloudflare.ctx exposes state.storage.transaction
+    const cf = context?.cloudflare;
+    const storage = cf?.ctx?.storage;
 
-    try {
+    if (!storage?.transaction) {
+      // Fallback: no transaction available (shouldn't happen on Pages Functions),
+      // but better to fail loudly than half-create users.
+      return bad(500, "TRANSACTION_API_MISSING");
+    }
+
+    await storage.transaction(async () => {
       await env.BF_DB.prepare(
         "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
       )
@@ -64,14 +74,7 @@ export async function onRequestPost({ env, request }) {
       )
         .bind(orgId, userId, "owner", t)
         .run();
-
-      await env.BF_DB.prepare("COMMIT").run();
-    } catch (e) {
-      await env.BF_DB.prepare("ROLLBACK").run();
-      console.error("REGISTER_DB_ERROR", e);
-      const msg = e?.message ? String(e.message) : "REGISTER_DB_ERROR";
-      return bad(500, msg);
-    }
+    });
 
     const token = await signJwt(
       env.JWT_SECRET,
