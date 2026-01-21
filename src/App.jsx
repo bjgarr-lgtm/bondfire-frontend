@@ -37,7 +37,9 @@ class ErrorBoundary extends React.Component {
     return { error };
   }
   componentDidCatch(error, info) {
-    console.error("App error boundary:", error, info);
+    console.error("App error boundary:", error);
+    console.error("App error boundary stack:", error?.stack);
+    console.error("App error boundary component stack:", info?.componentStack);
   }
   render() {
     if (this.state.error) {
