@@ -3,12 +3,18 @@ export async function onRequest(context) {
 
   const upstreamBase = (env.BACKEND_URL || "").replace(/\/+$/, "");
   if (!upstreamBase) {
-    return new Response("Missing BACKEND_URL", { status: 500 });
+    return new Response("BACKEND_URL is not set.", { status: 500 });
   }
 
-  const pathParts = Array.isArray(params.path) ? params.path : [params.path].filter(Boolean);
-  const upstreamUrl = new URL(`${upstreamBase}/api/${pathParts.join("/")}`);
+  // In Cloudflare Pages Functions, [[path]] returns an array of segments (or undefined)
+  // for multi-depth matches. :contentReference[oaicite:2]{index=2}
+  const segs = Array.isArray(params.path)
+    ? params.path
+    : (typeof params.path === "string" ? [params.path] : []);
 
+  const upstreamUrl = new URL(`${upstreamBase}/api/${segs.join("/")}`);
+
+  // Preserve query string
   const incomingUrl = new URL(request.url);
   upstreamUrl.search = incomingUrl.search;
 
@@ -18,15 +24,16 @@ export async function onRequest(context) {
   const init = {
     method: request.method,
     headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+    body: request.method === "GET" || request.method === "HEAD"
+      ? undefined
+      : await request.arrayBuffer(),
     redirect: "manual",
   };
 
   const upstreamResp = await fetch(upstreamUrl.toString(), init);
-  const respHeaders = new Headers(upstreamResp.headers);
 
   return new Response(upstreamResp.body, {
     status: upstreamResp.status,
-    headers: respHeaders,
+    headers: upstreamResp.headers,
   });
 }
