@@ -65,7 +65,7 @@ function OrgNav() {
         ["Meetings", `${base}/meetings`],
         ["Settings", `${base}/settings`],
         ["Public", `${base}/public`],
-        ["Bambi", `${base}/chat`],
+        ["Chat", `${base}/chat`],
       ].map(([label, to]) => (
         <NavLink
           key={to}
