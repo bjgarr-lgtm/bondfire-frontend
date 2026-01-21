@@ -23,7 +23,7 @@ async function hashPass(pass) {
   return btoa(String.fromCharCode(...out));
 }
 
-export async function onRequestPost({ env, request, context }) {
+export async function onRequestPost({ env, request }) {
   try {
     const body = await request.json().catch(() => ({}));
     const email = String(body.email || "").trim().toLowerCase();
@@ -45,36 +45,28 @@ export async function onRequestPost({ env, request, context }) {
     const t = now();
     const passwordHash = await hashPass(password);
 
-    // Cloudflare Pages + D1 wants transaction() instead of BEGIN/COMMIT.
-    // context.cloudflare.env is the same env; context.cloudflare.ctx exposes state.storage.transaction
-    const cf = context?.cloudflare;
-    const storage = cf?.ctx?.storage;
+    // Step 1: create user
+    await env.BF_DB.prepare(
+      "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
+    ).bind(userId, email, name || "", passwordHash, t).run();
 
-    if (!storage?.transaction) {
-      // Fallback: no transaction available (shouldn't happen on Pages Functions),
-      // but better to fail loudly than half-create users.
-      return bad(500, "TRANSACTION_API_MISSING");
-    }
-
-    await storage.transaction(async () => {
-      await env.BF_DB.prepare(
-        "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?,?,?,?,?)"
-      )
-        .bind(userId, email, name || "", passwordHash, t)
-        .run();
-
+    try {
+      // Step 2: create org
       await env.BF_DB.prepare(
         "INSERT INTO orgs (id, name, created_at) VALUES (?,?,?)"
-      )
-        .bind(orgId, orgName, t)
-        .run();
+      ).bind(orgId, orgName, t).run();
 
+      // Step 3: create membership
       await env.BF_DB.prepare(
         "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?,?,?,?)"
-      )
-        .bind(orgId, userId, "owner", t)
-        .run();
-    });
+      ).bind(orgId, userId, "owner", t).run();
+    } catch (e) {
+      // Manual rollback: delete the user we just created so re-register works
+      console.error("REGISTER_ROLLBACK", e);
+      await env.BF_DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+      const msg = e?.message ? String(e.message) : "REGISTER_FAILED";
+      return bad(500, msg);
+    }
 
     const token = await signJwt(
       env.JWT_SECRET,
