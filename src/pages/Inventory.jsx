@@ -18,6 +18,8 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [err, setErr] = useState("");
+
   async function refresh() {
     if (!orgId) return;
     setLoading(true);

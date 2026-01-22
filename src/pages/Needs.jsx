@@ -18,16 +18,22 @@ export default function Needs() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [err, setErr] = useState("");
+
   async function refreshNeeds() {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-      setNeeds(Array.isArray(data.needs) ? data.needs : []);
-    } finally {
-      setLoading(false);
-    }
+  if (!orgId) return;
+  setLoading(true);
+  setErr("");
+  try {
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+    setNeeds(Array.isArray(data.needs) ? data.needs : []);
+  } catch (e) {
+    console.error(e);
+    setErr(e?.message || String(e));
+  } finally {
+    setLoading(false);
   }
+}
 
   useEffect(() => {
     refreshNeeds().catch(console.error);
@@ -116,6 +122,12 @@ export default function Needs() {
           placeholder="Search needs"
           style={{ marginTop: 12 }}
         />
+        {err && (
+          <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
+            {err}
+          </div>
+        )}
+
 
         <div style={{ marginTop: 12, overflowX: "auto" }}>
           <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 760 }}>

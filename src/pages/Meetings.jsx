@@ -33,16 +33,22 @@ export default function Meetings() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [err, setErr] = useState("");
+
   async function refresh() {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
-      setItems(Array.isArray(data.meetings) ? data.meetings : []);
-    } finally {
-      setLoading(false);
-    }
+  if (!orgId) return;
+  setLoading(true);
+  setErr("");
+  try {
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
+    setItems(Array.isArray(data.meetings) ? data.meetings : []);
+  } catch (e) {
+    console.error(e);
+    setErr(e?.message || String(e));
+  } finally {
+    setLoading(false);
   }
+}
 
   useEffect(() => {
     refresh().catch(console.error);
@@ -118,6 +124,12 @@ export default function Meetings() {
           placeholder="Search meetings"
           style={{ marginTop: 12 }}
         />
+        {err && (
+          <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
+            {err}
+          </div>
+        )}
+
 
         <div style={{ marginTop: 12, overflowX: "auto" }}>
           <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
