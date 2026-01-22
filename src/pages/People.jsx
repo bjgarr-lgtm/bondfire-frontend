@@ -104,7 +104,7 @@ export default function People() {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ id: p.id, role: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    }).then(() => refresh()).catch(console.error)}
                   />
                 </td>
                 <td>
@@ -115,7 +115,7 @@ export default function People() {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ id: p.id, phone: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    }).then(() => refresh()).catch(console.error)}
 
                   />
                 </td>
@@ -127,7 +127,7 @@ export default function People() {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ id: p.id, skills: e.target.value })
-                    }).then(() => refreshPeople()).catch(console.error)}
+                    }).then(() => refresh()).catch(console.error)}
                   />
                 </td>
                 <td>

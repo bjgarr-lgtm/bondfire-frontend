@@ -18,12 +18,28 @@ export async function onRequestGet({ env, request, params }) {
     "SELECT COUNT(*) as c FROM needs WHERE org_id = ?"
   ).bind(orgId).first();
 
+  const inventory = await env.BF_DB.prepare(
+    "SELECT COUNT(*) as c FROM inventory WHERE org_id = ?"
+  ).bind(orgId).first();
+
+  const nowMs = Date.now();
+  const meetingsUpcoming = await env.BF_DB.prepare(
+    "SELECT COUNT(*) as c FROM meetings WHERE org_id = ? AND (starts_at IS NULL OR starts_at >= ?)"
+  ).bind(orgId, nowMs).first();
+
+  const activity = await env.BF_DB.prepare(
+    "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 10"
+  ).bind(orgId).all();
+
   return json({
     ok: true,
     counts: {
       people: people?.c || 0,
       needsOpen: needsOpen?.c || 0,
-      needsAll: needsAll?.c || 0
-    }
+      needsAll: needsAll?.c || 0,
+      inventory: inventory?.c || 0,
+      meetingsUpcoming: meetingsUpcoming?.c || 0
+    },
+    activity: activity?.results || []
   });
 }

@@ -1,114 +1,209 @@
-import React, { useMemo, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useStore, addMeeting, updateMeeting, deleteMeeting } from "../utils/store.js";
+// src/pages/Meetings.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { api } from "../utils/api.js";
 
-// simple date display
-function fmtWhen(w) {
-  if (!w) return "";
-  const d = new Date(w);
-  return isNaN(d) ? String(w) : d.toLocaleString();
+function getOrgId() {
+  try {
+    const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
-// derive orgId from route param (HashRouter-safe)
-function useOrgId() {
-  const { orgId } = useParams();
-  return orgId || null;
+function toInputDT(ms) {
+  if (!ms) return "";
+  const d = new Date(Number(ms));
+  const pad = (n) => String(n).padStart(2, "0");
+  // datetime-local wants local time, no timezone suffix
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromInputDT(value) {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 export default function Meetings() {
-  const orgId = useOrgId();
-  const meetingsAll = useStore((s) => s.meetings || []);
-  const titleRef = useRef(null);
-  const whenRef = useRef(null);
+  const orgId = getOrgId();
 
-  // scope to org when objects carry an org field
-  const meetings = useMemo(() => {
-    if (!orgId) return meetingsAll;
-    return meetingsAll.some(m => Object.prototype.hasOwnProperty.call(m, "org"))
-      ? meetingsAll.filter(m => m?.org === orgId)
-      : meetingsAll;
-  }, [meetingsAll, orgId]);
+  const [items, setItems] = useState([]);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function onAdd(e) {
+  async function refresh() {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
+      setItems(Array.isArray(data.meetings) ? data.meetings : []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh().catch(console.error);
+  }, [orgId]);
+
+  const list = useMemo(() => {
+    const needle = q.toLowerCase();
+    return items.filter((m) =>
+      `${m.title || ""} ${m.location || ""} ${m.agenda || ""}`
+        .toLowerCase()
+        .includes(needle)
+    );
+  }, [items, q]);
+
+  async function putMeeting(id, patch) {
+    if (!orgId || !id) return;
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    refresh().catch(console.error);
+  }
+
+  async function delMeeting(id) {
+    if (!orgId || !id) return;
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    refresh().catch(console.error);
+  }
+
+  async function onAdd(e) {
     e.preventDefault();
-    const title = titleRef.current?.value?.trim();
-    const whenRaw = whenRef.current?.value?.trim();
+    if (!orgId) return;
+
+    const f = new FormData(e.currentTarget);
+    const title = String(f.get("title") || "").trim();
     if (!title) return;
 
-    // try to parse "when" as date; fall back to raw string
-    let when = whenRaw;
-    const maybe = new Date(whenRaw);
-    if (!isNaN(maybe)) when = maybe.toISOString();
-
-    addMeeting({
-      id: crypto.randomUUID(),
-      title,
-      when,
-      notes: "",
-      files: [],
-      org: orgId || undefined,
-      created: Date.now(),
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        starts_at: fromInputDT(String(f.get("starts_at") || "")),
+        ends_at: fromInputDT(String(f.get("ends_at") || "")),
+        location: String(f.get("location") || ""),
+        agenda: String(f.get("agenda") || ""),
+      }),
     });
 
-    titleRef.current.value = "";
-    whenRef.current.value = "";
+    e.currentTarget.reset();
+    refresh().catch(console.error);
   }
 
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <h2 className="section-title">Meetings</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+            Meetings
+          </h2>
+          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
 
-        {/* Add bar */}
-        <form onSubmit={onAdd} className="grid cols-3" style={{ gap: 8, marginBottom: 12 }}>
-          <input ref={titleRef} className="input" placeholder="Title" />
-          <input ref={whenRef} className="input" placeholder="When (e.g. 2025-09-18 6pm)" />
+        <input
+          className="input"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search meetings"
+          style={{ marginTop: 12 }}
+        />
+
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
+            <thead>
+              <tr>
+                <th style={{ width: "26%" }}>Title</th>
+                <th style={{ width: "20%" }}>Starts</th>
+                <th style={{ width: "20%" }}>Ends</th>
+                <th style={{ width: "22%" }}>Location</th>
+                <th style={{ width: "12%" }} />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={m.title || ""}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (m.title || "")) putMeeting(m.id, { title: v }).catch(console.error);
+                      }}
+                    />
+                    <div className="helper" style={{ marginTop: 6 }}>
+                      <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>Open</Link>
+                    </div>
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      defaultValue={toInputDT(m.starts_at)}
+                      onBlur={(e) => {
+                        const ms = fromInputDT(e.target.value);
+                        if ((ms ?? null) !== (m.starts_at ?? null)) putMeeting(m.id, { starts_at: ms }).catch(console.error);
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      defaultValue={toInputDT(m.ends_at)}
+                      onBlur={(e) => {
+                        const ms = fromInputDT(e.target.value);
+                        if ((ms ?? null) !== (m.ends_at ?? null)) putMeeting(m.id, { ends_at: ms }).catch(console.error);
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={m.location || ""}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (m.location || "")) putMeeting(m.id, { location: v }).catch(console.error);
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="helper">
+                    No meetings.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
+          <input className="input" name="title" placeholder="Title" required />
+          <input className="input" name="starts_at" type="datetime-local" />
+          <input className="input" name="ends_at" type="datetime-local" />
+          <input className="input" name="location" placeholder="Location" />
+          <input className="input" name="agenda" placeholder="Agenda (short)" />
           <button className="btn">Add Meeting</button>
         </form>
-
-        {/* Table */}
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: "40%" }}>Title</th>
-              <th style={{ width: "40%" }}>When</th>
-              <th style={{ width: "20%" }} />
-            </tr>
-          </thead>
-          <tbody>
-            {meetings.map((m) => (
-              <tr key={m.id}>
-                <td>
-                  <input
-                    className="input"
-                    defaultValue={m.title}
-                    onBlur={(e) => updateMeeting(m.id, { title: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="input"
-                    defaultValue={fmtWhen(m.when)}
-                    onBlur={(e) => {
-                      const raw = e.target.value.trim();
-                      const d = new Date(raw);
-                      updateMeeting(m.id, { when: isNaN(d) ? raw : d.toISOString() });
-                    }}
-                  />
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <Link className="btn" to={`/org/${orgId}/meetings/${m.id}`}>Open</Link>
-                  <button className="btn" style={{ marginLeft: 8 }} onClick={() => deleteMeeting(m.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {meetings.length === 0 && (
-              <tr><td colSpan={3} className="helper">No meetings yet.</td></tr>
-            )}
-          </tbody>
-        </table>
       </div>
     </div>
   );
