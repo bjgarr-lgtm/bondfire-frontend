@@ -1,8 +1,7 @@
 // src/pages/People.jsx
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
 
-// derive orgId from hash (matches your other pages)
 function getOrgId() {
   try {
     const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
@@ -16,20 +15,24 @@ export default function People() {
   const orgId = getOrgId();
 
   const [people, setPeople] = useState([]);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  async function refreshPeople() {
     if (!orgId) return;
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-    setPeople(data.people || []);
+    setLoading(true);
+    try {
+      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+      setPeople(Array.isArray(data.people) ? data.people : []);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    refresh().catch(console.error);
+    refreshPeople().catch(console.error);
   }, [orgId]);
 
-
-  // search
-  const [q, setQ] = useState("");
   const list = useMemo(() => {
     const needle = q.toLowerCase();
     return people.filter((p) =>
@@ -41,35 +44,76 @@ export default function People() {
     );
   }, [people, q]);
 
-  // add
+  async function putPerson(id, patch) {
+    if (!orgId || !id) return;
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    refreshPeople().catch(console.error);
+  }
+
+  async function delPerson(id) {
+    if (!orgId || !id) return;
+    await api(
+      `/api/orgs/${encodeURIComponent(orgId)}/people?id=${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+    setPeople((prev) => prev.filter((x) => x.id !== id));
+    refreshPeople().catch(console.error);
+  }
+
   async function onAdd(e) {
     e.preventDefault();
+    if (!orgId) return;
+
     const f = new FormData(e.currentTarget);
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+    const name = String(f.get("name") || "").trim();
+    if (!name) return;
+
+    const payload = {
+      name,
+      role: String(f.get("role") || ""),
+      phone: String(f.get("phone") || ""),
+      skills: String(f.get("skills") || ""),
+    };
+
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: f.get("name"),
-        role: f.get("role") || "",
-        phone: f.get("phone") || "",
-        skills: f.get("skills") || ""
-      }),
+      body: JSON.stringify(payload),
     });
-    e.currentTarget.reset();
-    refresh().catch(console.error);
 
+    if (data?.id) {
+      setPeople((prev) => [{ id: data.id, ...payload }, ...prev]);
+    }
+
+    setQ("");
+    e.currentTarget.reset();
+    refreshPeople().catch(console.error);
   }
+
+  const cellInputStyle = { width: "100%", minWidth: 80, boxSizing: "border-box" };
 
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <h2 className="section-title">People</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+            People
+          </h2>
+          <button className="btn" onClick={() => refreshPeople().catch(console.error)} disabled={loading}>
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
 
         <input
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search by name, role, phone, skills"
+          style={{ marginTop: 12 }}
         />
 
         <table className="table" style={{ marginTop: 12 }}>
@@ -88,52 +132,49 @@ export default function People() {
                 <td>
                   <input
                     className="input"
-                    defaultValue={p.name}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, name: e.target.value })
-                    }).then(() => refresh()).catch(console.error)}
+                    defaultValue={p.name || ""}
+                    style={cellInputStyle}
+                    onBlur={(e) => {
+                      const v = e.target.value || "";
+                      if (v !== (p.name || "")) putPerson(p.id, { name: v }).catch(console.error);
+                    }}
                   />
                 </td>
                 <td>
                   <input
                     className="input"
-                    defaultValue={p.role}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, role: e.target.value })
-                    }).then(() => refresh()).catch(console.error)}
+                    defaultValue={p.role || ""}
+                    style={cellInputStyle}
+                    onBlur={(e) => {
+                      const v = e.target.value || "";
+                      if (v !== (p.role || "")) putPerson(p.id, { role: v }).catch(console.error);
+                    }}
                   />
                 </td>
                 <td>
                   <input
                     className="input"
-                    defaultValue={p.phone}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, phone: e.target.value })
-                    }).then(() => refresh()).catch(console.error)}
-
+                    defaultValue={p.phone || ""}
+                    style={cellInputStyle}
+                    onBlur={(e) => {
+                      const v = e.target.value || "";
+                      if (v !== (p.phone || "")) putPerson(p.id, { phone: v }).catch(console.error);
+                    }}
                   />
                 </td>
                 <td>
                   <input
                     className="input"
-                    defaultValue={p.skills}
-                    onBlur={(e) => api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: p.id, skills: e.target.value })
-                    }).then(() => refresh()).catch(console.error)}
+                    defaultValue={p.skills || ""}
+                    style={cellInputStyle}
+                    onBlur={(e) => {
+                      const v = e.target.value || "";
+                      if (v !== (p.skills || "")) putPerson(p.id, { skills: v }).catch(console.error);
+                    }}
                   />
                 </td>
                 <td>
-                  <button className="btn" onClick={() => api(`/api/orgs/${encodeURIComponent(orgId)}/people?id=${encodeURIComponent(p.id)}`, {
-                    method: "DELETE"
-                  }).then(() => refresh()).catch(console.error)}>
+                  <button className="btn" onClick={() => delPerson(p.id).catch(console.error)}>
                     Delete
                   </button>
                 </td>
@@ -154,8 +195,8 @@ export default function People() {
           <input className="input" name="role" placeholder="Role" />
           <input className="input" name="phone" placeholder="Phone" />
           <input className="input" name="skills" placeholder="Skills" />
-          <div></div>
-          <div></div>
+          <div />
+          <div />
           <button className="btn">Add Person</button>
         </form>
       </div>

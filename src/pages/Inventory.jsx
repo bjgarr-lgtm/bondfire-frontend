@@ -18,25 +18,25 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  async function refreshInventory() {
     if (!orgId) return;
     setLoading(true);
     try {
-      const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-      setItems(Array.isArray(d.items) ? d.items : []);
+      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
+      setItems(Array.isArray(data.inventory) ? data.inventory : []);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    refresh().catch(console.error);
+    refreshInventory().catch(console.error);
   }, [orgId]);
 
   const list = useMemo(() => {
     const needle = q.toLowerCase();
-    return items.filter((i) =>
-      [i.name, i.category, i.location, i.notes, i.unit]
+    return items.filter((it) =>
+      [it.name, it.category, it.location, it.unit]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -51,7 +51,7 @@ export default function Inventory() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...patch }),
     });
-    refresh().catch(console.error);
+    refreshInventory().catch(console.error);
   }
 
   async function delItem(id) {
@@ -60,7 +60,8 @@ export default function Inventory() {
       `/api/orgs/${encodeURIComponent(orgId)}/inventory?id=${encodeURIComponent(id)}`,
       { method: "DELETE" }
     );
-    refresh().catch(console.error);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+    refreshInventory().catch(console.error);
   }
 
   async function onAdd(e) {
@@ -68,31 +69,37 @@ export default function Inventory() {
     if (!orgId) return;
 
     const f = new FormData(e.currentTarget);
-    const qtyRaw = f.get("qty");
+    const name = String(f.get("name") || "").trim();
+    if (!name) return;
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    const payload = {
+      name,
+      qty: Number(f.get("qty") || 0),
+      unit: String(f.get("unit") || ""),
+      category: String(f.get("category") || ""),
+      location: String(f.get("location") || ""),
+      is_public: String(f.get("is_public") || "") === "on",
+    };
+
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: f.get("name"),
-        qty: qtyRaw === "" || qtyRaw === null ? null : Number(qtyRaw),
-        unit: f.get("unit") || "",
-        category: f.get("category") || "",
-        location: f.get("location") || "",
-        notes: f.get("notes") || "",
-        is_public: String(f.get("is_public") || "") === "on",
-      }),
+      body: JSON.stringify(payload),
     });
 
+    // immediate UI update
+    if (data?.id) {
+      setItems((prev) => [{ id: data.id, ...payload }, ...prev]);
+    }
+
+    setQ("");
     e.currentTarget.reset();
-    refresh().catch(console.error);
+
+    // background canonical refresh
+    refreshInventory().catch(console.error);
   }
 
-  const cellInputStyle = {
-    width: "100%",
-    minWidth: 80,
-    boxSizing: "border-box",
-  };
+  const cellInputStyle = { width: "100%", minWidth: 80, boxSizing: "border-box" };
 
   return (
     <div>
@@ -101,11 +108,7 @@ export default function Inventory() {
           <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
             Inventory
           </h2>
-          <button
-            className="btn"
-            onClick={() => refresh().catch(console.error)}
-            disabled={loading}
-          >
+          <button className="btn" onClick={() => refreshInventory().catch(console.error)} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
@@ -119,132 +122,94 @@ export default function Inventory() {
         />
 
         <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table
-            className="table"
-            style={{ width: "100%", tableLayout: "fixed", minWidth: 980 }}
-          >
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
             <thead>
               <tr>
-                <th style={{ width: "22%" }}>Name</th>
+                <th style={{ width: "26%" }}>Name</th>
                 <th style={{ width: "10%" }}>Qty</th>
                 <th style={{ width: "10%" }}>Unit</th>
-                <th style={{ width: "14%" }}>Category</th>
-                <th style={{ width: "14%" }}>Location</th>
-                <th style={{ width: "22%" }}>Notes</th>
-                <th style={{ width: "4%" }}>Pub</th>
-                <th style={{ width: "4%" }} />
+                <th style={{ width: "18%" }}>Category</th>
+                <th style={{ width: "18%" }}>Location</th>
+                <th style={{ width: "8%" }}>Public</th>
+                <th style={{ width: "10%" }} />
               </tr>
             </thead>
             <tbody>
-              {list.map((i) => (
-                <tr key={i.id}>
+              {list.map((it) => (
+                <tr key={it.id}>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.name || ""}
+                      defaultValue={it.name || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.name || ""))
-                          putItem(i.id, { name: v }).catch(console.error);
+                        if (v !== (it.name || "")) putItem(it.id, { name: v }).catch(console.error);
                       }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      type="number"
-                      step="any"
-                      defaultValue={
-                        i.qty === null || typeof i.qty === "undefined" ? "" : i.qty
-                      }
+                      defaultValue={String(it.qty ?? 0)}
                       style={cellInputStyle}
                       onBlur={(e) => {
-                        const raw = e.target.value;
-                        const v = raw === "" ? null : Number(raw);
-                        const curr =
-                          i.qty === null || typeof i.qty === "undefined"
-                            ? null
-                            : Number(i.qty);
-                        if (v !== curr)
-                          putItem(i.id, { qty: v }).catch(console.error);
+                        const v = Number(e.target.value || 0);
+                        if (v !== Number(it.qty ?? 0)) putItem(it.id, { qty: v }).catch(console.error);
                       }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.unit || ""}
+                      defaultValue={it.unit || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.unit || ""))
-                          putItem(i.id, { unit: v }).catch(console.error);
+                        if (v !== (it.unit || "")) putItem(it.id, { unit: v }).catch(console.error);
                       }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.category || ""}
+                      defaultValue={it.category || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.category || ""))
-                          putItem(i.id, { category: v }).catch(console.error);
+                        if (v !== (it.category || "")) putItem(it.id, { category: v }).catch(console.error);
                       }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.location || ""}
+                      defaultValue={it.location || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.location || ""))
-                          putItem(i.id, { location: v }).catch(console.error);
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="input"
-                      defaultValue={i.notes || ""}
-                      style={cellInputStyle}
-                      onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (i.notes || ""))
-                          putItem(i.id, { notes: v }).catch(console.error);
+                        if (v !== (it.location || "")) putItem(it.id, { location: v }).catch(console.error);
                       }}
                     />
                   </td>
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
-                      defaultChecked={!!i.is_public}
-                      onChange={(e) =>
-                        putItem(i.id, { is_public: e.target.checked }).catch(
-                          console.error
-                        )
-                      }
+                      defaultChecked={!!it.is_public}
+                      onChange={(e) => putItem(it.id, { is_public: e.target.checked }).catch(console.error)}
                     />
                   </td>
                   <td>
-                    <button
-                      className="btn"
-                      onClick={() => delItem(i.id).catch(console.error)}
-                    >
+                    <button className="btn" onClick={() => delItem(it.id).catch(console.error)}>
                       Delete
                     </button>
                   </td>
                 </tr>
               ))}
-
               {list.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="helper">
-                    No inventory items match.
+                  <td colSpan={7} className="helper">
+                    No inventory items.
                   </td>
                 </tr>
               )}
@@ -254,17 +219,10 @@ export default function Inventory() {
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
           <input className="input" name="name" placeholder="Name" required />
-          <input
-            className="input"
-            name="qty"
-            placeholder="Qty"
-            type="number"
-            step="any"
-          />
+          <input className="input" name="qty" placeholder="Qty" />
           <input className="input" name="unit" placeholder="Unit" />
           <input className="input" name="category" placeholder="Category" />
           <input className="input" name="location" placeholder="Location" />
-          <input className="input" name="notes" placeholder="Notes" />
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" name="is_public" />
             Public
