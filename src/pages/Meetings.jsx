@@ -89,42 +89,46 @@ export default function Meetings() {
     const title = String(f.get("title") || "").trim();
     if (!title) return;
 
-    const payload = {
-      title,
-      starts_at: fromInputDT(String(f.get("starts_at") || "")),
-      ends_at: fromInputDT(String(f.get("ends_at") || "")),
-      location: String(f.get("location") || ""),
-      agenda: String(f.get("agenda") || ""),
-    };
+    const starts_at = fromInputDT(String(f.get("starts_at") || ""));
+    const ends_at = fromInputDT(String(f.get("ends_at") || ""));
+    const location = String(f.get("location") || "");
+    const agenda = String(f.get("agenda") || "");
 
-    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+    // POST
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        title,
+        starts_at,
+        ends_at,
+        location,
+        agenda,
+      }),
     });
 
-    if (created?.id) {
+    // optimistic insert (so you see it immediately)
+    if (res?.id) {
       setItems((prev) => [
         {
-          id: created.id,
-          ...payload,
-          created_at: Date.now(),
-          updated_at: Date.now(),
+          id: res.id,
+          title,
+          starts_at,
+          ends_at,
+          location,
+          agenda,
         },
-        ...(Array.isArray(prev) ? prev : []),
+        ...prev,
       ]);
-      setTimeout(() => refresh().catch(console.error), 600);
-    } else {
-      refresh().catch(console.error);
     }
 
     e.currentTarget.reset();
-  }),
-    });
 
-    e.currentTarget.reset();
-    await refresh();
-  }
+    // delayed reconcile (handles D1 lag)
+    setTimeout(() => {
+      refresh().catch(console.error);
+    }, 500);
+  };
 
   return (
     <div>
