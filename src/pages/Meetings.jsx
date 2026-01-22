@@ -69,9 +69,14 @@ export default function Meetings() {
 
   async function delMeeting(id) {
     if (!orgId || !id) return;
+
+    // Optimistic remove
+    setItems((prev) => prev.filter((m) => m?.id !== id));
+
     await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+
     refresh().catch(console.error);
   }
 
@@ -83,21 +88,32 @@ export default function Meetings() {
     const title = String(f.get("title") || "").trim();
     if (!title) return;
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+    const payload = {
+      title,
+      starts_at: fromInputDT(String(f.get("starts_at") || "")),
+      ends_at: fromInputDT(String(f.get("ends_at") || "")),
+      location: String(f.get("location") || ""),
+      agenda: String(f.get("agenda") || ""),
+    };
+
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        starts_at: fromInputDT(String(f.get("starts_at") || "")),
-        ends_at: fromInputDT(String(f.get("ends_at") || "")),
-        location: String(f.get("location") || ""),
-        agenda: String(f.get("agenda") || ""),
-      }),
+      body: JSON.stringify(payload),
     });
 
+    // Optimistic insert so the table updates instantly.
+    // Expecting POST response: { ok:true, id:"..." }
+    if (data?.id) {
+      setItems((prev) => [{ id: data.id, ...payload }, ...prev]);
+    }
+
     e.currentTarget.reset();
+
+    // Background refresh to pull canonical data (server timestamps, ordering, etc.)
     refresh().catch(console.error);
   }
+
 
   return (
     <div>
