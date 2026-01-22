@@ -16,14 +16,6 @@ export default function Overview() {
   const nav = useNavigate();
   const orgId = getOrgId();
 
-  // IMPORTANT: use absolute org routes so "View all" works no matter where
-  // Overview is mounted (index vs /overview). Otherwise you can end up at
-  // /org/:id/overview/people and the Outlet goes blank.
-  const go = (sub) => {
-    if (!orgId) return;
-    nav(`/org/${encodeURIComponent(orgId)}/${sub}`);
-  };
-
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("...");
   const [data, setData] = useState(null);
@@ -71,7 +63,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-            <button className="btn" onClick={() => go("people")}>View all</button>
+              <button className="btn" onClick={() => go("people")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}</div>
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
@@ -86,7 +78,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
-            <button className="btn" onClick={() => go("inventory")}>View all</button>
+            <button className="btn" onClick={() => nav("inventory")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}</div>
           <div className="helper" style={{ marginTop: 10 }}>
@@ -98,7 +90,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
-            <button className="btn" onClick={() => go("needs")}>View all</button>
+            <button className="btn" onClick={() => nav("needs")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.needsAll || 0} total, {counts.needsOpen || 0} open
@@ -117,7 +109,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
-            <button className="btn" onClick={() => go("meetings")}>View all</button>
+            <button className="btn" onClick={() => nav("meetings")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
           <div className="helper" style={{ marginTop: 10 }}>
