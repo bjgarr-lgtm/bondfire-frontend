@@ -108,21 +108,6 @@ export default function Needs() {
     e.currentTarget.reset();
   };
 
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (data?.id) {
-      setNeeds((prev) => [{ id: data.id, ...payload }, ...prev]);
-    }
-
-    setQ("");
-    e.currentTarget.reset();
-    await refreshNeeds();
-  }
-
   const cellInputStyle = { width: "100%", minWidth: 80, boxSizing: "border-box" };
 
   return (
