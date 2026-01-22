@@ -41,50 +41,42 @@ export default function People() {
     );
   }, [people, q]);
 
-  // add
-  async function onAdd(e) {
-    e.preventDefault();
-    if (!orgId) return;
+async function onAdd(e) {
+  e.preventDefault();
+  if (!orgId) return;
 
-    const f = new FormData(e.currentTarget);
+  const f = new FormData(e.currentTarget);
 
-    const payload = {
-      name: f.get("name"),
-      role: f.get("role") || "",
-      phone: f.get("phone") || "",
-      skills: f.get("skills") || "",
-    };
+  const name = String(f.get("name") || "").trim();
+  if (!name) return;
 
-    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+  const role = String(f.get("role") || "");
+  const phone = String(f.get("phone") || "");
+  const skills = String(f.get("skills") || "");
 
-    // Optimistic update: D1 can lag on immediate read-after-write
-    if (created?.id) {
-      setPeople((prev) => [
-        {
-          id: created.id,
-          ...payload,
-          created_at: Date.now(),
-          updated_at: Date.now(),
-        },
-        ...(Array.isArray(prev) ? prev : []),
-      ]);
-      // reconcile shortly after
-      setTimeout(() => refresh().catch(console.error), 600);
-    } else {
-      refresh().catch(console.error);
-    }
+  // POST
+  const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, role, phone, skills }),
+  });
 
-    e.currentTarget.reset();
-  }),
-    });
-    e.currentTarget.reset();
-    await refresh();
-
+  // optimistic insert if API returns an id (best case)
+  if (data?.id) {
+    setPeople((prev) => [
+      { id: data.id, name, role, phone, skills },
+      ...prev,
+    ]);
   }
+
+  e.currentTarget.reset();
+
+  // reconcile fetch (covers D1 propagation delay and keeps list canonical)
+  setTimeout(() => {
+    refresh().catch(console.error);
+  }, 500);
+}
+
 
   return (
     <div>
