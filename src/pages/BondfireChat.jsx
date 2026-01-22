@@ -200,7 +200,12 @@ export default function BondfireChat() {
     if (!req) return;
     try {
       await req.accept();
-      const verifier = req.beginKeyVerification("sas");
+      let verifier;
+      try {
+        verifier = req.beginKeyVerification("m.sas.v1");
+      } catch {
+        verifier = req.beginKeyVerification("sas");
+      }
       verifierRef.current = verifier;
 
       // Some SDKs emit 'show_sas' with emojis, others provide decimal fallback
@@ -279,70 +284,119 @@ export default function BondfireChat() {
   async function scanVerificationRequests() {
     const client = clientRef.current;
     if (!client) return;
+
     try {
-      const all = client.getCrypto?.()?.getRequests?.() || [];
-      const reqs = Array.isArray(all) ? all : [];
-      if (reqs.length) {
-        const mine = reqs.filter((r) => r?.otherUserId === client.getUserId());
-        if (mine.length) {
-          const latest = mine[mine.length - 1];
-          setPendingVerification(latest);
-          setPendingFrom(`${latest?.otherUserId || ""} · ${latest?.otherDeviceId || ""}`);
-          attachVerifierListeners(latest);
-          return;
-        }
+      const crypto = client.getCrypto?.();
+      const getters = [
+        crypto?.getVerificationRequests,
+        crypto?.getRequests,
+        client.getVerificationRequests,
+      ].filter(Boolean);
+
+      let reqs = [];
+      for (const g of getters) {
+        try {
+          const out = typeof g === "function" ? await g.call(crypto || client) : [];
+          if (Array.isArray(out) && out.length) {
+            reqs = out;
+            break;
+          }
+        } catch {}
       }
-      log("No pending verification requests");
+
+      if (!Array.isArray(reqs) || reqs.length === 0) {
+        log("No pending verification requests");
+        return;
+      }
+
+      const latest = reqs[reqs.length - 1];
+      setPendingVerification(latest);
+      setPendingFrom(`${latest?.otherUserId || ""} · ${latest?.otherDeviceId || ""}`);
+      attachVerifierListeners(latest);
+      log("Found verification request", latest?.otherUserId || "", latest?.otherDeviceId || "");
     } catch (e) {
       log("Scan failed:", e?.message || e);
     }
   }
 
+
   // Manual start via REST (avoid SDK quirk)
-  async function manualToDeviceRequest(targetDeviceId) {
-    const client = clientRef.current;
-    if (!client || !targetDeviceId) return;
-    try {
-      const txn = randId();
-      const url = new URL(
-        "/_matrix/client/v3/sendToDevice/m.key.verification.request/" +
-          encodeURIComponent(txn),
-        client.baseUrl
-      ).toString();
+async function manualToDeviceRequest(targetDeviceId) {
+  const client = clientRef.current;
+  if (!client || !targetDeviceId) return;
 
-      const payload = {
-        messages: {
-          [client.getUserId()]: {
-            [targetDeviceId]: {
-              from_device: client.getDeviceId(),
-              transaction_id: txn,
-              methods: ["m.sas.v1"],
-              timestamp: Date.now(),
-            },
-          },
-        },
-      };
+  const crypto = client.getCrypto?.();
 
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${client.getAccessToken()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+  try {
+    // Prefer SDK API so we actually get a VerificationRequest object locally
+    const fn =
+      crypto?.requestDeviceVerification ||
+      crypto?.requestDeviceVerificationWithDeviceId ||
+      client.requestDeviceVerification;
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} ${res.statusText} — ${text.slice(0, 200)}`);
+    if (typeof fn === "function") {
+      const maybeReq = await fn.call(crypto || client, client.getUserId(), targetDeviceId);
+
+      // Some builds return a request, others stash it internally
+      if (maybeReq) {
+        setPendingVerification(maybeReq);
+        setPendingFrom(`${maybeReq?.otherUserId || client.getUserId()} · ${maybeReq?.otherDeviceId || targetDeviceId}`);
+        attachVerifierListeners(maybeReq);
+      } else {
+        // fall back to scanning
+        await scanVerificationRequests();
       }
 
-      log("Sent manual verification request to", targetDeviceId);
-      // After Element pops, click "Accept" there and then hit “Accept & Start SAS” here.
-    } catch (e) {
-      log("Manual request failed:", e?.message || e);
+      log("Requested verification with device", targetDeviceId);
+      log("Now accept it in Element, then click Scan for requests here");
+      return;
     }
+  } catch (e) {
+    log("SDK verification request failed, falling back:", e?.message || e);
   }
+
+  // Fallback: raw to device request (works for Element, but may not give us SAS locally)
+  try {
+    const txn = randId();
+    const url = new URL(
+      "/_matrix/client/v3/sendToDevice/m.key.verification.request/" + encodeURIComponent(txn),
+      client.baseUrl
+    ).toString();
+
+    const payload = {
+      messages: {
+        [client.getUserId()]: {
+          [targetDeviceId]: {
+            from_device: client.getDeviceId(),
+            transaction_id: txn,
+            methods: ["m.sas.v1"],
+            timestamp: Date.now(),
+          },
+        },
+      },
+    };
+
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${client.getAccessToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
+    }
+
+    log("Sent raw verification request to", targetDeviceId);
+    log("Accept in Element, then click Scan for requests here");
+  } catch (e) {
+    log("Manual request failed:", e?.message || e);
+  }
+}
+
 
   /* -------------- session -------------- */
   const login = async (e) => {
