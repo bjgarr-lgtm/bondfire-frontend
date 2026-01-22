@@ -56,12 +56,16 @@ export async function onRequestPost({ env, request, params }) {
     )
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "inventory.created",
     message: `inventory added: ${name}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true, id });
 }
@@ -111,12 +115,16 @@ export async function onRequestPut({ env, request, params }) {
     )
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "inventory.updated",
     message: `inventory updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }
@@ -134,12 +142,16 @@ export async function onRequestDelete({ env, request, params }) {
     .bind(id, orgId)
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "inventory.deleted",
     message: `inventory deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }

@@ -56,12 +56,16 @@ export async function onRequestPost({ env, request, params }) {
     )
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "meeting.created",
     message: `meeting created: ${title}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true, id });
 }
@@ -113,12 +117,16 @@ export async function onRequestPut({ env, request, params }) {
     )
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "meeting.updated",
     message: `meeting updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }
@@ -136,19 +144,27 @@ export async function onRequestDelete({ env, request, params }) {
     .bind(id, orgId)
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "meeting.deleted",
     message: `meeting deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "meeting.deleted",
     message: `meeting deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }

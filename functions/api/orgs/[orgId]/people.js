@@ -41,12 +41,16 @@ export async function onRequestPost({ env, request, params }) {
     t
   ).run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "person.created",
     message: `person added: ${name}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true, id });
 }
@@ -80,12 +84,16 @@ export async function onRequestPut({ env, request, params }) {
     orgId
   ).run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "person.updated",
     message: `person updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }
@@ -102,12 +110,16 @@ export async function onRequestDelete({ env, request, params }) {
   await env.BF_DB.prepare("DELETE FROM people WHERE id = ? AND org_id = ?")
     .bind(id, orgId).run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "person.deleted",
     message: `person deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }

@@ -44,16 +44,42 @@ export default function People() {
   // add
   async function onAdd(e) {
     e.preventDefault();
+    if (!orgId) return;
+
     const f = new FormData(e.currentTarget);
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+
+    const payload = {
+      name: f.get("name"),
+      role: f.get("role") || "",
+      phone: f.get("phone") || "",
+      skills: f.get("skills") || "",
+    };
+
+    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: f.get("name"),
-        role: f.get("role") || "",
-        phone: f.get("phone") || "",
-        skills: f.get("skills") || ""
-      }),
+      body: JSON.stringify(payload),
+    });
+
+    // Optimistic update: D1 can lag on immediate read-after-write
+    if (created?.id) {
+      setPeople((prev) => [
+        {
+          id: created.id,
+          ...payload,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        },
+        ...(Array.isArray(prev) ? prev : []),
+      ]);
+      // reconcile shortly after
+      setTimeout(() => refresh().catch(console.error), 600);
+    } else {
+      refresh().catch(console.error);
+    }
+
+    e.currentTarget.reset();
+  }),
     });
     e.currentTarget.reset();
     await refresh();

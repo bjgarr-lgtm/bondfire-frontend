@@ -83,16 +83,37 @@ export default function Meetings() {
     const title = String(f.get("title") || "").trim();
     if (!title) return;
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+    const payload = {
+      title,
+      starts_at: fromInputDT(String(f.get("starts_at") || "")),
+      ends_at: fromInputDT(String(f.get("ends_at") || "")),
+      location: String(f.get("location") || ""),
+      agenda: String(f.get("agenda") || ""),
+    };
+
+    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        starts_at: fromInputDT(String(f.get("starts_at") || "")),
-        ends_at: fromInputDT(String(f.get("ends_at") || "")),
-        location: String(f.get("location") || ""),
-        agenda: String(f.get("agenda") || ""),
-      }),
+      body: JSON.stringify(payload),
+    });
+
+    if (created?.id) {
+      setItems((prev) => [
+        {
+          id: created.id,
+          ...payload,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        },
+        ...(Array.isArray(prev) ? prev : []),
+      ]);
+      setTimeout(() => refresh().catch(console.error), 600);
+    } else {
+      refresh().catch(console.error);
+    }
+
+    e.currentTarget.reset();
+  }),
     });
 
     e.currentTarget.reset();

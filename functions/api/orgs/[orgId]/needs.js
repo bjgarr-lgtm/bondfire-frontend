@@ -43,28 +43,40 @@ export async function onRequestPost({ env, request, params }) {
     t
   ).run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.updated",
     message: `need updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   // best-effort activity log
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.created",
     message: `need created: ${title}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   // Best-effort activity log
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.create",
     message: `Need created: ${title}`,
     actorUserId: a.user?.sub || null,
   }).catch(() => {});
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true, id });
 }
@@ -105,19 +117,27 @@ export async function onRequestPut({ env, request, params }) {
     orgId
   ).run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.updated",
     message: `need updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.update",
     message: `Need updated: ${id}`,
     actorUserId: a.user?.sub || null,
   }).catch(() => {});
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }
@@ -135,33 +155,49 @@ export async function onRequestDelete({ env, request, params }) {
     .bind(id, orgId)
     .run();
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.deleted",
     message: `need deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.deleted",
     message: `need deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.deleted",
     message: `need deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
-  logActivity(env, {
+  try {
+    await logActivity(env, {
     orgId,
     kind: "need.delete",
     message: `Need deleted: ${id}`,
     actorUserId: a.user?.sub || null,
   }).catch(() => {});
+  } catch (e) {
+    console.error("ACTIVITY_FAIL", e);
+  }
 
   return json({ ok: true });
 }

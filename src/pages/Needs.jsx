@@ -69,16 +69,38 @@ export default function Needs() {
     if (!orgId) return;
 
     const f = new FormData(e.currentTarget);
-    const title = String(f.get("title") || "").trim();
-    if (!title) return;
 
     const payload = {
-      title,
-      description: String(f.get("description") || ""),
-      urgency: String(f.get("urgency") || ""),
-      status: String(f.get("status") || "open"),
+      title: f.get("title"),
+      description: f.get("description") || "",
+      urgency: f.get("urgency") || "",
+      status: f.get("status") || "open",
       is_public: String(f.get("is_public") || "") === "on",
     };
+
+    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (created?.id) {
+      setNeeds((prev) => [
+        {
+          id: created.id,
+          ...payload,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        },
+        ...(Array.isArray(prev) ? prev : []),
+      ]);
+      setTimeout(() => refreshNeeds().catch(console.error), 600);
+    } else {
+      refreshNeeds().catch(console.error);
+    }
+
+    e.currentTarget.reset();
+  };
 
     const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "POST",

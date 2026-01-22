@@ -69,20 +69,42 @@ export default function Inventory() {
     if (!orgId) return;
 
     const f = new FormData(e.currentTarget);
-    const qtyRaw = f.get("qty");
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    const payload = {
+      name: String(f.get("name") || "").trim(),
+      qty: String(f.get("qty") || ""),
+      unit: String(f.get("unit") || ""),
+      category: String(f.get("category") || ""),
+      location: String(f.get("location") || ""),
+      notes: String(f.get("notes") || ""),
+      is_public: String(f.get("is_public") || "") === "on",
+    };
+
+    if (!payload.name) return;
+
+    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: f.get("name"),
-        qty: qtyRaw === "" || qtyRaw === null ? null : Number(qtyRaw),
-        unit: f.get("unit") || "",
-        category: f.get("category") || "",
-        location: f.get("location") || "",
-        notes: f.get("notes") || "",
-        is_public: String(f.get("is_public") || "") === "on",
-      }),
+      body: JSON.stringify(payload),
+    });
+
+    if (created?.id) {
+      setItems((prev) => [
+        {
+          id: created.id,
+          ...payload,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        },
+        ...(Array.isArray(prev) ? prev : []),
+      ]);
+      setTimeout(() => refresh().catch(console.error), 600);
+    } else {
+      refresh().catch(console.error);
+    }
+
+    e.currentTarget.reset();
+  }),
     });
 
     e.currentTarget.reset();
