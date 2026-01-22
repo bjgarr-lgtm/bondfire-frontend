@@ -2,16 +2,25 @@ import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
 
+// Inventory items for an org.
+// Columns expected:
+// id, org_id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
+
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
   const res = await env.BF_DB.prepare(
-    "SELECT id, name, role, phone, skills, notes, created_at, updated_at FROM people WHERE org_id = ? ORDER BY created_at DESC"
-  ).bind(orgId).all();
+    `SELECT id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
+     FROM inventory
+     WHERE org_id = ?
+     ORDER BY created_at DESC`
+  )
+    .bind(orgId)
+    .all();
 
-  return json({ ok: true, people: res.results || [] });
+  return json({ ok: true, inventory: res.results || [] });
 }
 
 export async function onRequestPost({ env, request, params }) {
@@ -25,26 +34,32 @@ export async function onRequestPost({ env, request, params }) {
 
   const id = uuid();
   const t = now();
+  const qty = Number.isFinite(Number(body.qty)) ? Number(body.qty) : 0;
 
   await env.BF_DB.prepare(
-    `INSERT INTO people (id, org_id, name, role, phone, skills, notes, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(
-    id,
-    orgId,
-    name,
-    String(body.role || ""),
-    String(body.phone || ""),
-    String(body.skills || ""),
-    String(body.notes || ""),
-    t,
-    t
-  ).run();
+    `INSERT INTO inventory (
+        id, org_id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+  )
+    .bind(
+      id,
+      orgId,
+      name,
+      qty,
+      String(body.unit || ""),
+      String(body.category || ""),
+      String(body.location || ""),
+      String(body.notes || ""),
+      body.is_public ? 1 : 0,
+      t,
+      t
+    )
+    .run();
 
   logActivity(env, {
     orgId,
-    kind: "person.created",
-    message: `person added: ${name}`,
+    kind: "inventory.created",
+    message: `inventory added: ${name}`,
     actorUserId: a?.user?.sub || null,
   });
 
@@ -60,30 +75,46 @@ export async function onRequestPut({ env, request, params }) {
   const id = String(body.id || "");
   if (!id) return bad(400, "MISSING_ID");
 
+  const isPublic =
+    typeof body.is_public === "boolean" ? (body.is_public ? 1 : 0) : null;
+
+  const qty =
+    body.qty === undefined || body.qty === null
+      ? null
+      : Number.isFinite(Number(body.qty))
+      ? Number(body.qty)
+      : 0;
+
   await env.BF_DB.prepare(
-    `UPDATE people
+    `UPDATE inventory
      SET name = COALESCE(?, name),
-         role = COALESCE(?, role),
-         phone = COALESCE(?, phone),
-         skills = COALESCE(?, skills),
+         qty = COALESCE(?, qty),
+         unit = COALESCE(?, unit),
+         category = COALESCE(?, category),
+         location = COALESCE(?, location),
          notes = COALESCE(?, notes),
+         is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
-  ).bind(
-    body.name ?? null,
-    body.role ?? null,
-    body.phone ?? null,
-    body.skills ?? null,
-    body.notes ?? null,
-    now(),
-    id,
-    orgId
-  ).run();
+  )
+    .bind(
+      body.name ?? null,
+      qty,
+      body.unit ?? null,
+      body.category ?? null,
+      body.location ?? null,
+      body.notes ?? null,
+      isPublic,
+      now(),
+      id,
+      orgId
+    )
+    .run();
 
   logActivity(env, {
     orgId,
-    kind: "person.updated",
-    message: `person updated: ${id}`,
+    kind: "inventory.updated",
+    message: `inventory updated: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
 
@@ -99,13 +130,14 @@ export async function onRequestDelete({ env, request, params }) {
   const id = url.searchParams.get("id");
   if (!id) return bad(400, "MISSING_ID");
 
-  await env.BF_DB.prepare("DELETE FROM people WHERE id = ? AND org_id = ?")
-    .bind(id, orgId).run();
+  await env.BF_DB.prepare("DELETE FROM inventory WHERE id = ? AND org_id = ?")
+    .bind(id, orgId)
+    .run();
 
   logActivity(env, {
     orgId,
-    kind: "person.deleted",
-    message: `person deleted: ${id}`,
+    kind: "inventory.deleted",
+    message: `inventory deleted: ${id}`,
     actorUserId: a?.user?.sub || null,
   });
 

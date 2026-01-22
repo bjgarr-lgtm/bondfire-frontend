@@ -82,7 +82,7 @@ export default function Needs() {
     });
 
     e.currentTarget.reset();
-    refreshNeeds().catch(console.error);
+    await refreshNeeds();
   }
 
   const cellInputStyle = {

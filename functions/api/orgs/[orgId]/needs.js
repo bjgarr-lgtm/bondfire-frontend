@@ -1,5 +1,6 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
+import { logActivity } from "../../_lib/activity.js";
 
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
@@ -42,6 +43,29 @@ export async function onRequestPost({ env, request, params }) {
     t
   ).run();
 
+  logActivity(env, {
+    orgId,
+    kind: "need.updated",
+    message: `need updated: ${id}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  // best-effort activity log
+  logActivity(env, {
+    orgId,
+    kind: "need.created",
+    message: `need created: ${title}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  // Best-effort activity log
+  logActivity(env, {
+    orgId,
+    kind: "need.create",
+    message: `Need created: ${title}`,
+    actorUserId: a.user?.sub || null,
+  }).catch(() => {});
+
   return json({ ok: true, id });
 }
 
@@ -81,6 +105,20 @@ export async function onRequestPut({ env, request, params }) {
     orgId
   ).run();
 
+  logActivity(env, {
+    orgId,
+    kind: "need.updated",
+    message: `need updated: ${id}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  logActivity(env, {
+    orgId,
+    kind: "need.update",
+    message: `Need updated: ${id}`,
+    actorUserId: a.user?.sub || null,
+  }).catch(() => {});
+
   return json({ ok: true });
 }
 
@@ -96,6 +134,34 @@ export async function onRequestDelete({ env, request, params }) {
   await env.BF_DB.prepare("DELETE FROM needs WHERE id = ? AND org_id = ?")
     .bind(id, orgId)
     .run();
+
+  logActivity(env, {
+    orgId,
+    kind: "need.deleted",
+    message: `need deleted: ${id}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  logActivity(env, {
+    orgId,
+    kind: "need.deleted",
+    message: `need deleted: ${id}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  logActivity(env, {
+    orgId,
+    kind: "need.deleted",
+    message: `need deleted: ${id}`,
+    actorUserId: a?.user?.sub || null,
+  });
+
+  logActivity(env, {
+    orgId,
+    kind: "need.delete",
+    message: `Need deleted: ${id}`,
+    actorUserId: a.user?.sub || null,
+  }).catch(() => {});
 
   return json({ ok: true });
 }

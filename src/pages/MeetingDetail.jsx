@@ -1,120 +1,178 @@
-import React, { useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useStore, updateMeeting } from "../utils/store.js";
+// src/pages/MeetingDetail.jsx
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api } from "../utils/api.js";
+
+function getOrgId() {
+  try {
+    const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function toLocalDateTimeInput(valueMs) {
+  if (!valueMs) return "";
+  const d = new Date(Number(valueMs));
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  // datetime-local wants local time without seconds
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromLocalDateTimeInput(s) {
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
 
 export default function MeetingDetail() {
-  const { orgId, meetingId } = useParams();
-  const meetings = useStore((s) => s.meetings || []);
+  const nav = useNavigate();
+  const { meetingId } = useParams();
+  const orgId = getOrgId();
 
-  const meeting = useMemo(() => meetings.find((m) => m.id === meetingId) || null, [meetings, meetingId]);
+  const [m, setM] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  if (!meeting) {
-    return (
-      <div className="card" style={{ margin: 16 }}>
-        <div>Meeting not found.</div>
-        <div style={{ marginTop: 8 }}>
-          <Link className="btn" to={`/org/${orgId}/meetings`}>Back to Meetings</Link>
-        </div>
-      </div>
-    );
+  async function refresh() {
+    if (!orgId || !meetingId) return;
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}`);
+    setM(data.meeting || null);
   }
 
-  // helpers
-  const setField = (patch) => updateMeeting(meeting.id, patch);
+  useEffect(() => {
+    refresh().catch((e) => setErr(e?.message || String(e)));
+  }, [orgId, meetingId]);
+
+  async function save(patch) {
+    if (!orgId || !meetingId) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      await refresh();
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function del() {
+    if (!orgId || !meetingId) return;
+    if (!confirm("Delete this meeting?")) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}`, {
+        method: "DELETE",
+      });
+      nav(`/org/${encodeURIComponent(orgId)}/meetings`, { replace: true });
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
+  if (!m) return <div style={{ padding: 16 }}>{err ? `Error: ${err}` : "Loading..."}</div>;
 
   return (
-    <div style={{ padding: 16 }}>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <h2 className="section-title" style={{ marginBottom: 8 }}>Meeting</h2>
+    <div className="card" style={{ margin: 16, padding: 12 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+          Meeting
+        </h2>
+        <button className="btn" onClick={() => nav(-1)} disabled={busy}>
+          Back
+        </button>
+        <button className="btn" onClick={del} disabled={busy}>
+          Delete
+        </button>
+      </div>
 
-        <div className="grid cols-2" style={{ gap: 8 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span className="helper">Title</span>
-            <input
-              className="input"
-              defaultValue={meeting.title || ""}
-              onBlur={(e) => setField({ title: e.target.value })}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <span className="helper">When</span>
-            <input
-              className="input"
-              defaultValue={meeting.when || ""}
-              onBlur={(e) => {
-                const raw = e.target.value.trim();
-                const d = new Date(raw);
-                setField({ when: isNaN(d) ? raw : d.toISOString() });
-              }}
-            />
-          </label>
+      {err && (
+        <div className="helper" style={{ color: "tomato", marginTop: 8 }}>
+          {err}
         </div>
-      </div>
+      )}
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <h3 className="section-title" style={{ marginBottom: 8 }}>Agenda & Minutes</h3>
-        <textarea
-          className="input"
-          style={{ minHeight: 260 }}
-          defaultValue={meeting.notes || ""}
-          onBlur={(e) => setField({ notes: e.target.value })}
-          placeholder="Type agenda and minutes here..."
-        />
-      </div>
-
-      <div className="card">
-        <h3 className="section-title" style={{ marginBottom: 8 }}>Files</h3>
+      <div className="grid" style={{ gap: 10, marginTop: 12 }}>
         <input
-          type="file"
-          multiple
-          onChange={async (e) => {
-            const files = Array.from(e.target.files || []);
-            if (!files.length) return;
-
-            // light-weight: store small files as data URLs
-            const toDataUrl = (file) =>
-              new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = () => res(r.result);
-                r.onerror = rej;
-                r.readAsDataURL(file);
-              });
-
-            const existing = Array.isArray(meeting.files) ? meeting.files : [];
-            const newOnes = await Promise.all(files.map(async (f) => ({
-              id: crypto.randomUUID(),
-              name: f.name,
-              size: f.size,
-              mime: f.type,
-              dataUrl: await toDataUrl(f),
-            })));
-            setField({ files: [...existing, ...newOnes] });
-            e.target.value = "";
+          className="input"
+          defaultValue={m.title || ""}
+          placeholder="Title"
+          onBlur={(e) => {
+            const v = e.target.value || "";
+            if (v !== (m.title || "")) save({ title: v }).catch(console.error);
           }}
         />
 
-        <div className="list" style={{ marginTop: 10 }}>
-          {Array.isArray(meeting.files) && meeting.files.length ? (
-            meeting.files.map((f) => (
-              <div key={f.id} className="row" style={{ justifyContent: "space-between" }}>
-                <div>
-                  {f.name}{" "}
-                  <span className="tag">
-                    {Math.round((f.size || 0) / 1024)} KB
-                  </span>
-                </div>
-                <a className="btn" href={f.dataUrl} download={f.name}>Download</a>
-              </div>
-            ))
-          ) : (
-            <div className="helper">No files yet.</div>
-          )}
+        <div className="grid cols-2" style={{ gap: 10 }}>
+          <div>
+            <div className="helper">Start</div>
+            <input
+              className="input"
+              type="datetime-local"
+              defaultValue={toLocalDateTimeInput(m.starts_at)}
+              onBlur={(e) => {
+                const ms = fromLocalDateTimeInput(e.target.value);
+                if (ms !== (m.starts_at ?? null)) save({ starts_at: ms }).catch(console.error);
+              }}
+            />
+          </div>
+          <div>
+            <div className="helper">End</div>
+            <input
+              className="input"
+              type="datetime-local"
+              defaultValue={toLocalDateTimeInput(m.ends_at)}
+              onBlur={(e) => {
+                const ms = fromLocalDateTimeInput(e.target.value);
+                if (ms !== (m.ends_at ?? null)) save({ ends_at: ms }).catch(console.error);
+              }}
+            />
+          </div>
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <Link className="btn" to={`/org/${orgId}/meetings`}>Back to Meetings</Link>
-        </div>
+        <input
+          className="input"
+          defaultValue={m.location || ""}
+          placeholder="Location"
+          onBlur={(e) => {
+            const v = e.target.value || "";
+            if (v !== (m.location || "")) save({ location: v }).catch(console.error);
+          }}
+        />
+
+        <textarea
+          className="textarea"
+          defaultValue={m.agenda || ""}
+          placeholder="Agenda"
+          rows={4}
+          onBlur={(e) => {
+            const v = e.target.value || "";
+            if (v !== (m.agenda || "")) save({ agenda: v }).catch(console.error);
+          }}
+        />
+
+        <textarea
+          className="textarea"
+          defaultValue={m.notes || ""}
+          placeholder="Notes"
+          rows={6}
+          onBlur={(e) => {
+            const v = e.target.value || "";
+            if (v !== (m.notes || "")) save({ notes: v }).catch(console.error);
+          }}
+        />
       </div>
     </div>
   );

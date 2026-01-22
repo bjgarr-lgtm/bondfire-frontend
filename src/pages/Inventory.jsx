@@ -1,88 +1,140 @@
 // src/pages/Inventory.jsx
-import React, { useMemo, useState, useCallback } from "react";
-import { useStore, addItem, updateItem, deleteItem } from "../utils/store.js";
+import React, { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api.js";
 
-// derive orgId from hash; no extra deps
 function getOrgId() {
   try {
     const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
     return m && m[1] ? decodeURIComponent(m[1]) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export default function Inventory() {
   const orgId = getOrgId();
 
-  // NOTE: some store impls mutate arrays in place (no new reference),
-  // which can prevent subscribed components from re-rendering.
-  // We use a tiny "rev" bump to force a render after we call actions.
-  const [rev, setRev] = useState(0);
-
-  const inventoryAll = useStore((s) => s.inventory || []);
-  const inventory = useMemo(() => {
-    if (!orgId) return inventoryAll;
-    return inventoryAll.some(i => i && Object.prototype.hasOwnProperty.call(i, "org"))
-      ? inventoryAll.filter(i => i?.org === orgId)
-      : inventoryAll;
-  }, [inventoryAll, orgId, rev]);
-
+  const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
-  const list = useMemo(() => {
-    const needle = q.toLowerCase();
-    return inventory.filter((p) =>
-      [p.name, p.category, p.location].filter(Boolean).join(" ").toLowerCase().includes(needle)
-    );
-  }, [inventory, q]);
+  const [loading, setLoading] = useState(false);
 
-  const bump = useCallback(() => setRev((r) => r + 1), []);
-
-  function onAdd(e) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    addItem({
-      id: crypto.randomUUID(),
-      name: f.get("name"),
-      qty: +(f.get("qty") || 0),
-      unit: f.get("unit") || "ea",
-      category: f.get("category") || "",
-      location: f.get("location") || "",
-      public: f.get("public") === "on",
-      low: +(f.get("low") || 0),
-      org: orgId || undefined,
-    });
-    e.currentTarget.reset();
-    bump(); // ensure UI shows the new row immediately
+  async function refresh() {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
+      // backend returns { inventory: [...] }
+      setItems(Array.isArray(d.inventory) ? d.inventory : []);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const onUpdate = (id, patch) => {
-    updateItem(id, patch);
-    bump();
-  };
+  useEffect(() => {
+    refresh().catch(console.error);
+  }, [orgId]);
 
-  const onDelete = (id) => {
-    deleteItem(id);
-    bump();
+  const list = useMemo(() => {
+    const needle = q.toLowerCase();
+    return items.filter((i) =>
+      [i.name, i.category, i.location, i.notes, i.unit]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+    );
+  }, [items, q]);
+
+  async function putItem(id, patch) {
+    if (!orgId || !id) return;
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    refresh().catch(console.error);
+  }
+
+  async function delItem(id) {
+    if (!orgId || !id) return;
+    await api(
+      `/api/orgs/${encodeURIComponent(orgId)}/inventory?id=${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+    refresh().catch(console.error);
+  }
+
+  async function onAdd(e) {
+    e.preventDefault();
+    if (!orgId) return;
+
+    const f = new FormData(e.currentTarget);
+    const qtyRaw = f.get("qty");
+
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: f.get("name"),
+        qty: qtyRaw === "" || qtyRaw === null ? null : Number(qtyRaw),
+        unit: f.get("unit") || "",
+        category: f.get("category") || "",
+        location: f.get("location") || "",
+        notes: f.get("notes") || "",
+        is_public: String(f.get("is_public") || "") === "on",
+      }),
+    });
+
+    e.currentTarget.reset();
+    // make sure the list updates before we return
+    await refresh();
+  }
+
+  const cellInputStyle = {
+    width: "100%",
+    minWidth: 80,
+    boxSizing: "border-box",
   };
 
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <h2 className="section-title">Inventory</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+            Inventory
+          </h2>
+          <button
+            className="btn"
+            onClick={() => refresh().catch(console.error)}
+            disabled={loading}
+          >
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
 
         <input
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, category, location"
+          placeholder="Search inventory"
+          style={{ marginTop: 12 }}
         />
 
-        {/* Prevent horizontal overflow */}
         <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table className="table" style={{ minWidth: 900 }}>
+          <table
+            className="table"
+            style={{ width: "100%", tableLayout: "fixed", minWidth: 980 }}
+          >
             <thead>
               <tr>
-                <th>Name</th><th>Qty</th><th>Unit</th><th>Category</th>
-                <th>Location</th><th>Public</th><th>Low</th><th />
+                <th style={{ width: "22%" }}>Name</th>
+                <th style={{ width: "10%" }}>Qty</th>
+                <th style={{ width: "10%" }}>Unit</th>
+                <th style={{ width: "14%" }}>Category</th>
+                <th style={{ width: "14%" }}>Location</th>
+                <th style={{ width: "22%" }}>Notes</th>
+                <th style={{ width: "4%" }}>Pub</th>
+                <th style={{ width: "4%" }} />
               </tr>
             </thead>
             <tbody>
@@ -91,87 +143,134 @@ export default function Inventory() {
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.name}
-                      onBlur={(e) => onUpdate(i.id, { name: e.target.value })}
+                      defaultValue={i.name || ""}
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (i.name || ""))
+                          putItem(i.id, { name: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
                       type="number"
-                      defaultValue={i.qty}
-                      onBlur={(e) => onUpdate(i.id, { qty: +e.target.value })}
+                      step="any"
+                      defaultValue={
+                        i.qty === null || typeof i.qty === "undefined" ? "" : i.qty
+                      }
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const raw = e.target.value;
+                        const v = raw === "" ? null : Number(raw);
+                        const curr =
+                          i.qty === null || typeof i.qty === "undefined"
+                            ? null
+                            : Number(i.qty);
+                        if (v !== curr)
+                          putItem(i.id, { qty: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.unit}
-                      onBlur={(e) => onUpdate(i.id, { unit: e.target.value })}
+                      defaultValue={i.unit || ""}
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (i.unit || ""))
+                          putItem(i.id, { unit: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.category}
-                      onBlur={(e) => onUpdate(i.id, { category: e.target.value })}
+                      defaultValue={i.category || ""}
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (i.category || ""))
+                          putItem(i.id, { category: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td>
                     <input
                       className="input"
-                      defaultValue={i.location}
-                      onBlur={(e) => onUpdate(i.id, { location: e.target.value })}
+                      defaultValue={i.location || ""}
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (i.location || ""))
+                          putItem(i.id, { location: v }).catch(console.error);
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      defaultValue={i.notes || ""}
+                      style={cellInputStyle}
+                      onBlur={(e) => {
+                        const v = e.target.value || "";
+                        if (v !== (i.notes || ""))
+                          putItem(i.id, { notes: v }).catch(console.error);
+                      }}
                     />
                   </td>
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
-                      defaultChecked={!!i.public}
-                      onChange={(e) => onUpdate(i.id, { public: e.target.checked })}
+                      defaultChecked={!!i.is_public}
+                      onChange={(e) =>
+                        putItem(i.id, { is_public: e.target.checked }).catch(
+                          console.error
+                        )
+                      }
                     />
                   </td>
                   <td>
-                    <input
-                      className="input"
-                      type="number"
-                      defaultValue={i.low}
-                      onBlur={(e) => onUpdate(i.id, { low: +e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <button className="btn" onClick={() => onDelete(i.id)}>Delete</button>
+                    <button
+                      className="btn"
+                      onClick={() => delItem(i.id).catch(console.error)}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}
+
               {list.length === 0 && (
-                <tr><td colSpan={8} className="helper">No items match.</td></tr>
+                <tr>
+                  <td colSpan={8} className="helper">
+                    No inventory items match.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
 
-        {/* Responsive grid: wraps instead of overflowing */}
-        <form
-          onSubmit={onAdd}
-          className="grid"
-          style={{
-            marginTop: 12,
-            display: "grid",
-            gap: 8,
-            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-            alignItems: "center",
-          }}
-        >
+        <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
           <input className="input" name="name" placeholder="Name" required />
-          <input className="input" name="qty" type="number" placeholder="Qty" required />
+          <input
+            className="input"
+            name="qty"
+            placeholder="Qty"
+            type="number"
+            step="any"
+          />
           <input className="input" name="unit" placeholder="Unit" />
           <input className="input" name="category" placeholder="Category" />
           <input className="input" name="location" placeholder="Location" />
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input type="checkbox" name="public" /> Public
+          <input className="input" name="notes" placeholder="Notes" />
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" name="is_public" />
+            Public
           </label>
-          <input className="input" name="low" type="number" placeholder="Low threshold" />
           <div />
           <button className="btn">Add Item</button>
         </form>
