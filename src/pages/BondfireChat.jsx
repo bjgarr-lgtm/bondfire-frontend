@@ -195,62 +195,74 @@ export default function BondfireChat() {
     });
   }
 
-  async function acceptAndBeginSas() {
-    const req = pendingVerification;
-    if (!req) return;
-    try {
+async function acceptAndBeginSas() {
+  const req = pendingVerification;
+  if (!req) return;
+
+  try {
+    // Only accept in phases where accept is valid.
+    // Phase meanings vary a bit by SDK version, but:
+    // 1 = Requested, 2 = Ready, 3 = Started, 4 = WaitingForDone
+    const p = Number(req.phase);
+
+    if (p === 1 || p === 2) {
       await req.accept();
-      let verifier;
-      try {
-        verifier = req.beginKeyVerification("m.sas.v1");
-      } catch {
-        verifier = req.beginKeyVerification("sas");
-      }
-      verifierRef.current = verifier;
-
-      // Some SDKs emit 'show_sas' with emojis, others provide decimal fallback
-      verifier.on?.("show_sas", (sas) => {
-        try {
-          // Try emoji set first
-          const e = verifier.getEmoji?.() || sas?.emoji;
-          if (e && Array.isArray(e) && e.length) {
-            // e is array of [emoji, name], or array of objects {emoji, description}
-            const normalized = e.map((x) =>
-              Array.isArray(x) ? x : [x?.emoji || "", x?.description || ""]
-            );
-            setSasEmojis(normalized);
-            setSasDecimals(null);
-          } else {
-            // fallback to decimals
-            const d = verifier.getDecimals?.() || sas?.decimal || sas?.sas;
-            if (d && Array.isArray(d)) setSasDecimals(d);
-          }
-        } catch {}
-      });
-
-      verifier.on?.("cancel", () => {
-        setSasEmojis(null);
-        setSasDecimals(null);
-        verifierRef.current = null;
-        setPendingVerification(null);
-        setPendingFrom("");
-        log("Verification cancelled");
-      });
-
-      verifier.on?.("verified", () => {
-        setSasEmojis(null);
-        setSasDecimals(null);
-        verifierRef.current = null;
-        setPendingVerification(null);
-        setPendingFrom("");
-        log("Device verified ✅");
-      });
-
-      await verifier.verify(); // waits until confirmed/cancelled
-    } catch (e) {
-      log("Could not begin SAS:", e?.message || e);
+      log("Accepted verification request");
+    } else {
+      log("Skipping accept; request already in phase", phaseName(p));
     }
+
+    // Start SAS
+    let verifier;
+    try {
+      verifier = req.beginKeyVerification("m.sas.v1");
+    } catch {
+      verifier = req.beginKeyVerification("sas");
+    }
+    verifierRef.current = verifier;
+
+    verifier.on?.("show_sas", (sas) => {
+      try {
+        const e = verifier.getEmoji?.() || sas?.emoji;
+        if (e && Array.isArray(e) && e.length) {
+          const normalized = e.map((x) =>
+            Array.isArray(x) ? x : [x?.emoji || "", x?.description || ""]
+          );
+          setSasEmojis(normalized);
+          setSasDecimals(null);
+        } else {
+          const d = verifier.getDecimals?.() || sas?.decimal || sas?.sas;
+          if (d && Array.isArray(d)) setSasDecimals(d);
+        }
+      } catch {}
+    });
+
+    verifier.on?.("cancel", () => {
+      setSasEmojis(null);
+      setSasDecimals(null);
+      verifierRef.current = null;
+      setPendingVerification(null);
+      setPendingFrom("");
+      log("Verification cancelled");
+    });
+
+    verifier.on?.("verified", () => {
+      setSasEmojis(null);
+      setSasDecimals(null);
+      verifierRef.current = null;
+      setPendingVerification(null);
+      setPendingFrom("");
+      log("Device verified ✅");
+    });
+
+    // Kick the verifier. Some SDKs will emit show_sas only after verify()
+    await verifier.verify();
+
+  } catch (e) {
+    log("Could not begin SAS:", e?.message || e);
   }
+}
+
 
   async function confirmSasMatch() {
     const verifier = verifierRef.current;
@@ -584,9 +596,10 @@ async function manualToDeviceRequest(targetDeviceId) {
               </button>
               {pendingVerification && (
                 <button className="btn" onClick={acceptAndBeginSas}>
-                  Accept & Start SAS
+                  Start SAS
                 </button>
               )}
+
             </div>
             {pendingFrom && (
               <div className="helper" style={{ marginTop: 8 }}>
