@@ -1,5 +1,5 @@
 // src/pages/Needs.jsx
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
 
 function getOrgId() {
@@ -60,6 +60,7 @@ export default function Needs() {
       `/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(id)}`,
       { method: "DELETE" }
     );
+    setNeeds((prev) => prev.filter((x) => x.id !== id));
     refreshNeeds().catch(console.error);
   }
 
@@ -68,28 +69,33 @@ export default function Needs() {
     if (!orgId) return;
 
     const f = new FormData(e.currentTarget);
+    const title = String(f.get("title") || "").trim();
+    if (!title) return;
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+    const payload = {
+      title,
+      description: String(f.get("description") || ""),
+      urgency: String(f.get("urgency") || ""),
+      status: String(f.get("status") || "open"),
+      is_public: String(f.get("is_public") || "") === "on",
+    };
+
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: f.get("title"),
-        description: f.get("description") || "",
-        urgency: f.get("urgency") || "",
-        status: f.get("status") || "open",
-        is_public: String(f.get("is_public") || "") === "on",
-      }),
+      body: JSON.stringify(payload),
     });
 
+    if (data?.id) {
+      setNeeds((prev) => [{ id: data.id, ...payload }, ...prev]);
+    }
+
+    setQ("");
     e.currentTarget.reset();
     await refreshNeeds();
   }
 
-  const cellInputStyle = {
-    width: "100%",
-    minWidth: 80,
-    boxSizing: "border-box",
-  };
+  const cellInputStyle = { width: "100%", minWidth: 80, boxSizing: "border-box" };
 
   return (
     <div>
