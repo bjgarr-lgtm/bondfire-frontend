@@ -72,47 +72,56 @@ export default function Inventory() {
 
     const f = new FormData(e.currentTarget);
 
-    const payload = {
-      name: String(f.get("name") || "").trim(),
-      qty: String(f.get("qty") || ""),
-      unit: String(f.get("unit") || ""),
-      category: String(f.get("category") || ""),
-      location: String(f.get("location") || ""),
-      notes: String(f.get("notes") || ""),
-      is_public: String(f.get("is_public") || "") === "on",
-    };
+    const name = String(f.get("name") || "").trim();
+    if (!name) return;
 
-    if (!payload.name) return;
+    const qty = String(f.get("qty") || "");
+    const unit = String(f.get("unit") || "");
+    const category = String(f.get("category") || "");
+    const location = String(f.get("location") || "");
+    const notes = String(f.get("notes") || "");
+    const is_public = String(f.get("is_public") || "") === "on";
 
-    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    // POST
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        name,
+        qty,
+        unit,
+        category,
+        location,
+        notes,
+        is_public,
+      }),
     });
 
-    if (created?.id) {
+    // optimistic insert if API returns id
+    if (data?.id) {
       setItems((prev) => [
         {
-          id: created.id,
-          ...payload,
-          created_at: Date.now(),
-          updated_at: Date.now(),
+          id: data.id,
+          name,
+          qty,
+          unit,
+          category,
+          location,
+          notes,
+          is_public: is_public ? 1 : 0,
         },
-        ...(Array.isArray(prev) ? prev : []),
+        ...prev,
       ]);
-      setTimeout(() => refresh().catch(console.error), 600);
-    } else {
-      refresh().catch(console.error);
     }
 
     e.currentTarget.reset();
-  }),
-    });
 
-    e.currentTarget.reset();
-    // make sure the list updates before we return
-    await refresh();
+    // reconcile fetch to keep canonical
+    setTimeout(() => {
+      refresh().catch(console.error);
+    }, 500);
   }
+
 
   const cellInputStyle = {
     width: "100%",
