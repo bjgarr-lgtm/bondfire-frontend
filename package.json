@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@matrix-org/matrix-sdk-crypto-wasm": "^12.0.0",
     "matrix-js-sdk": "^37.13.0",
+    "olm": "^0.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"

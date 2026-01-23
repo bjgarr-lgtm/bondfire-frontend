@@ -255,66 +255,6 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* ---------- Invites ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper">
-          Create a one-time invite code to let someone join this org.
-        </p>
-
-        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn-red"
-            onClick={createInvite}
-            disabled={inviteBusy}
-            title="Create a new invite code"
-          >
-            {inviteBusy ? "Creating…" : "Create invite"}
-          </button>
-          <button type="button" className="btn" onClick={loadInvites}>
-            Refresh
-          </button>
-          {inviteMsg && (
-            <span className={inviteMsg.includes("Failed") ? "error" : "success"}>
-              {inviteMsg}
-            </span>
-          )}
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          {invites.length === 0 ? (
-            <div className="helper">No invites yet.</div>
-          ) : (
-            <div className="grid" style={{ gap: 8 }}>
-              {invites.map((inv) => {
-                const exp = inv.expires_at ? new Date(inv.expires_at).toLocaleString() : "";
-                const uses = typeof inv.uses === "number" ? inv.uses : 0;
-                const maxUses = typeof inv.max_uses === "number" ? inv.max_uses : inv.maxUses;
-                return (
-                  <div
-                    key={inv.code}
-                    className="card"
-                    style={{ padding: 12, border: "1px solid #222" }}
-                  >
-                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <code style={{ fontSize: 16 }}>{inv.code}</code>
-                      <button type="button" className="btn" onClick={() => copyInvite(inv.code)}>
-                        Copy
-                      </button>
-                      <span className="helper">
-                        Role: {inv.role || "member"} · Uses: {uses}/{maxUses ?? "∞"}
-                        {exp ? ` · Expires: ${exp}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
