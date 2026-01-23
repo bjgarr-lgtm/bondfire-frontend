@@ -1,85 +1,200 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import * as React from "react";
+import { useNavigate } from "react-router-dom";
 
-// temp local store until real backend
-const load = () => { try{ return JSON.parse(localStorage.getItem('bf_orgs')||'[]'); }catch{return []} };
-const save = (x) => localStorage.setItem('bf_orgs', JSON.stringify(x));
+/* ---------- API helper ---------- */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-export default function OrgDash(){
-  const [name, setName] = useState('');
-  const [invite, setInvite] = useState('');
-  const [orgs, setOrgs] = useState(load());
+function getToken() {
+  return (
+    localStorage.getItem("bf_auth_token") ||
+    sessionStorage.getItem("bf_auth_token") ||
+    ""
+  );
+}
+
+async function authFetch(path, opts = {}) {
+  const token = getToken();
+  const url = path.startsWith("http")
+    ? path
+    : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+  const headers = {
+    "Content-Type": "application/json",
+    ...(opts.headers || {}),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(url, {
+    ...opts,
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.ok === false) {
+    throw new Error(j.error || j.message || `HTTP ${res.status}`);
+  }
+  return j;
+}
+
+export default function OrgDash() {
   const nav = useNavigate();
 
-  const create = (e) => {
-    e.preventDefault();
-    const n = name.trim(); if(!n) return;
-    const org = { id: 'org_'+Math.random().toString(36).slice(2,8), name:n, role:'owner' };
-    const next = [...orgs, org]; setOrgs(next); save(next); setName('');
+  const [orgs, setOrgs] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState("");
+
+  const [newOrgName, setNewOrgName] = React.useState("");
+  const [inviteCode, setInviteCode] = React.useState("");
+
+  const load = React.useCallback(async () => {
+    setMsg("");
+    try {
+      const r = await authFetch("/api/orgs", { method: "GET" });
+      setOrgs(Array.isArray(r.orgs) ? r.orgs : []);
+    } catch (e) {
+      setMsg(e.message || "Failed to load orgs");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const createOrg = async (e) => {
+    e?.preventDefault();
+    const name = (newOrgName || "").trim();
+    if (!name) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await authFetch("/api/orgs/create", {
+        method: "POST",
+        body: { name },
+      });
+      setNewOrgName("");
+      await load();
+      // jump straight into the org
+      if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
+    } catch (e2) {
+      setMsg(e2.message || "Failed to create org");
+    } finally {
+      setBusy(false);
+    }
   };
-  const join = (e) => {
-    e.preventDefault();
-    const code = invite.trim(); if(!code) return;
-    const org = { id: code, name: `Org ${code.slice(-4)}`, role:'member' };
-    const next = [...orgs, org]; setOrgs(next); save(next); setInvite('');
+
+  const joinWithInvite = async (e) => {
+    e?.preventDefault();
+    const code = (inviteCode || "").trim();
+    if (!code) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await authFetch("/api/invites/redeem", {
+        method: "POST",
+        body: { code },
+      });
+      setInviteCode("");
+      await load();
+      if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
+      else setMsg("Joined.");
+    } catch (e2) {
+      setMsg(e2.message || "Failed to join");
+    } finally {
+      setBusy(false);
+    }
   };
-  const open = (id) => nav(`/org/${id}`);
 
   return (
-    <div className="grid" style={{gap:12}}>
-      <div className="card"><h1 style={{margin:'4px 0 8px'}}>Org Dashboard</h1>
-        <p className="helper">Choose an organization to enter its workspace, or create/join one.</p>
-      </div>
+    <div style={{ padding: 16 }}>
+      <h1 style={{ marginTop: 0 }}>Org Dashboard</h1>
+      <p className="helper">
+        Choose an organization to enter its workspace, or create or join one.
+      </p>
 
-<div style={{marginTop:8}}>
-  <button
-    className="primary"
-    type="button"
-    onClick={() => window.location.assign('/#/mfa')} // goes to the Auth app's MFA page
-  >
-    Set up 2FA (recommended)
-  </button>
-</div>
-
-      <div className="grid cols-2">
-        <div className="card">
-          <h3>Create a new org</h3>
-          <form onSubmit={create} className="grid" style={{gap:8}}>
-            <label className="grid" style={{gap:6}}>
+      <div className="grid" style={{ gap: 16, gridTemplateColumns: "1fr 1fr" }}>
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Create a new org</h2>
+          <form onSubmit={createOrg} className="grid" style={{ gap: 10 }}>
+            <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Organization name</span>
-              <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Bondfire Team"/>
+              <input
+                className="input"
+                value={newOrgName}
+                onChange={(e) => setNewOrgName(e.target.value)}
+                placeholder="e.g. Bondfire Team"
+              />
             </label>
-            <button className="primary" type="submit">Create</button>
+            <button className="btn-red" disabled={busy || !newOrgName.trim()}>
+              Create
+            </button>
           </form>
         </div>
 
-        <div className="card">
-          <h3>Join with an invite code</h3>
-          <form onSubmit={join} className="grid" style={{gap:8}}>
-            <label className="grid" style={{gap:6}}>
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Join with an invite code</h2>
+          <form onSubmit={joinWithInvite} className="grid" style={{ gap: 10 }}>
+            <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Invite code</span>
-              <input value={invite} onChange={e=>setInvite(e.target.value)} placeholder="Paste invite code"/>
+              <input
+                className="input"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="Paste invite code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+              />
             </label>
-            <button className="primary" type="submit">Join</button>
+            <button className="btn-red" disabled={busy || !inviteCode.trim()}>
+              Join
+            </button>
           </form>
         </div>
       </div>
 
-      <div className="card">
-        <h3>Your orgs</h3>
-        {!orgs.length ? <p className="helper" style={{marginTop:6}}>You don’t belong to any orgs yet.</p> :
-          <ul style={{display:'grid', gap:8, marginTop:8, listStyle:'none', padding:0}}>
-            {orgs.map(o => (
-              <li key={o.id} className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+      <div className="card" style={{ padding: 16, marginTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h2 style={{ margin: 0, flex: 1 }}>Your orgs</h2>
+          <button className="btn" onClick={load} disabled={busy}>
+            Refresh
+          </button>
+        </div>
+
+        {msg && (
+          <div className={msg.toLowerCase().includes("fail") ? "error" : "helper"} style={{ marginTop: 10 }}>
+            {msg}
+          </div>
+        )}
+
+        {orgs.length === 0 ? (
+          <div className="helper" style={{ marginTop: 12 }}>
+            No orgs yet.
+          </div>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            {orgs.map((o) => (
+              <div
+                key={o.id}
+                className="row"
+                style={{
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 0",
+                  borderTop: "1px solid #222",
+                }}
+              >
                 <div>
-                  <div style={{fontWeight:600}}>{o.name}</div>
-                  <div className="helper">Role: {o.role}</div>
+                  <div style={{ fontWeight: 700 }}>{o.name || o.id}</div>
+                  <div className="helper">Role: {o.role || "member"}</div>
                 </div>
-                <button className="btn" onClick={() => nav(`/org/${o.id}/overview`)}>Open</button>
-              </li>
+                <button
+                  className="btn-red"
+                  onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}
+                >
+                  Open
+                </button>
+              </div>
             ))}
-          </ul>
-        }
+          </div>
+        )}
       </div>
     </div>
   );

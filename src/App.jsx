@@ -122,9 +122,13 @@ function Shell() {
   const loc = useLocation();
   const path = loc.pathname || "/";
 
-  // Hide the header on landing/public routes (keeps your old behavior)
-  const hideHeader =
-    path === "/" || path === "/orgs" || path.startsWith("/p/") || path === "/signin";
+  const hasAuth = !!getToken();
+
+  const HomeRoute = () =>
+    hasAuth ? <Navigate to="/orgs" replace /> : <Navigate to="/signin" replace />;
+
+  // Hide the header on public routes (keeps the "landing" clean)
+  const hideHeader = path === "/" || path.startsWith("/p/") || path === "/signin";
 
   return (
     <>
@@ -137,10 +141,18 @@ function Shell() {
         <Route path="/p/*" element={<PublicPage />} />
         <Route path="/signin" element={<SignIn />} />
 
+        {/* Landing */}
+        <Route path="/" element={<HomeRoute />} />
 
-        {/* Landing / Orgs list */}
-        <Route path="/" element={<OrgDash />} />
-        <Route path="/orgs" element={<OrgDash />} />
+        {/* Orgs list (auth-gated) */}
+        <Route
+          path="/orgs"
+          element={
+            <RequireAuth>
+              <OrgDash />
+            </RequireAuth>
+          }
+        />
 
         {/* ORG SPACE (auth-gated) */}
         <Route
@@ -166,7 +178,7 @@ function Shell() {
         </Route>
 
         {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/orgs" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );

@@ -13,6 +13,8 @@ export default function SignIn() {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
 
+  const [inviteCode, setInviteCode] = useState("");
+
   const [name, setName] = useState("");
   const [orgName, setOrgName] = useState("Bondfire");
 
@@ -54,6 +56,27 @@ async function handleSubmit(e) {
       localStorage.setItem("bf_orgs", JSON.stringify([data.org]));
       navigate(`/org/${data.org.id}`, { replace: true });
       return;
+    }
+
+    // Optional invite join flow (login mode)
+    const trimmedCode = (inviteCode || "").trim();
+    if (trimmedCode) {
+      const jRes = await fetch("/api/invites/redeem", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${data.token}`,
+        },
+        body: JSON.stringify({ code: trimmedCode }),
+      });
+      const jData = await jRes.json().catch(() => ({}));
+      if (!jRes.ok || !jData?.ok) {
+        throw new Error(jData?.error || "Invite code was not accepted");
+      }
+      if (jData?.org?.id) {
+        navigate(`/org/${jData.org.id}`, { replace: true });
+        return;
+      }
     }
 
     // Otherwise (login), load org memberships
@@ -150,6 +173,16 @@ async function handleSubmit(e) {
           onChange={(e) => setPass(e.target.value)}
           required
         />
+
+        {mode === "login" && (
+          <input
+            className="input"
+            type="text"
+            placeholder="Invite code (optional)"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+          />
+        )}
 
         <button className="btn" disabled={busy}>
           {busy ? "Working" : (mode === "login" ? "Sign in" : "Create account")}

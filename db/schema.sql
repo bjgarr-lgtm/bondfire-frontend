@@ -55,3 +55,17 @@ CREATE TABLE IF NOT EXISTS needs (
 CREATE INDEX IF NOT EXISTS idx_people_org ON people(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_org ON needs(org_id);
 CREATE INDEX IF NOT EXISTS idx_needs_public ON needs(is_public);
+
+CREATE TABLE IF NOT EXISTS org_invites (
+  code TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  uses INTEGER NOT NULL DEFAULT 0,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  expires_at INTEGER,
+  created_by TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id);
