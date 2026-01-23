@@ -28,3 +28,9 @@ export async function requireOrgRole({ env, request, orgId, minRole }) {
 
   return { ok: true, user: u.user, role: row.role };
 }
+
+// Back-compat alias: earlier endpoints used `requireAuth`.
+// Pages Functions bundling fails if an imported name is missing.
+export async function requireAuth(ctx) {
+  return requireUser(ctx);
+}
