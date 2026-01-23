@@ -43,6 +43,61 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export default function Settings() {
   const { orgId } = useParams();
 
+  /* ========== INVITES (backend) ========== */
+  const [invites, setInvites] = React.useState([]);
+  const [inviteMsg, setInviteMsg] = React.useState("");
+  const [inviteBusy, setInviteBusy] = React.useState(false);
+
+  const loadInvites = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
+      setInvites(Array.isArray(r.invites) ? r.invites : []);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to load invites");
+    }
+  }, [orgId]);
+
+  React.useEffect(() => {
+    loadInvites();
+  }, [loadInvites]);
+
+  const createInvite = async () => {
+    if (!orgId) return;
+    setInviteBusy(true);
+    setInviteMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
+      if (r?.invite) {
+        setInvites((prev) => [r.invite, ...prev]);
+      } else {
+        await loadInvites();
+      }
+      setInviteMsg("Invite created.");
+      setTimeout(() => setInviteMsg(""), 1200);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to create invite");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const copyInvite = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setInviteMsg("Copied.");
+      setTimeout(() => setInviteMsg(""), 900);
+    } catch {
+      setInviteMsg("Clipboard blocked. Copy it manually.");
+    }
+  };
+
+
   /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
