@@ -19,34 +19,9 @@ export default function OrgDash(){
   };
   const join = (e) => {
     e.preventDefault();
-    const code = invite.trim();
-    if (!code) return;
-
-    // local invite map created from Settings -> Invites
-    let targetOrgId = code;
-    try {
-      const map = JSON.parse(localStorage.getItem("bf_invite_map") || "{}");
-      if (map && map[code]) targetOrgId = map[code];
-    } catch {}
-
-    // Avoid dupes
-    if (orgs.some((o) => o.id === targetOrgId)) {
-      setInvite("");
-      return;
-    }
-
-    // Try to use org name from local org settings if present
-    let displayName = `Org ${targetOrgId.slice(-4)}`;
-    try {
-      const s = JSON.parse(localStorage.getItem(`bf_org_settings_${targetOrgId}`) || "{}");
-      if (s?.name) displayName = s.name;
-    } catch {}
-
-    const org = { id: targetOrgId, name: displayName, role: "member" };
-    const next = [...orgs, org];
-    setOrgs(next);
-    save(next);
-    setInvite("");
+    const code = invite.trim(); if(!code) return;
+    const org = { id: code, name: `Org ${code.slice(-4)}`, role:'member' };
+    const next = [...orgs, org]; setOrgs(next); save(next); setInvite('');
   };
   const open = (id) => nav(`/org/${id}`);
 

@@ -43,75 +43,48 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export default function Settings() {
   const { orgId } = useParams();
 
-    /* ========== INVITES (local until backend) ========== */
-  const invitesKey = React.useMemo(() => `bf_org_invites_${orgId}`, [orgId]);
-
-  const readInvites = React.useCallback(() => {
-    const list = readJSON(invitesKey, []);
-    return Array.isArray(list) ? list : [];
-  }, [invitesKey]);
-
-  const [invites, setInvites] = React.useState(() => readInvites());
+  /* ========== INVITES (backend) ========== */
+  const [invites, setInvites] = React.useState([]);
   const [inviteMsg, setInviteMsg] = React.useState("");
   const [inviteBusy, setInviteBusy] = React.useState(false);
 
+  const loadInvites = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
+      setInvites(Array.isArray(r.invites) ? r.invites : []);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to load invites");
+    }
+  }, [orgId]);
+
   React.useEffect(() => {
-    setInvites(readInvites());
-  }, [readInvites]);
-
-  const saveInvites = (list) => {
-    writeJSON(invitesKey, list);
-    setInvites(list);
-  };
-
-  const INVITE_MAP_KEY = "bf_invite_map"; // code -> orgId
-
-  const upsertInviteMap = (code) => {
-    const map = readJSON(INVITE_MAP_KEY, {});
-    map[code] = orgId;
-    writeJSON(INVITE_MAP_KEY, map);
-  };
-
-  const removeInviteMap = (code) => {
-    const map = readJSON(INVITE_MAP_KEY, {});
-    delete map[code];
-    writeJSON(INVITE_MAP_KEY, map);
-  };
-
-  const genCode = () =>
-    Math.random().toString(36).slice(2, 8).toUpperCase() +
-    Math.random().toString(36).slice(2, 6).toUpperCase();
+    loadInvites();
+  }, [loadInvites]);
 
   const createInvite = async () => {
     if (!orgId) return;
     setInviteBusy(true);
     setInviteMsg("");
     try {
-      const code = genCode();
-      const invite = {
-        code,
-        role: "member",
-        uses: 0,
-        max_uses: 1,
-        expires_at: Date.now() + 14 * 24 * 60 * 60 * 1000,
-        created_at: Date.now(),
-      };
-      const next = [invite, ...readInvites()];
-      saveInvites(next);
-      upsertInviteMap(code);
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
+      if (r?.invite) {
+        setInvites((prev) => [r.invite, ...prev]);
+      } else {
+        await loadInvites();
+      }
       setInviteMsg("Invite created.");
       setTimeout(() => setInviteMsg(""), 1200);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to create invite");
     } finally {
       setInviteBusy(false);
     }
-  };
-
-  const revokeInvite = (code) => {
-    const next = readInvites().filter((i) => i.code !== code);
-    saveInvites(next);
-    removeInviteMap(code);
-    setInviteMsg("Invite revoked.");
-    setTimeout(() => setInviteMsg(""), 1200);
   };
 
   const copyInvite = async (code) => {
@@ -124,7 +97,8 @@ export default function Settings() {
     }
   };
 
-/* ========== ORG BASICS (local) ========== */
+
+  /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
 
@@ -236,6 +210,70 @@ export default function Settings() {
 
   return (
     <div className="grid" style={{ gap: 16, padding: 16 }}>
+      {/* ---------- Invites ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Invites</h2>
+        <p className="helper" style={{ marginTop: 0 }}>
+          Generate a one-time code so someone can join this org. (Backend endpoint: <code>/api/orgs/:orgId/invites</code>)
+        </p>
+
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
+            {inviteBusy ? "Creating…" : "Create invite"}
+          </button>
+          <button className="btn" onClick={loadInvites} disabled={inviteBusy}>
+            Refresh
+          </button>
+          {inviteMsg && (
+            <span className={inviteMsg.toLowerCase().includes("fail") ? "error" : "success"}>
+              {inviteMsg}
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+          <table className="table" style={{ width: "100%", minWidth: 720 }}>
+            <thead>
+              <tr>
+                <th style={{ width: "36%" }}>Code</th>
+                <th style={{ width: "14%" }}>Role</th>
+                <th style={{ width: "18%" }}>Uses</th>
+                <th style={{ width: "20%" }}>Expires</th>
+                <th style={{ width: "12%" }} />
+              </tr>
+            </thead>
+            <tbody>
+              {invites.map((i) => {
+                const exp = i.expires_at ? new Date(Number(i.expires_at)).toLocaleString() : "";
+                const uses = `${i.uses ?? 0}/${i.max_uses ?? 1}`;
+                return (
+                  <tr key={i.code}>
+                    <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                      {i.code}
+                    </td>
+                    <td>{i.role || "member"}</td>
+                    <td>{uses}</td>
+                    <td>{exp || <span className="helper">(none)</span>}</td>
+                    <td>
+                      <button className="btn" onClick={() => copyInvite(i.code)}>
+                        Copy
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {invites.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="helper">
+                    No invites yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* ---------- Org Basics ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Organization</h2>
@@ -281,45 +319,7 @@ export default function Settings() {
         </div>
       </div>
 
-      
-      {/* ---------- Invites ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper">
-          Generate a short code someone can paste into the Org Dashboard to join this org.
-          (Local-only for now, so it works even while we&apos;re still pretending a backend exists.)
-        </p>
-
-        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn-red" type="button" onClick={createInvite} disabled={inviteBusy}>
-            {inviteBusy ? "Working…" : "Create invite"}
-          </button>
-          {inviteMsg && (
-            <span className={inviteMsg.includes("Created") || inviteMsg.includes("Copied") || inviteMsg.includes("revoked") ? "success" : "error"}>
-              {inviteMsg}
-            </span>
-          )}
-        </div>
-
-        {invites.length === 0 ? (
-          <div className="helper" style={{ marginTop: 10 }}>No invites yet.</div>
-        ) : (
-          <div style={{ marginTop: 10 }}>
-            {invites.map((i) => (
-              <div key={i.code} className="row" style={{ gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-                <code style={{ fontSize: 14 }}>{i.code}</code>
-                <span className="helper">
-                  expires {new Date(i.expires_at).toLocaleDateString()}
-                </span>
-                <button className="btn" type="button" onClick={() => copyInvite(i.code)}>Copy</button>
-                <button className="btn" type="button" onClick={() => revokeInvite(i.code)}>Revoke</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-{/* ---------- Public Page ---------- */}
+      {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
         <p className="helper">

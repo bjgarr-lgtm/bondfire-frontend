@@ -1,7 +1,7 @@
 // src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { createClient, IndexedDBStore, IndexedDBCryptoStore } from "matrix-js-sdk";
+import { createClient } from "matrix-js-sdk";
 
 /*
   Bondfire Chat:
@@ -60,30 +60,35 @@ export default function BondfireChat() {
   useEffect(() => {
     if (!saved?.hsUrl || !userId || !accessToken) return;
 
-    // persistent stores so this session actually supports E2EE
-    const store = new IndexedDBStore({
-      indexedDB: window.indexedDB,
-      localStorage: window.localStorage,
-      dbName: `bf_matrix_store_${orgId}_${(saved?.userId || userId || "anon").replace(/[^a-z0-9_]/gi,"_")}`,
-    });
-    await store.startup().catch(() => {});
-    const cryptoStore = new IndexedDBCryptoStore(
-      window.indexedDB,
-      `bf_matrix_crypto_${orgId}_${(saved?.userId || userId || "anon").replace(/[^a-z0-9_]/gi,"_")}`
-    );
-
     const client = createClient({
       baseUrl: saved.hsUrl,
       accessToken,
       userId,
       deviceId: deviceId || undefined,
-      store,
-      cryptoStore,
     });
 
     clientRef.current = client;
     setReady(false);
     log("Connecting…");
+
+    // Enable end-to-end encryption in the browser build.
+    // Verification itself should be done in Element (Settings -> Security & Privacy -> Sessions).
+    // But Rust crypto MUST be initialized here or encrypted rooms will not decrypt.
+    (async () => {
+      try {
+        if (typeof client.initRustCrypto === "function") {
+          await client.initRustCrypto();
+          log("Crypto: Rust initialized");
+        } else if (typeof client.initCrypto === "function") {
+          await client.initCrypto();
+          log("Crypto: legacy initialized");
+        } else {
+          log("Crypto: not available in this build");
+        }
+      } catch (e) {
+        log("Crypto init failed:", e?.message || String(e));
+      }
+    })();
 
     const refreshRooms = () => {
       try {
