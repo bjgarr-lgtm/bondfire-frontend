@@ -71,25 +71,6 @@ export default function BondfireChat() {
     setReady(false);
     log("Connecting…");
 
-    // Enable end-to-end encryption in the browser build.
-    // Verification itself should be done in Element (Settings -> Security & Privacy -> Sessions).
-    // But Rust crypto MUST be initialized here or encrypted rooms will not decrypt.
-    (async () => {
-      try {
-        if (typeof client.initRustCrypto === "function") {
-          await client.initRustCrypto();
-          log("Crypto: Rust initialized");
-        } else if (typeof client.initCrypto === "function") {
-          await client.initCrypto();
-          log("Crypto: legacy initialized");
-        } else {
-          log("Crypto: not available in this build");
-        }
-      } catch (e) {
-        log("Crypto init failed:", e?.message || String(e));
-      }
-    })();
-
     const refreshRooms = () => {
       try {
         const rs = client

@@ -9,6 +9,7 @@ export default function OrgDash(){
   const [name, setName] = useState('');
   const [invite, setInvite] = useState('');
   const [orgs, setOrgs] = useState(load());
+  const [msg, setMsg] = useState('');
   const nav = useNavigate();
 
   const create = (e) => {
@@ -19,9 +20,48 @@ export default function OrgDash(){
   };
   const join = (e) => {
     e.preventDefault();
-    const code = invite.trim(); if(!code) return;
-    const org = { id: code, name: `Org ${code.slice(-4)}`, role:'member' };
-    const next = [...orgs, org]; setOrgs(next); save(next); setInvite('');
+    setMsg('');
+    const code = invite.trim().toUpperCase();
+    if (!code) { setMsg('Paste an invite code first.'); return; }
+
+    // Local invite records live in Settings for now
+    const recKey = `bf_invite_${code}`;
+    let rec = null;
+    try { rec = JSON.parse(localStorage.getItem(recKey) || 'null'); } catch {}
+
+    if (!rec || rec.code !== code) {
+      setMsg('That invite code is not recognized (or was created on a different browser).');
+      return;
+    }
+
+    if (rec.expiresAt && Date.now() > rec.expiresAt) {
+      setMsg('That invite code is expired.');
+      return;
+    }
+
+    if ((rec.uses || 0) >= (rec.maxUses || 1)) {
+      setMsg('That invite code has already been used.');
+      return;
+    }
+
+    // Avoid duplicate org entries
+    if (orgs.some((o) => o.id === rec.orgId)) {
+      setMsg('You already have this org.');
+      setInvite('');
+      return;
+    }
+
+    const org = { id: rec.orgId, name: rec.orgName || `Org ${rec.orgId.slice(-4)}`, role: rec.role || 'member' };
+    const next = [...orgs, org];
+    setOrgs(next);
+    save(next);
+
+    // consume one use
+    const updated = { ...rec, uses: (rec.uses || 0) + 1 };
+    localStorage.setItem(recKey, JSON.stringify(updated));
+
+    setInvite('');
+    setMsg('Joined.');
   };
   const open = (id) => nav(`/org/${id}`);
 
