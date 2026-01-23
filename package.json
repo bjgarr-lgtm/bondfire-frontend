@@ -4,6 +4,7 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
+    "preinstall": "node -e \"const v=process.versions.node.split('.')[0]; if(v!=='20'){console.error('Need Node 20.x. Got '+process.versions.node); process.exit(1)}\"",
     "prebuild": "node -e \"console.log('prebuild: npm is running')\"",
     "dev": "vite --port 5174",
     "build": "vite build",
