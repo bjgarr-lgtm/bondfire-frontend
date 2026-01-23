@@ -1,27 +1,64 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// temp local store until real backend
-const load = () => { try{ return JSON.parse(localStorage.getItem('bf_orgs')||'[]'); }catch{return []} };
-const save = (x) => localStorage.setItem('bf_orgs', JSON.stringify(x));
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+function authFetch(path, opts = {}) {
+  const token = localStorage.getItem('bf_auth_token') || sessionStorage.getItem('bf_auth_token');
+  const url = path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return fetch(url, {
+    ...opts,
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  }).then(async (r) => {
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    return j;
+  });
+}
 
 export default function OrgDash(){
   const [name, setName] = useState('');
   const [invite, setInvite] = useState('');
-  const [orgs, setOrgs] = useState(load());
+  const [orgs, setOrgs] = useState([]);
+  const [msg, setMsg] = useState('');
   const nav = useNavigate();
+
+  const refreshOrgs = async () => {
+    try {
+      const r = await authFetch('/api/orgs', { method: 'GET' });
+      setOrgs(Array.isArray(r.orgs) ? r.orgs : []);
+    } catch (e) {
+      // if user isn't logged in yet, keep it quiet
+      setMsg(e.message || 'Failed to load orgs');
+    }
+  };
+
+  useEffect(() => {
+    refreshOrgs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const create = (e) => {
     e.preventDefault();
-    const n = name.trim(); if(!n) return;
-    const org = { id: 'org_'+Math.random().toString(36).slice(2,8), name:n, role:'owner' };
-    const next = [...orgs, org]; setOrgs(next); save(next); setName('');
+    setMsg('Org creation is currently done during account creation. (Invite-based org creation coming soon.)');
+    setTimeout(() => setMsg(''), 2500);
+    setName('');
   };
-  const join = (e) => {
+  const join = async (e) => {
     e.preventDefault();
     const code = invite.trim(); if(!code) return;
-    const org = { id: code, name: `Org ${code.slice(-4)}`, role:'member' };
-    const next = [...orgs, org]; setOrgs(next); save(next); setInvite('');
+    setMsg('');
+    try {
+      await authFetch('/api/invites/redeem', { method: 'POST', body: { code } });
+      setInvite('');
+      await refreshOrgs();
+      setMsg('Joined.');
+      setTimeout(() => setMsg(''), 1200);
+    } catch (e2) {
+      setMsg(e2.message || 'Join failed');
+    }
   };
   const open = (id) => nav(`/org/${id}`);
 
@@ -51,6 +88,7 @@ export default function OrgDash(){
             </label>
             <button className="primary" type="submit">Create</button>
           </form>
+          <p className="helper" style={{marginTop:8}}>Org creation currently happens during account creation. Invite codes are for joining existing orgs.</p>
         </div>
 
         <div className="card">
@@ -67,6 +105,7 @@ export default function OrgDash(){
 
       <div className="card">
         <h3>Your orgs</h3>
+        {msg ? <p className={msg === 'Joined.' ? 'success' : 'error'} style={{marginTop:6}}>{msg}</p> : null}
         {!orgs.length ? <p className="helper" style={{marginTop:6}}>You don’t belong to any orgs yet.</p> :
           <ul style={{display:'grid', gap:8, marginTop:8, listStyle:'none', padding:0}}>
             {orgs.map(o => (
