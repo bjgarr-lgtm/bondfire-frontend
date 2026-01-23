@@ -254,6 +254,7 @@ export default function BondfireChat() {
       }
       await req.accept();
       setVerifyMsg("Accepted. Now click Start SAS.");
+      await startSas();
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
@@ -495,7 +496,6 @@ export default function BondfireChat() {
           ) : (
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button className="btn" onClick={acceptVerification}>Accept</button>
-              <button className="btn" onClick={startSas}>Start SAS</button>
             </div>
           )}
 
