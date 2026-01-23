@@ -1,0 +1,3 @@
+/* overrides to ensure only the top header appears */
+.brand-row, .section-brand, .org-brand-row { display: none !important; }
+.header .brand-row, .header .section-brand, .header .org-brand-row { display: inherit !important; }
