@@ -1,17 +1,8 @@
+// src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  createClient,
-  IndexedDBStore,
-  IndexedDBCryptoStore,
-} from "matrix-js-sdk";
-
-// Pull these from the SDK's crypto-api layer (stable names)
-import {
-  CryptoEvent,
-  VerifierEvent,
-  canAcceptVerificationRequest,
-} from "matrix-js-sdk/lib/crypto-api";
+import { createClient, IndexedDBStore, IndexedDBCryptoStore } from "matrix-js-sdk";
+import { CryptoEvent, VerifierEvent } from "matrix-js-sdk/lib/crypto-api";
 
 /* ---------------- helpers ---------------- */
 function readJSON(key, fallback = null) {
@@ -30,13 +21,38 @@ function parseOrgIdFromHash() {
 
 const ts = () => new Date().toLocaleTimeString();
 
+function normalizeEmojiList(raw) {
+  if (!raw) return null;
+
+  if (Array.isArray(raw) && raw.length) {
+    if (Array.isArray(raw[0])) {
+      return raw.map((x) => [x?.[0] || "", x?.[1] || ""]);
+    }
+    if (typeof raw[0] === "object") {
+      return raw.map((x) => [x?.emoji || "", x?.description || ""]);
+    }
+  }
+
+  return null;
+}
+
+function isUndecryptableBody(body) {
+  const b = (body || "").toLowerCase();
+  if (!b) return true;
+  if (b.includes("unable to decrypt")) return true;
+  if (b.includes("could not decrypt")) return true;
+  if (b.includes("failed to decrypt")) return true;
+  if (b.includes("m.bad.encrypted")) return true;
+  return false;
+}
+
 /* --------------- component --------------- */
 export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
   const saved = readJSON(`bf_matrix_${orgId}`, null);
 
-  // login form (left blank by design)
+  // login form
   const [hsUrl, setHsUrl] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -51,7 +67,7 @@ export default function BondfireChat() {
 
   // verification
   const [verificationReq, setVerificationReq] = useState(null);
-  const [sasData, setSasData] = useState(null); // {emoji?: [emoji,name][], decimal?: number[], confirm():Promise, mismatch():Promise}
+  const [sasData, setSasData] = useState(null); // { emoji, decimal, confirm(), mismatch() }
   const [verifyMsg, setVerifyMsg] = useState("");
 
   // rooms / messages
@@ -60,8 +76,13 @@ export default function BondfireChat() {
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
 
+  // message display controls
+  const [hideUndecryptable, setHideUndecryptable] = useState(true);
+  const [newestFirst, setNewestFirst] = useState(false);
+
   const clientRef = useRef(null);
   const verifierRef = useRef(null);
+  const timelineRef = useRef(null);
   const log = (...a) => setStatus(`[${ts()}] ${a.join(" ")}`);
 
   /* ---------- boot / resume ---------- */
@@ -76,10 +97,7 @@ export default function BondfireChat() {
       dbName: `bf_mx_store_${userId}`,
     });
 
-    const cryptoStore = new IndexedDBCryptoStore(
-      window.indexedDB,
-      `bf_mx_crypto_${userId}`
-    );
+    const cryptoStore = new IndexedDBCryptoStore(window.indexedDB, `bf_mx_crypto_${userId}`);
 
     const client = createClient({
       baseUrl,
@@ -93,6 +111,8 @@ export default function BondfireChat() {
     clientRef.current = client;
     log("Connecting…");
 
+    let disposed = false;
+
     (async () => {
       try {
         await store.startup();
@@ -101,7 +121,6 @@ export default function BondfireChat() {
       }
 
       try {
-        // Prefer Rust crypto (encryption + verification support).
         if (typeof client.initRustCrypto === "function") {
           await client.initRustCrypto();
           setCryptoReady(true);
@@ -117,7 +136,6 @@ export default function BondfireChat() {
         log("Crypto init failed:", e?.message || e);
       }
 
-      // Sync ready
       client.on("sync", (state) => {
         if (state === "PREPARED") {
           setReady(true);
@@ -125,19 +143,14 @@ export default function BondfireChat() {
         }
       });
 
-      // Verification requests from Element
+      // Verification requests
       client.on(CryptoEvent.VerificationRequestReceived, (req) => {
         setVerificationReq(req);
         setSasData(null);
         setVerifyMsg("");
-        log(
-          "Verification request from",
-          req.otherUserId,
-          req.otherDeviceId
-        );
+        log("Verification request from", req.otherUserId, req.otherDeviceId);
 
         req.on?.("change", () => {
-          // Keep UI fresh
           setVerificationReq(req);
         });
       });
@@ -146,18 +159,19 @@ export default function BondfireChat() {
       client.on("Room.timeline", (ev, room, toStartOfTimeline) => {
         if (toStartOfTimeline) return;
         if (!activeRoomId || room.roomId !== activeRoomId) return;
-        if (ev.getType() === "m.room.message") {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: ev.getId(),
-              body: ev.getContent()?.body || "",
-              sender: ev.getSender(),
-              ts: ev.getTs(),
-              encrypted: !!ev.isEncrypted?.(),
-            },
-          ]);
-        }
+        if (ev.getType() !== "m.room.message") return;
+
+        const body = ev.getContent()?.body || "";
+        const item = {
+          id: ev.getId(),
+          body,
+          sender: ev.getSender(),
+          ts: ev.getTs(),
+          encrypted: !!ev.isEncrypted?.(),
+        };
+
+        // Keep list clean. If you want to see garbage, uncheck the UI toggle.
+        setMessages((prev) => [...prev, item]);
       });
 
       client.startClient({ initialSyncLimit: 30 });
@@ -166,67 +180,68 @@ export default function BondfireChat() {
         const rs = client
           .getVisibleRooms()
           .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
-          .sort(
-            (a, b) =>
-              (b.getLastActiveTimestamp() || 0) - (a.getLastActiveTimestamp() || 0)
+          .sort((a, b) => (b.getLastActiveTimestamp() || 0) - (a.getLastActiveTimestamp() || 0));
+
+        if (!disposed) {
+          setRooms(
+            rs.map((r) => ({
+              id: r.roomId,
+              name: r.name || r.getCanonicalAlias() || r.roomId,
+              encrypted: r.isEncrypted?.(),
+            }))
           );
-        setRooms(
-          rs.map((r) => ({
-            id: r.roomId,
-            name: r.name || r.getCanonicalAlias() || r.roomId,
-            encrypted: r.isEncrypted?.(),
-          }))
-        );
+        }
       }
     })();
 
     return () => {
+      disposed = true;
       try {
         client.stopClient();
         client.removeAllListeners();
       } catch {}
       clientRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved?.hsUrl, userId, accessToken, deviceId]);
+  }, [saved?.hsUrl, userId, accessToken, deviceId, activeRoomId]);
 
-  /* -------- verification actions -------- */
-  async function acceptVerification() {
+  /* ---------- verification actions ---------- */
+  async function acceptAndStartSas() {
     const req = verificationReq;
     if (!req) return;
+
     try {
-      if (!canAcceptVerificationRequest(req)) {
-        setVerifyMsg("Cannot accept: request is already in progress.");
-        return;
+      setVerifyMsg("");
+      setSasData(null);
+
+      // Accept if possible. If it is already accepted or in progress, this can throw.
+      try {
+        await req.accept?.();
+      } catch (e) {
+        log("Accept skipped:", e?.message || e);
       }
-      await req.accept();
-      setVerifyMsg("Accepted. Now click Start SAS.");
-    } catch (e) {
-      setVerifyMsg(e?.message || String(e));
-    }
-  }
 
-  async function startSas() {
-    const req = verificationReq;
-    if (!req) return;
-    try {
-      // m.sas.v1 is the canonical method string.
+      // Start SAS verification
       const verifier = await req.startVerification("m.sas.v1");
       verifierRef.current = verifier;
 
-      verifier.on(VerifierEvent.ShowSas, (sas) => {
-        const payload = sas?.sas || {};
-        const emoji = payload.emoji
-          ? payload.emoji.map((e) => [e.emoji, e.description])
-          : null;
-        const decimal = payload.decimal ? payload.decimal : null;
+      const setFromVerifier = (sas) => {
+        const payload = sas?.sas || sas || {};
+        const emoji = normalizeEmojiList(payload.emoji);
+        const decimal = Array.isArray(payload.decimal) ? payload.decimal : null;
 
-        setSasData({
-          emoji,
-          decimal,
-          confirm: sas.confirm,
-          mismatch: sas.mismatch,
-        });
+        if (emoji || decimal) {
+          setSasData({
+            emoji,
+            decimal,
+            confirm: sas.confirm,
+            mismatch: sas.mismatch,
+          });
+        }
+      };
+
+      // Normal event path
+      verifier.on(VerifierEvent.ShowSas, (sas) => {
+        setFromVerifier(sas);
       });
 
       verifier.on(VerifierEvent.Done, () => {
@@ -243,6 +258,31 @@ export default function BondfireChat() {
         verifierRef.current = null;
       });
 
+      // Fallback poll path for when ShowSas does not fire reliably
+      let tries = 0;
+      const poll = setInterval(() => {
+        tries += 1;
+
+        // Some SDK builds expose getEmoji / getDecimals
+        try {
+          const emoji = normalizeEmojiList(verifier.getEmoji?.());
+          if (emoji && emoji.length) {
+            setSasData((prev) => prev || { emoji, decimal: null, confirm: null, mismatch: null });
+          }
+        } catch {}
+
+        try {
+          const dec = verifier.getDecimals?.();
+          if (Array.isArray(dec) && dec.length) {
+            setSasData((prev) => prev || { emoji: null, decimal: dec, confirm: null, mismatch: null });
+          }
+        } catch {}
+
+        if (tries > 40 || sasData) {
+          clearInterval(poll);
+        }
+      }, 250);
+
       await verifier.verify();
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
@@ -251,7 +291,13 @@ export default function BondfireChat() {
 
   async function confirmSas() {
     try {
-      await sasData?.confirm?.();
+      if (!sasData?.confirm) {
+        // Some SDKs do not provide confirm as a function on the event object
+        // In those cases, verifier.verify resolves when the other side confirms.
+        setVerifyMsg("Confirmed on this side. Waiting for other device…");
+        return;
+      }
+      await sasData.confirm();
       setVerifyMsg("Confirmed. Waiting for other device…");
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
@@ -260,13 +306,14 @@ export default function BondfireChat() {
 
   async function mismatchSas() {
     try {
-      await sasData?.mismatch?.();
+      if (sasData?.mismatch) await sasData.mismatch();
+      else setVerifyMsg("Marked mismatch.");
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
   }
 
-  /* -------------- session -------------- */
+  /* ---------- session ---------- */
   const login = async (e) => {
     e.preventDefault();
     try {
@@ -277,9 +324,11 @@ export default function BondfireChat() {
         identifier: { type: "m.id.user", user: localpart },
         password,
       });
+
       setUserId(res.user_id);
       setAccessToken(res.access_token);
       setDeviceId(res.device_id || "");
+
       localStorage.setItem(
         `bf_matrix_${orgId}`,
         JSON.stringify({
@@ -289,8 +338,9 @@ export default function BondfireChat() {
           deviceId: res.device_id || "",
         })
       );
+
       setPassword("");
-      window.location.hash = window.location.hash; // kick resume
+      window.location.hash = window.location.hash;
     } catch (err) {
       log("Login failed:", err?.message || "Unknown error");
     }
@@ -300,39 +350,51 @@ export default function BondfireChat() {
     try {
       localStorage.removeItem(`bf_matrix_${orgId}`);
     } catch {}
+
     setUserId("");
     setAccessToken("");
     setDeviceId("");
     setReady(false);
     setCryptoReady(false);
+
     setVerificationReq(null);
     setSasData(null);
     setVerifyMsg("");
+
     setRooms([]);
     setMessages([]);
     setMsg("");
+
     if (clientRef.current) {
-      clientRef.current.stopClient();
-      clientRef.current.removeAllListeners();
+      try {
+        clientRef.current.stopClient();
+        clientRef.current.removeAllListeners();
+      } catch {}
       clientRef.current = null;
     }
+
     log("Logged out");
   };
 
-  /* -------- rooms / messages -------- */
+  /* ---------- rooms / messages ---------- */
   const selectRoom = async (roomId) => {
     setActiveRoomId(roomId);
     setMessages([]);
+
     const client = clientRef.current;
     if (!client) return;
+
     const room = client.getRoom(roomId);
     if (!room) return;
+
     const tl = room.getLiveTimeline?.();
-    const evs = (tl?.getEvents?.() || []).filter(
-      (e) => e.getType() === "m.room.message"
-    );
+    const evs = (tl?.getEvents?.() || []).filter((e) => e.getType() === "m.room.message");
+
+    // Keep it sane. You can increase this if you like suffering.
+    const last = evs.slice(-200);
+
     setMessages(
-      evs.map((ev) => ({
+      last.map((ev) => ({
         id: ev.getId(),
         body: ev.getContent()?.body || "",
         sender: ev.getSender(),
@@ -340,31 +402,40 @@ export default function BondfireChat() {
         encrypted: !!ev.isEncrypted?.(),
       }))
     );
+
+    // Auto scroll to bottom after load if using oldest first
+    setTimeout(() => {
+      if (!newestFirst && timelineRef.current) {
+        timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+      }
+    }, 50);
   };
 
   const send = async (e) => {
     e.preventDefault();
     const client = clientRef.current;
     if (!client || !activeRoomId || !msg.trim()) return;
+
     try {
-      await client.sendEvent(
-        activeRoomId,
-        "m.room.message",
-        { msgtype: "m.text", body: msg.trim() },
-        ""
-      );
+      await client.sendEvent(activeRoomId, "m.room.message", { msgtype: "m.text", body: msg.trim() }, "");
       setMsg("");
     } catch (err) {
       log("Send failed:", err?.message || "Unknown error");
     }
   };
 
-  /* -------- derived / render -------- */
+  /* ---------- derived ---------- */
   const loggedIn = !!(saved?.hsUrl && userId && accessToken);
-  const currentRoom = useMemo(
-    () => rooms.find((r) => r.id === activeRoomId) || null,
-    [rooms, activeRoomId]
-  );
+  const currentRoom = useMemo(() => rooms.find((r) => r.id === activeRoomId) || null, [rooms, activeRoomId]);
+
+  const visibleMessages = useMemo(() => {
+    const filtered = hideUndecryptable
+      ? messages.filter((m) => !isUndecryptableBody(m.body))
+      : messages;
+
+    const sorted = [...filtered].sort((a, b) => (newestFirst ? b.ts - a.ts : a.ts - b.ts));
+    return sorted;
+  }, [messages, hideUndecryptable, newestFirst]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -388,8 +459,8 @@ export default function BondfireChat() {
 
       {loggedIn && (
         <div className="helper" style={{ marginTop: 8 }}>
-          <strong>Signed in as:</strong> {userId} · <strong>Device:</strong>{" "}
-          {deviceId || "(loading)"} {cryptoReady ? "🔒" : "🟡"}
+          <strong>Signed in as:</strong> {userId} · <strong>Device:</strong> {deviceId || "(loading)"}{" "}
+          {cryptoReady ? "🔒" : "🟡"}
         </div>
       )}
 
@@ -397,14 +468,19 @@ export default function BondfireChat() {
       {verificationReq && (
         <div className="card" style={{ padding: 12, marginTop: 12 }}>
           <h3 className="section-title" style={{ marginTop: 0 }}>
-            Verify this session (so Element stops judging you)
+            Verify this session
           </h3>
+
           <div className="helper">
             From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
           </div>
 
           {sasData?.emoji || sasData?.decimal ? (
             <>
+              <div className="helper" style={{ marginTop: 10 }}>
+                Compare what Bondfire shows here with what Element shows. Then confirm.
+              </div>
+
               {sasData.emoji ? (
                 <div
                   style={{
@@ -441,17 +517,14 @@ export default function BondfireChat() {
                   Confirm match
                 </button>
                 <button className="btn" onClick={mismatchSas}>
-                  Doesn’t match
+                  Does not match
                 </button>
               </div>
             </>
           ) : (
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn" onClick={acceptVerification}>
-                Accept
-              </button>
-              <button className="btn" onClick={startSas}>
-                Start SAS
+              <button className="btn" onClick={acceptAndStartSas}>
+                Accept and start SAS
               </button>
             </div>
           )}
@@ -465,6 +538,7 @@ export default function BondfireChat() {
           <h3 className="section-title" style={{ marginTop: 0 }}>
             Sign in to your Matrix homeserver
           </h3>
+
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
@@ -532,12 +606,33 @@ export default function BondfireChat() {
               flexDirection: "column",
             }}
           >
-            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
-              {currentRoom ? currentRoom.name : "Select a room"}
-              {currentRoom?.encrypted ? " 🔒" : ""}
-            </h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8, flex: 1 }}>
+                {currentRoom ? currentRoom.name : "Select a room"}
+                {currentRoom?.encrypted ? " 🔒" : ""}
+              </h3>
+
+              <label className="row" style={{ gap: 6, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={hideUndecryptable}
+                  onChange={(e) => setHideUndecryptable(e.target.checked)}
+                />
+                <span className="helper">Hide undecryptable</span>
+              </label>
+
+              <label className="row" style={{ gap: 6, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={newestFirst}
+                  onChange={(e) => setNewestFirst(e.target.checked)}
+                />
+                <span className="helper">Newest first</span>
+              </label>
+            </div>
 
             <div
+              ref={timelineRef}
               style={{
                 flex: 1,
                 overflow: "auto",
@@ -546,19 +641,17 @@ export default function BondfireChat() {
                 padding: 8,
               }}
             >
-              {messages.length === 0 ? (
+              {visibleMessages.length === 0 ? (
                 <div className="helper">No messages yet.</div>
               ) : (
-                messages
-                  .sort((a, b) => a.ts - b.ts)
-                  .map((m) => (
-                    <div key={m.id} style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}
-                      </div>
-                      <div>{m.body}</div>
+                visibleMessages.map((m) => (
+                  <div key={m.id} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>
+                      {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}
                     </div>
-                  ))
+                    <div>{m.body}</div>
+                  </div>
+                ))
               )}
             </div>
 

@@ -9,22 +9,26 @@ function authFetch(path, opts = {}) {
   const token =
     localStorage.getItem("bf_auth_token") ||
     sessionStorage.getItem("bf_auth_token");
+
   const url = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+
   const headers = {
     "Content-Type": "application/json",
     ...(opts.headers || {}),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
+
   return fetch(url, {
     ...opts,
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   }).then(async (r) => {
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.ok === false)
+    if (!r.ok || j.ok === false) {
       throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    }
     return j;
   });
 }
@@ -51,9 +55,10 @@ export default function Settings() {
   const loadInvites = React.useCallback(async () => {
     if (!orgId) return;
     try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "GET",
-      });
+      const r = await authFetch(
+        `/api/orgs/${encodeURIComponent(orgId)}/invites`,
+        { method: "GET" }
+      );
       setInvites(Array.isArray(r.invites) ? r.invites : []);
     } catch (e) {
       setInviteMsg(e.message || "Failed to load invites");
@@ -69,15 +74,20 @@ export default function Settings() {
     setInviteBusy(true);
     setInviteMsg("");
     try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "POST",
-        body: { role: "member", expiresInDays: 14, maxUses: 1 },
-      });
+      const r = await authFetch(
+        `/api/orgs/${encodeURIComponent(orgId)}/invites`,
+        {
+          method: "POST",
+          body: { role: "member", expiresInDays: 14, maxUses: 1 },
+        }
+      );
+
       if (r?.invite) {
         setInvites((prev) => [r.invite, ...prev]);
       } else {
         await loadInvites();
       }
+
       setInviteMsg("Invite created.");
       setTimeout(() => setInviteMsg(""), 1200);
     } catch (e) {
@@ -97,7 +107,6 @@ export default function Settings() {
     }
   };
 
-
   /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
@@ -105,8 +114,7 @@ export default function Settings() {
   React.useEffect(() => {
     const s = readJSON(orgSettingsKey(orgId));
     if (s.name) setOrgName(s.name);
-    if (s.logoDataUrl || s.logoUrl)
-      setLogoDataUrl(s.logoDataUrl || s.logoUrl);
+    if (s.logoDataUrl || s.logoUrl) setLogoDataUrl(s.logoDataUrl || s.logoUrl);
   }, [orgId]);
 
   const onLogo = (e) => {
@@ -121,10 +129,11 @@ export default function Settings() {
     const key = orgSettingsKey(orgId);
     const prev = readJSON(key);
     writeJSON(key, { ...prev, name: (orgName || "").trim(), logoDataUrl });
-    // notify overview/header, etc.
+
     window.dispatchEvent(
       new CustomEvent("bf:org_settings_changed", { detail: { orgId } })
     );
+
     alert("Organization settings saved.");
   };
 
@@ -133,12 +142,9 @@ export default function Settings() {
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [about, setAbout] = React.useState("");
-  const [features, setFeatures] = React.useState(""); // lines
-  const [links, setLinks] = React.useState(""); // "Text | URL" lines
+  const [features, setFeatures] = React.useState("");
+  const [links, setLinks] = React.useState("");
   const [msg, setMsg] = React.useState("");
-
-  // optional: if you already know a slug, you could fetch current config here.
-  // We rely on Save/Generate flow to populate fields.
 
   const genSlug = async () => {
     setMsg("");
@@ -171,34 +177,30 @@ export default function Settings() {
         links: (links || "")
           .split("\n")
           .map((line) => {
-            const [text, url] = line
-              .split("|")
-              .map((s) => (s || "").trim());
+            const [text, url] = line.split("|").map((s) => (s || "").trim());
             return url ? { text: text || url, url } : null;
           })
           .filter(Boolean),
       };
+
       const r = await authFetch(
         `/api/orgs/${encodeURIComponent(orgId)}/public/save`,
         { method: "POST", body: payload }
       );
-      // reflect server-cleaned values (slug may change)
+
       setSlug(r.public?.slug || payload.slug);
       setTitle(r.public?.title ?? payload.title);
       setAbout(r.public?.about ?? payload.about);
       setFeatures(
-        Array.isArray(r.public?.features)
-          ? r.public.features.join("\n")
-          : features
+        Array.isArray(r.public?.features) ? r.public.features.join("\n") : features
       );
       setLinks(
         Array.isArray(r.public?.links)
-          ? r.public.links
-              .map((l) => `${l.text || l.url} | ${l.url}`)
-              .join("\n")
+          ? r.public.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
           : links
       );
       setEnabled(!!r.public?.enabled);
+
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -210,6 +212,75 @@ export default function Settings() {
 
   return (
     <div className="grid" style={{ gap: 16, padding: 16 }}>
+      {/* ---------- Invites ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Invites</h2>
+        <p className="helper">
+          Generate invite codes so someone can join this org.
+        </p>
+
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
+            {inviteBusy ? "Working…" : "Generate invite"}
+          </button>
+          <button className="btn" onClick={loadInvites} disabled={inviteBusy}>
+            Refresh
+          </button>
+
+          {inviteMsg && (
+            <span
+              className={
+                inviteMsg.toLowerCase().includes("copied") ||
+                inviteMsg.toLowerCase().includes("created")
+                  ? "success"
+                  : "error"
+              }
+            >
+              {inviteMsg}
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          {invites.length === 0 ? (
+            <div className="helper">No invites yet.</div>
+          ) : (
+            <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: "45%" }}>Code</th>
+                  <th style={{ width: "15%" }}>Role</th>
+                  <th style={{ width: "20%" }}>Uses</th>
+                  <th style={{ width: "20%" }} />
+                </tr>
+              </thead>
+              <tbody>
+                {invites.map((i) => {
+                  const code = i.code || i.invite || i.id || "";
+                  const role = i.role || "member";
+                  const uses = i.uses ?? 0;
+                  const maxUses = i.max_uses ?? i.maxUses ?? 1;
+                  return (
+                    <tr key={code}>
+                      <td style={{ wordBreak: "break-all" }}>{code}</td>
+                      <td>{role}</td>
+                      <td>
+                        {uses} / {maxUses}
+                      </td>
+                      <td>
+                        <button className="btn" onClick={() => copyInvite(code)}>
+                          Copy
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {/* ---------- Org Basics ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Organization</h2>
@@ -226,12 +297,7 @@ export default function Settings() {
 
           <label className="grid" style={{ gap: 6 }}>
             <span className="helper">Logo</span>
-            <input
-              className="input"
-              type="file"
-              accept="image/*"
-              onChange={onLogo}
-            />
+            <input className="input" type="file" accept="image/*" onChange={onLogo} />
             {logoDataUrl && (
               <img
                 src={logoDataUrl}
@@ -259,14 +325,10 @@ export default function Settings() {
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
         <p className="helper">
-          Share a read‑only page for your org. Only what you enable is shown.
+          Share a read only page for your org. Only what you enable is shown.
         </p>
 
-        <form
-          onSubmit={savePublic}
-          className="grid"
-          style={{ gap: 10, marginTop: 8 }}
-        >
+        <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
           <label className="row" style={{ gap: 8, alignItems: "center" }}>
             <input
               type="checkbox"
@@ -286,22 +348,13 @@ export default function Settings() {
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder="e.g. bondfire-team"
               />
-              <button
-                type="button"
-                className="btn"
-                onClick={genSlug}
-                title="Generate a nice slug"
-              >
+              <button type="button" className="btn" onClick={genSlug} title="Generate a nice slug">
                 Generate
               </button>
             </div>
 
-            {/* Share link visible right in Settings */}
             {slug && (
-              <div
-                className="row"
-                style={{ gap: 8, alignItems: "center", marginTop: 8 }}
-              >
+              <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
                 <span className="helper">Public link:</span>
                 <a
                   className="helper"
@@ -354,9 +407,7 @@ export default function Settings() {
               rows={3}
               value={links}
               onChange={(e) => setLinks(e.target.value)}
-              placeholder={
-                "Website | https://example.org\nTwitter | https://x.com/yourorg"
-              }
+              placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
             />
           </label>
 
@@ -364,15 +415,10 @@ export default function Settings() {
             <button className="btn-red" type="submit">
               Save
             </button>
-            {msg && (
-              <span className={msg.includes("Saved") ? "success" : "error"}>
-                {msg}
-              </span>
-            )}
+            {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
           </div>
         </form>
 
-        {/* Inline preview (no iframe) */}
         {enabled && (
           <div style={{ marginTop: 16 }}>
             <h3 style={{ margin: "8px 0" }}>Preview</h3>
@@ -388,9 +434,7 @@ export default function Settings() {
                   links: (links || "")
                     .split("\n")
                     .map((line) => {
-                      const [text, url] = line
-                        .split("|")
-                        .map((s) => (s || "").trim());
+                      const [text, url] = line.split("|").map((s) => (s || "").trim());
                       return url ? { text: text || url, url } : null;
                     })
                     .filter(Boolean),
