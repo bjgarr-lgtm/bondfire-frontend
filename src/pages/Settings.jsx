@@ -43,6 +43,61 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export default function Settings() {
   const { orgId } = useParams();
 
+  /* ========== INVITES (backend) ========== */
+  const [invites, setInvites] = React.useState([]);
+  const [inviteMsg, setInviteMsg] = React.useState("");
+  const [inviteBusy, setInviteBusy] = React.useState(false);
+
+  const loadInvites = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
+      setInvites(Array.isArray(r.invites) ? r.invites : []);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to load invites");
+    }
+  }, [orgId]);
+
+  React.useEffect(() => {
+    loadInvites();
+  }, [loadInvites]);
+
+  const createInvite = async () => {
+    if (!orgId) return;
+    setInviteBusy(true);
+    setInviteMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
+      if (r?.invite) {
+        setInvites((prev) => [r.invite, ...prev]);
+      } else {
+        await loadInvites();
+      }
+      setInviteMsg("Invite created.");
+      setTimeout(() => setInviteMsg(""), 1200);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to create invite");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const copyInvite = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setInviteMsg("Copied.");
+      setTimeout(() => setInviteMsg(""), 900);
+    } catch {
+      setInviteMsg("Clipboard blocked. Copy it manually.");
+    }
+  };
+
+
   /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
@@ -197,6 +252,66 @@ export default function Settings() {
               Save
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* ---------- Invites ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Invites</h2>
+        <p className="helper">
+          Create a one-time invite code to let someone join this org.
+        </p>
+
+        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn-red"
+            onClick={createInvite}
+            disabled={inviteBusy}
+            title="Create a new invite code"
+          >
+            {inviteBusy ? "Creating…" : "Create invite"}
+          </button>
+          <button type="button" className="btn" onClick={loadInvites}>
+            Refresh
+          </button>
+          {inviteMsg && (
+            <span className={inviteMsg.includes("Failed") ? "error" : "success"}>
+              {inviteMsg}
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          {invites.length === 0 ? (
+            <div className="helper">No invites yet.</div>
+          ) : (
+            <div className="grid" style={{ gap: 8 }}>
+              {invites.map((inv) => {
+                const exp = inv.expires_at ? new Date(inv.expires_at).toLocaleString() : "";
+                const uses = typeof inv.uses === "number" ? inv.uses : 0;
+                const maxUses = typeof inv.max_uses === "number" ? inv.max_uses : inv.maxUses;
+                return (
+                  <div
+                    key={inv.code}
+                    className="card"
+                    style={{ padding: 12, border: "1px solid #222" }}
+                  >
+                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <code style={{ fontSize: 16 }}>{inv.code}</code>
+                      <button type="button" className="btn" onClick={() => copyInvite(inv.code)}>
+                        Copy
+                      </button>
+                      <span className="helper">
+                        Role: {inv.role || "member"} · Uses: {uses}/{maxUses ?? "∞"}
+                        {exp ? ` · Expires: ${exp}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
