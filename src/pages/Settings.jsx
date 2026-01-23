@@ -44,6 +44,15 @@ const readJSON = (k, fallback = {}) => {
 };
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
+function fmtExpires(expiresAt) {
+  if (!expiresAt) return "never";
+  // backend stores seconds or ms depending on implementation; handle both
+  const ms = expiresAt < 10_000_000_000 ? expiresAt * 1000 : expiresAt;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return String(expiresAt);
+  return d.toLocaleString();
+}
+
 export default function Settings() {
   const { orgId } = useParams();
 
@@ -54,6 +63,7 @@ export default function Settings() {
 
   const loadInvites = React.useCallback(async () => {
     if (!orgId) return;
+    setInviteMsg("");
     try {
       const r = await authFetch(
         `/api/orgs/${encodeURIComponent(orgId)}/invites`,
@@ -81,13 +91,11 @@ export default function Settings() {
           body: { role: "member", expiresInDays: 14, maxUses: 1 },
         }
       );
-
       if (r?.invite) {
         setInvites((prev) => [r.invite, ...prev]);
       } else {
         await loadInvites();
       }
-
       setInviteMsg("Invite created.");
       setTimeout(() => setInviteMsg(""), 1200);
     } catch (e) {
@@ -129,11 +137,9 @@ export default function Settings() {
     const key = orgSettingsKey(orgId);
     const prev = readJSON(key);
     writeJSON(key, { ...prev, name: (orgName || "").trim(), logoDataUrl });
-
     window.dispatchEvent(
       new CustomEvent("bf:org_settings_changed", { detail: { orgId } })
     );
-
     alert("Organization settings saved.");
   };
 
@@ -142,8 +148,8 @@ export default function Settings() {
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [about, setAbout] = React.useState("");
-  const [features, setFeatures] = React.useState("");
-  const [links, setLinks] = React.useState("");
+  const [features, setFeatures] = React.useState(""); // lines
+  const [links, setLinks] = React.useState(""); // "Text | URL" lines
   const [msg, setMsg] = React.useState("");
 
   const genSlug = async () => {
@@ -182,7 +188,6 @@ export default function Settings() {
           })
           .filter(Boolean),
       };
-
       const r = await authFetch(
         `/api/orgs/${encodeURIComponent(orgId)}/public/save`,
         { method: "POST", body: payload }
@@ -212,75 +217,6 @@ export default function Settings() {
 
   return (
     <div className="grid" style={{ gap: 16, padding: 16 }}>
-      {/* ---------- Invites ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper">
-          Generate invite codes so someone can join this org.
-        </p>
-
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
-            {inviteBusy ? "Working…" : "Generate invite"}
-          </button>
-          <button className="btn" onClick={loadInvites} disabled={inviteBusy}>
-            Refresh
-          </button>
-
-          {inviteMsg && (
-            <span
-              className={
-                inviteMsg.toLowerCase().includes("copied") ||
-                inviteMsg.toLowerCase().includes("created")
-                  ? "success"
-                  : "error"
-              }
-            >
-              {inviteMsg}
-            </span>
-          )}
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          {invites.length === 0 ? (
-            <div className="helper">No invites yet.</div>
-          ) : (
-            <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
-              <thead>
-                <tr>
-                  <th style={{ width: "45%" }}>Code</th>
-                  <th style={{ width: "15%" }}>Role</th>
-                  <th style={{ width: "20%" }}>Uses</th>
-                  <th style={{ width: "20%" }} />
-                </tr>
-              </thead>
-              <tbody>
-                {invites.map((i) => {
-                  const code = i.code || i.invite || i.id || "";
-                  const role = i.role || "member";
-                  const uses = i.uses ?? 0;
-                  const maxUses = i.max_uses ?? i.maxUses ?? 1;
-                  return (
-                    <tr key={code}>
-                      <td style={{ wordBreak: "break-all" }}>{code}</td>
-                      <td>{role}</td>
-                      <td>
-                        {uses} / {maxUses}
-                      </td>
-                      <td>
-                        <button className="btn" onClick={() => copyInvite(code)}>
-                          Copy
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
       {/* ---------- Org Basics ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Organization</h2>
@@ -321,12 +257,72 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* ---------- Invites ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Invites</h2>
+        <p className="helper" style={{ marginTop: 6 }}>
+          Generate invite codes so someone can join this org.
+        </p>
+
+        <div className="row" style={{ gap: 10, alignItems: "center", marginTop: 10 }}>
+          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
+            {inviteBusy ? "Generating…" : "Generate invite"}
+          </button>
+          <button className="btn" onClick={loadInvites} disabled={inviteBusy}>
+            Refresh
+          </button>
+          {inviteMsg && (
+            <span className={inviteMsg.includes("HTTP") ? "error" : "helper"}>
+              {inviteMsg}
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          {invites.length === 0 ? (
+            <div className="helper">No invites yet.</div>
+          ) : (
+            <div className="grid" style={{ gap: 8 }}>
+              {invites.map((inv) => (
+                <div
+                  key={inv.code}
+                  className="row"
+                  style={{
+                    gap: 10,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    border: "1px solid #222",
+                    borderRadius: 12,
+                    padding: "10px 12px",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, letterSpacing: 1 }}>
+                      {inv.code}
+                    </div>
+                    <div className="helper" style={{ marginTop: 4 }}>
+                      role: {inv.role || "member"} · uses: {inv.uses || 0}/
+                      {inv.max_uses || inv.maxUses || 1} · expires:{" "}
+                      {fmtExpires(inv.expires_at ?? inv.expiresAt)}
+                    </div>
+                  </div>
+
+                  <div className="row" style={{ gap: 8, flexShrink: 0 }}>
+                    <button className="btn" onClick={() => copyInvite(inv.code)}>
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
-        <p className="helper">
-          Share a read only page for your org. Only what you enable is shown.
-        </p>
+        <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
 
         <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
           <label className="row" style={{ gap: 8, alignItems: "center" }}>
