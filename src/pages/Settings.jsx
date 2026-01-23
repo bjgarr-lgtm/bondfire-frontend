@@ -43,68 +43,48 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export default function Settings() {
   const { orgId } = useParams();
 
-  /* ========== INVITES (local for now) ========== */
-  const invitesKey = React.useMemo(() => (orgId ? `bf_org_invites_${orgId}` : null), [orgId]);
-  const inviteRecordKey = (code) => `bf_invite_${code}`;
-
+  /* ========== INVITES (backend) ========== */
   const [invites, setInvites] = React.useState([]);
   const [inviteMsg, setInviteMsg] = React.useState("");
   const [inviteBusy, setInviteBusy] = React.useState(false);
 
-  const loadInvites = React.useCallback(() => {
-    if (!invitesKey) return;
-    const list = readJSON(invitesKey, []);
-    setInvites(Array.isArray(list) ? list : []);
-  }, [invitesKey]);
+  const loadInvites = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
+      setInvites(Array.isArray(r.invites) ? r.invites : []);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to load invites");
+    }
+  }, [orgId]);
 
   React.useEffect(() => {
     loadInvites();
   }, [loadInvites]);
 
-  const makeCode = () =>
-    (Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6)).toUpperCase();
-
   const createInvite = async () => {
-    if (!orgId || !invitesKey) return;
+    if (!orgId) return;
     setInviteBusy(true);
     setInviteMsg("");
     try {
-      const code = makeCode();
-
-      // keep record in localStorage so "Join" can validate it
-      const record = {
-        code,
-        orgId,
-        orgName: (orgName || "").trim(),
-        role: "member",
-        uses: 0,
-        maxUses: 1,
-        expiresAt: Date.now() + 14 * 24 * 60 * 60 * 1000,
-        createdAt: Date.now(),
-      };
-      writeJSON(inviteRecordKey(code), record);
-
-      const next = [{ code }, ...readJSON(invitesKey, [])];
-      writeJSON(invitesKey, next);
-      setInvites(next);
-
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
+      if (r?.invite) {
+        setInvites((prev) => [r.invite, ...prev]);
+      } else {
+        await loadInvites();
+      }
       setInviteMsg("Invite created.");
       setTimeout(() => setInviteMsg(""), 1200);
     } catch (e) {
-      setInviteMsg(e?.message || "Failed to create invite");
+      setInviteMsg(e.message || "Failed to create invite");
     } finally {
       setInviteBusy(false);
     }
-  };
-
-  const revokeInvite = (code) => {
-    if (!invitesKey) return;
-    try { localStorage.removeItem(inviteRecordKey(code)); } catch {}
-    const next = (readJSON(invitesKey, []) || []).filter((x) => (x?.code || x) !== code);
-    writeJSON(invitesKey, next);
-    setInvites(next);
-    setInviteMsg("Invite revoked.");
-    setTimeout(() => setInviteMsg(""), 1200);
   };
 
   const copyInvite = async (code) => {
@@ -116,7 +96,9 @@ export default function Settings() {
       setInviteMsg("Clipboard blocked. Copy it manually.");
     }
   };
-/* ========== ORG BASICS (local) ========== */
+
+
+  /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
 
@@ -273,65 +255,7 @@ export default function Settings() {
         </div>
       </div>
 
-      
-      {/* ---------- Invites ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper">
-          Generate a one‑time code so someone can join this org. (Local only for now, until we wire real backend auth.)
-        </p>
-
-        <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
-            {inviteBusy ? "Working…" : "Generate invite code"}
-          </button>
-          {inviteMsg && (
-            <span className={inviteMsg.includes("Failed") ? "error" : "success"}>{inviteMsg}</span>
-          )}
-        </div>
-
-        {invites.length === 0 ? (
-          <div className="helper" style={{ marginTop: 10 }}>No invites yet.</div>
-        ) : (
-          <div style={{ marginTop: 10, overflowX: "auto" }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th style={{ width: 220 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invites.map((i) => {
-                  const code = i?.code || i;
-                  const rec = readJSON(inviteRecordKey(code), null);
-                  const expired = rec?.expiresAt ? Date.now() > rec.expiresAt : false;
-                  const usedUp = rec ? (rec.uses || 0) >= (rec.maxUses || 1) : false;
-                  const badge = expired ? "expired" : usedUp ? "used" : "active";
-                  return (
-                    <tr key={code}>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <code style={{ fontSize: 14 }}>{code}</code>
-                          <span className="helper">({badge})</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                          <button className="btn" onClick={() => copyInvite(code)}>Copy</button>
-                          <button className="btn" onClick={() => revokeInvite(code)}>Revoke</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-{/* ---------- Public Page ---------- */}
+      {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
         <p className="helper">

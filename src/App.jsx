@@ -22,7 +22,6 @@ import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
 import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
-import Home from "./pages/Home.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
@@ -140,8 +139,8 @@ function Shell() {
 
 
         {/* Landing / Orgs list */}
-        <Route path="/" element={<Home />} />
-        <Route path="/orgs" element={<RequireAuth><OrgDash /></RequireAuth>} />
+        <Route path="/" element={<OrgDash />} />
+        <Route path="/orgs" element={<OrgDash />} />
 
         {/* ORG SPACE (auth-gated) */}
         <Route
