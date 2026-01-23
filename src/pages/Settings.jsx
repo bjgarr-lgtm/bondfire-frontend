@@ -43,48 +43,75 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export default function Settings() {
   const { orgId } = useParams();
 
-  /* ========== INVITES (backend) ========== */
-  const [invites, setInvites] = React.useState([]);
+    /* ========== INVITES (local until backend) ========== */
+  const invitesKey = React.useMemo(() => `bf_org_invites_${orgId}`, [orgId]);
+
+  const readInvites = React.useCallback(() => {
+    const list = readJSON(invitesKey, []);
+    return Array.isArray(list) ? list : [];
+  }, [invitesKey]);
+
+  const [invites, setInvites] = React.useState(() => readInvites());
   const [inviteMsg, setInviteMsg] = React.useState("");
   const [inviteBusy, setInviteBusy] = React.useState(false);
 
-  const loadInvites = React.useCallback(async () => {
-    if (!orgId) return;
-    try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "GET",
-      });
-      setInvites(Array.isArray(r.invites) ? r.invites : []);
-    } catch (e) {
-      setInviteMsg(e.message || "Failed to load invites");
-    }
-  }, [orgId]);
-
   React.useEffect(() => {
-    loadInvites();
-  }, [loadInvites]);
+    setInvites(readInvites());
+  }, [readInvites]);
+
+  const saveInvites = (list) => {
+    writeJSON(invitesKey, list);
+    setInvites(list);
+  };
+
+  const INVITE_MAP_KEY = "bf_invite_map"; // code -> orgId
+
+  const upsertInviteMap = (code) => {
+    const map = readJSON(INVITE_MAP_KEY, {});
+    map[code] = orgId;
+    writeJSON(INVITE_MAP_KEY, map);
+  };
+
+  const removeInviteMap = (code) => {
+    const map = readJSON(INVITE_MAP_KEY, {});
+    delete map[code];
+    writeJSON(INVITE_MAP_KEY, map);
+  };
+
+  const genCode = () =>
+    Math.random().toString(36).slice(2, 8).toUpperCase() +
+    Math.random().toString(36).slice(2, 6).toUpperCase();
 
   const createInvite = async () => {
     if (!orgId) return;
     setInviteBusy(true);
     setInviteMsg("");
     try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "POST",
-        body: { role: "member", expiresInDays: 14, maxUses: 1 },
-      });
-      if (r?.invite) {
-        setInvites((prev) => [r.invite, ...prev]);
-      } else {
-        await loadInvites();
-      }
+      const code = genCode();
+      const invite = {
+        code,
+        role: "member",
+        uses: 0,
+        max_uses: 1,
+        expires_at: Date.now() + 14 * 24 * 60 * 60 * 1000,
+        created_at: Date.now(),
+      };
+      const next = [invite, ...readInvites()];
+      saveInvites(next);
+      upsertInviteMap(code);
       setInviteMsg("Invite created.");
       setTimeout(() => setInviteMsg(""), 1200);
-    } catch (e) {
-      setInviteMsg(e.message || "Failed to create invite");
     } finally {
       setInviteBusy(false);
     }
+  };
+
+  const revokeInvite = (code) => {
+    const next = readInvites().filter((i) => i.code !== code);
+    saveInvites(next);
+    removeInviteMap(code);
+    setInviteMsg("Invite revoked.");
+    setTimeout(() => setInviteMsg(""), 1200);
   };
 
   const copyInvite = async (code) => {
@@ -97,8 +124,7 @@ export default function Settings() {
     }
   };
 
-
-  /* ========== ORG BASICS (local) ========== */
+/* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
   const [logoDataUrl, setLogoDataUrl] = React.useState(null);
 
@@ -255,7 +281,45 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* ---------- Public Page ---------- */}
+      
+      {/* ---------- Invites ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Invites</h2>
+        <p className="helper">
+          Generate a short code someone can paste into the Org Dashboard to join this org.
+          (Local-only for now, so it works even while we&apos;re still pretending a backend exists.)
+        </p>
+
+        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn-red" type="button" onClick={createInvite} disabled={inviteBusy}>
+            {inviteBusy ? "Working…" : "Create invite"}
+          </button>
+          {inviteMsg && (
+            <span className={inviteMsg.includes("Created") || inviteMsg.includes("Copied") || inviteMsg.includes("revoked") ? "success" : "error"}>
+              {inviteMsg}
+            </span>
+          )}
+        </div>
+
+        {invites.length === 0 ? (
+          <div className="helper" style={{ marginTop: 10 }}>No invites yet.</div>
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            {invites.map((i) => (
+              <div key={i.code} className="row" style={{ gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                <code style={{ fontSize: 14 }}>{i.code}</code>
+                <span className="helper">
+                  expires {new Date(i.expires_at).toLocaleDateString()}
+                </span>
+                <button className="btn" type="button" onClick={() => copyInvite(i.code)}>Copy</button>
+                <button className="btn" type="button" onClick={() => revokeInvite(i.code)}>Revoke</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+{/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
         <p className="helper">
