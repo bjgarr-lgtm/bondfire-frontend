@@ -1,6 +1,12 @@
 import { bad } from "./http.js";
 import { verifyJwt } from "./jwt.js";
 
+// Bindings can be named differently across environments.
+// Try a few common ones so we don't explode into a Cloudflare 500 HTML page.
+export function getDb(env) {
+  return env?.BF_DB || env?.DB || env?.db || null;
+}
+
 export async function requireUser({ env, request }) {
   const h = request.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/);
@@ -19,7 +25,10 @@ export async function requireOrgRole({ env, request, orgId, minRole }) {
   const roleRank = { viewer: 1, member: 2, admin: 3, owner: 4 };
   const need = roleRank[minRole || "member"] || 2;
 
-  const row = await env.BF_DB.prepare(
+  const db = getDb(env);
+  if (!db) return { ok: false, resp: bad(500, "NO_DB_BINDING") };
+
+  const row = await db.prepare(
     "SELECT role FROM org_memberships WHERE org_id = ? AND user_id = ?"
   ).bind(orgId, u.user.sub).first();
 
@@ -31,6 +40,12 @@ export async function requireOrgRole({ env, request, orgId, minRole }) {
 
 // Back-compat alias: earlier endpoints used `requireAuth`.
 // Pages Functions bundling fails if an imported name is missing.
-export async function requireAuth(ctx) {
-  return requireUser(ctx);
+export async function requireAuth(arg1, arg2) {
+  // Support both:
+  //   requireAuth({ env, request })
+  //   requireAuth(request, env)
+  if (arg2 && arg1?.headers) {
+    return requireUser({ request: arg1, env: arg2 });
+  }
+  return requireUser(arg1);
 }

@@ -60,9 +60,31 @@ export default function BondfireChat() {
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
 
+  // UI prefs
+  const prefsKey = `bf_chat_prefs_${orgId}`;
+  const prefs0 = readJSON(prefsKey, { hideUndecryptable: true, newestFirst: false });
+  const [hideUndecryptable, setHideUndecryptable] = useState(!!prefs0.hideUndecryptable);
+  const [newestFirst, setNewestFirst] = useState(!!prefs0.newestFirst);
+
   const clientRef = useRef(null);
   const verifierRef = useRef(null);
   const log = (...a) => setStatus(`[${ts()}] ${a.join(" ")}`);
+
+  // persist UI prefs
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        prefsKey,
+        JSON.stringify({ hideUndecryptable, newestFirst })
+      );
+    } catch {}
+  }, [prefsKey, hideUndecryptable, newestFirst]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(prefsKey, JSON.stringify({ hideUndecryptable, newestFirst }));
+    } catch {}
+  }, [prefsKey, hideUndecryptable, newestFirst]);
 
   // IMPORTANT:
   // The crypto store in matrix-js-sdk is tied to a specific device.
@@ -466,6 +488,15 @@ export default function BondfireChat() {
     [rooms, activeRoomId]
   );
 
+  const displayMessages = useMemo(() => {
+    const arr = Array.isArray(messages) ? [...messages] : [];
+    const filtered = hideUndecryptable
+      ? arr.filter((m) => !(m.encrypted && !m.body))
+      : arr;
+    filtered.sort((a, b) => (newestFirst ? b.ts - a.ts : a.ts - b.ts));
+    return filtered;
+  }, [messages, hideUndecryptable, newestFirst]);
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
       <header
@@ -603,6 +634,25 @@ export default function BondfireChat() {
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
+
+            <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+              <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={hideUndecryptable}
+                  onChange={(e) => setHideUndecryptable(e.target.checked)}
+                />
+                <span>Hide undecryptable</span>
+              </label>
+              <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={newestFirst}
+                  onChange={(e) => setNewestFirst(e.target.checked)}
+                />
+                <span>Newest first</span>
+              </label>
+            </div>
             <ul style={{ paddingLeft: 18 }}>
               {rooms.map((r) => (
                 <li key={r.id}>
@@ -645,12 +695,10 @@ export default function BondfireChat() {
                 padding: 8,
               }}
             >
-              {messages.length === 0 ? (
+              {displayMessages.length === 0 ? (
                 <div className="helper">No messages yet.</div>
               ) : (
-                messages
-                  .sort((a, b) => a.ts - b.ts)
-                  .map((m) => (
+                displayMessages.map((m) => (
                     <div key={m.id} style={{ marginBottom: 8 }}>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>
                         {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}

@@ -1,112 +1,119 @@
-import { json, bad, now } from "../../_lib/http";
-import { requireAuth, requireOrgRole } from "../../_lib/auth";
+import { ok, bad } from "../../_lib/http";
+import { requireAuth, requireOrgRole, getDb } from "../../_lib/auth";
 
 function randCode(len = 10) {
-  // URL-friendly, human-copyable-ish.
-  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no O0I1
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoids 0/O/1/I
   let out = "";
-  for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
 }
 
-async function ensureInvitesTable(db) {
-  if (!db) return;
-  const sql = `
-    CREATE TABLE IF NOT EXISTS org_invites (
-      code TEXT PRIMARY KEY,
-      org_id TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member',
-      uses INTEGER NOT NULL DEFAULT 0,
-      max_uses INTEGER NOT NULL DEFAULT 1,
-      expires_at INTEGER,
-      created_by TEXT,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_org_invites_org_id ON org_invites(org_id);
-  `;
-  // Some environments don't expose exec() reliably. prepare().run() is.
-  if (typeof db.exec === "function") {
-    await db.exec(sql);
-  } else {
-    // Split statements very conservatively.
-    for (const stmt of sql.split(";").map((s) => s.trim()).filter(Boolean)) {
-      await db.prepare(`${stmt};`).run();
-    }
-  }
+function toInt(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
-export async function onRequest(context) {
-  const { request, env, params } = context;
+export async function onRequest(ctx) {
+  const { request, env, params } = ctx;
 
-  const user = await requireAuth(context);
-  if (user instanceof Response) return user;
+  const db = getDb(env);
+  if (!db) return bad(500, "NO_DB_BINDING");
+
+  const auth = await requireAuth(ctx);
+  if (!auth.ok) return auth.resp;
 
   const orgId = params.orgId;
-  if (!orgId) return bad("missing orgId", 400);
+  const roleCheck = await requireOrgRole({ env, request, orgId, minRole: "owner" });
+  if (!roleCheck.ok) return roleCheck.resp;
 
-  if (!env.BF_DB) return bad("Server missing BF_DB binding", 500);
+  try {
+    if (request.method === "GET") {
+      const rows = await db
+        .prepare(
+          `SELECT code, role, uses, max_uses, expires_at, created_at
+           FROM invites
+           WHERE org_id = ?
+           ORDER BY created_at DESC
+           LIMIT 50`
+        )
+        .bind(orgId)
+        .all();
 
-  // Only owners/admins can manage codes.
-  const role = await requireOrgRole(env.BF_DB, orgId, user.id, "admin");
-  if (!role) return bad("forbidden", 403);
-
-  await ensureInvitesTable(env.BF_DB);
-
-  if (request.method === "GET") {
-    const { results } = await env.BF_DB
-      .prepare(
-        `SELECT code, role, uses, max_uses, expires_at, created_at
-         FROM org_invites
-         WHERE org_id = ?
-         ORDER BY created_at DESC
-         LIMIT 50`
-      )
-      .bind(orgId)
-      .all();
-    return json({ ok: true, invites: results || [] });
-  }
-
-  if (request.method === "POST") {
-    let body = {};
-    try {
-      body = (await request.json()) || {};
-    } catch {}
-
-    const inviteRole = (body.role || "member").toLowerCase();
-    const maxUses = Math.max(1, Math.min(100, Number(body.maxUses || 1)));
-    const expiresInDays = Number(body.expiresInDays || 14);
-    const expiresAt =
-      expiresInDays > 0 ? now() + Math.floor(expiresInDays * 86400) : null;
-
-    let code = randCode(10);
-    // Retry a few times on collision.
-    for (let i = 0; i < 5; i++) {
-      try {
-        await env.BF_DB
-          .prepare(
-            `INSERT INTO org_invites (code, org_id, role, uses, max_uses, expires_at, created_by, created_at)
-             VALUES (?, ?, ?, 0, ?, ?, ?, ?)`
-          )
-          .bind(code, orgId, inviteRole, maxUses, expiresAt, user.id, now())
-          .run();
-        break;
-      } catch {
-        code = randCode(10);
-      }
+      return ok({
+        invites: (rows.results || []).map((r) => ({
+          code: r.code,
+          role: r.role || "member",
+          uses: toInt(r.uses, 0),
+          max_uses: toInt(r.max_uses, 1),
+          expires_at: r.expires_at ? new Date(r.expires_at).getTime() : null,
+          created_at: r.created_at ? new Date(r.created_at).getTime() : null,
+        })),
+      });
     }
 
-    const invite = {
-      code,
-      role: inviteRole,
-      uses: 0,
-      max_uses: maxUses,
-      expires_at: expiresAt,
-      created_at: now(),
-    };
-    return json({ ok: true, invite });
-  }
+    if (request.method === "POST") {
+      let body = {};
+      try {
+        body = await request.json();
+      } catch {
+        body = {};
+      }
 
-  return bad("method not allowed", 405);
+      const role = (body.role || "member").toString();
+      const maxUses = toInt(body.maxUses ?? body.max_uses ?? body.maxUses, 1) || 1;
+      const expiresInDays = toInt(body.expiresInDays, 14);
+
+      const now = new Date();
+      const expiresAt =
+        expiresInDays && expiresInDays > 0
+          ? new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000)
+          : null;
+
+      // Try a few times to avoid rare collisions.
+      let code = null;
+      for (let i = 0; i < 5; i++) {
+        const candidate = randCode(10);
+        const existing = await db
+          .prepare("SELECT code FROM invites WHERE code = ? LIMIT 1")
+          .bind(candidate)
+          .first();
+        if (!existing) {
+          code = candidate;
+          break;
+        }
+      }
+      if (!code) return bad(500, "INVITE_CODE_COLLISION");
+
+      await db
+        .prepare(
+          `INSERT INTO invites (org_id, code, role, uses, max_uses, expires_at, created_by, created_at)
+           VALUES (?, ?, ?, 0, ?, ?, ?, ?)`
+        )
+        .bind(
+          orgId,
+          code,
+          role,
+          maxUses,
+          expiresAt ? expiresAt.toISOString() : null,
+          auth.user.id,
+          now.toISOString()
+        )
+        .run();
+
+      return ok({
+        invite: {
+          code,
+          role,
+          uses: 0,
+          max_uses: maxUses,
+          expires_at: expiresAt ? expiresAt.getTime() : null,
+          created_at: now.getTime(),
+        },
+      });
+    }
+
+    return bad(405, "Method not allowed");
+  } catch (e) {
+    return bad(500, e?.message || "INVITES_ERROR");
+  }
 }

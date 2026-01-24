@@ -21,9 +21,12 @@ async function ensureTables(db) {
 }
 
 export async function onRequestPost({ request, env }) {
-  const me = await requireAuth(request, env);
-  const db = env.BF_DB;
-  if (!db) return bad(500, "BF_DB is not bound");
+  const auth = await requireAuth(request, env);
+  if (auth.resp) return auth.resp;
+  const me = auth.user;
+
+  const db = env.BF_DB || env.DB || env.db;
+  if (!db) return bad(500, "NO_DB_BINDING");
 
   await ensureTables(db);
 
