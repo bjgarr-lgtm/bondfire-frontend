@@ -2,7 +2,8 @@ import { json, bad, now } from "../_lib/http";
 import { requireAuth } from "../_lib/auth";
 
 async function ensureInvitesTable(db) {
-  await db.exec(`
+  if (!db) return;
+  const sql = `
     CREATE TABLE IF NOT EXISTS org_invites (
       code TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
@@ -14,7 +15,12 @@ async function ensureInvitesTable(db) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_org_invites_org_id ON org_invites(org_id);
-  `);
+  `;
+  try {
+    await db.exec(sql);
+  } catch {
+    await db.prepare(sql).run();
+  }
 }
 
 export async function onRequest(context) {

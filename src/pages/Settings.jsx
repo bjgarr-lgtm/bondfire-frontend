@@ -27,7 +27,8 @@ function authFetch(path, opts = {}) {
   }).then(async (r) => {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.ok === false) {
-      throw new Error(j.error || j.message || `HTTP ${r.status}`);
+      const err = j.error || j.message || `HTTP ${r.status}`;
+      throw new Error(err);
     }
     return j;
   });
@@ -44,15 +45,6 @@ const readJSON = (k, fallback = {}) => {
 };
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-function fmtExpires(expiresAt) {
-  if (!expiresAt) return "never";
-  // backend stores seconds or ms depending on implementation; handle both
-  const ms = expiresAt < 10_000_000_000 ? expiresAt * 1000 : expiresAt;
-  const d = new Date(ms);
-  if (Number.isNaN(d.getTime())) return String(expiresAt);
-  return d.toLocaleString();
-}
-
 export default function Settings() {
   const { orgId } = useParams();
 
@@ -63,13 +55,12 @@ export default function Settings() {
 
   const loadInvites = React.useCallback(async () => {
     if (!orgId) return;
-    setInviteMsg("");
     try {
-      const r = await authFetch(
-        `/api/orgs/${encodeURIComponent(orgId)}/invites`,
-        { method: "GET" }
-      );
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
       setInvites(Array.isArray(r.invites) ? r.invites : []);
+      setInviteMsg("");
     } catch (e) {
       setInviteMsg(e.message || "Failed to load invites");
     }
@@ -84,20 +75,18 @@ export default function Settings() {
     setInviteBusy(true);
     setInviteMsg("");
     try {
-      const r = await authFetch(
-        `/api/orgs/${encodeURIComponent(orgId)}/invites`,
-        {
-          method: "POST",
-          body: { role: "member", expiresInDays: 14, maxUses: 1 },
-        }
-      );
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
       if (r?.invite) {
         setInvites((prev) => [r.invite, ...prev]);
+        // Make it obvious we actually generated something.
+        setInviteMsg(`Invite created: ${r.invite.code}`);
       } else {
         await loadInvites();
+        setInviteMsg("Invite created.");
       }
-      setInviteMsg("Invite created.");
-      setTimeout(() => setInviteMsg(""), 1200);
     } catch (e) {
       setInviteMsg(e.message || "Failed to create invite");
     } finally {
@@ -148,8 +137,8 @@ export default function Settings() {
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [about, setAbout] = React.useState("");
-  const [features, setFeatures] = React.useState(""); // lines
-  const [links, setLinks] = React.useState(""); // "Text | URL" lines
+  const [features, setFeatures] = React.useState("");
+  const [links, setLinks] = React.useState("");
   const [msg, setMsg] = React.useState("");
 
   const genSlug = async () => {
@@ -192,12 +181,13 @@ export default function Settings() {
         `/api/orgs/${encodeURIComponent(orgId)}/public/save`,
         { method: "POST", body: payload }
       );
-
       setSlug(r.public?.slug || payload.slug);
       setTitle(r.public?.title ?? payload.title);
       setAbout(r.public?.about ?? payload.about);
       setFeatures(
-        Array.isArray(r.public?.features) ? r.public.features.join("\n") : features
+        Array.isArray(r.public?.features)
+          ? r.public.features.join("\n")
+          : features
       );
       setLinks(
         Array.isArray(r.public?.links)
@@ -205,7 +195,6 @@ export default function Settings() {
           : links
       );
       setEnabled(!!r.public?.enabled);
-
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -260,19 +249,17 @@ export default function Settings() {
       {/* ---------- Invites ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper" style={{ marginTop: 6 }}>
-          Generate invite codes so someone can join this org.
-        </p>
+        <p className="helper">Generate invite codes so someone can join this org.</p>
 
-        <div className="row" style={{ gap: 10, alignItems: "center", marginTop: 10 }}>
+        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
             {inviteBusy ? "Generating…" : "Generate invite"}
           </button>
-          <button className="btn" onClick={loadInvites} disabled={inviteBusy}>
+          <button className="btn" type="button" onClick={loadInvites}>
             Refresh
           </button>
           {inviteMsg && (
-            <span className={inviteMsg.includes("HTTP") ? "error" : "helper"}>
+            <span className={inviteMsg.toLowerCase().includes("fail") || inviteMsg.toLowerCase().includes("http") ? "error" : "helper"}>
               {inviteMsg}
             </span>
           )}
@@ -280,37 +267,24 @@ export default function Settings() {
 
         <div style={{ marginTop: 12 }}>
           {invites.length === 0 ? (
-            <div className="helper">No invites yet.</div>
+            <div className="helper">No invites yet</div>
           ) : (
-            <div className="grid" style={{ gap: 8 }}>
+            <div className="grid" style={{ gap: 10 }}>
               {invites.map((inv) => (
                 <div
                   key={inv.code}
-                  className="row"
-                  style={{
-                    gap: 10,
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    border: "1px solid #222",
-                    borderRadius: 12,
-                    padding: "10px 12px",
-                  }}
+                  className="card"
+                  style={{ padding: 12, border: "1px solid #222" }}
                 >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, letterSpacing: 1 }}>
-                      {inv.code}
-                    </div>
-                    <div className="helper" style={{ marginTop: 4 }}>
-                      role: {inv.role || "member"} · uses: {inv.uses || 0}/
-                      {inv.max_uses || inv.maxUses || 1} · expires:{" "}
-                      {fmtExpires(inv.expires_at ?? inv.expiresAt)}
-                    </div>
-                  </div>
-
-                  <div className="row" style={{ gap: 8, flexShrink: 0 }}>
+                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <code style={{ fontSize: 16 }}>{inv.code}</code>
                     <button className="btn" onClick={() => copyInvite(inv.code)}>
                       Copy
                     </button>
+                    <div className="helper" style={{ marginLeft: "auto" }}>
+                      role: {inv.role || "member"} · uses: {inv.uses || 0}/{inv.max_uses || 1}
+                      {inv.expires_at ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}` : ""}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -322,15 +296,11 @@ export default function Settings() {
       {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
-        <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
+        <p className="helper">Share a read‑only page for your org. Only what you enable is shown.</p>
 
         <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
           <label className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
             <span>Enable public page</span>
           </label>
 
@@ -403,7 +373,9 @@ export default function Settings() {
               rows={3}
               value={links}
               onChange={(e) => setLinks(e.target.value)}
-              placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
+              placeholder={
+                "Website | https://example.org\nTwitter | https://x.com/yourorg"
+              }
             />
           </label>
 
