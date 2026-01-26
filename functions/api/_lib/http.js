@@ -15,3 +15,8 @@ export function now() {
 export function uuid() {
   return crypto.randomUUID();
 }
+
+export function ok(data = {}, init = {}) {
+  const payload = (data && typeof data === "object") ? data : { value: data };
+  return json({ ok: true, ...payload }, init);
+}
