@@ -1,68 +1,81 @@
+import { onRequestGet as orgInvitesGet, onRequestPost as orgInvitesPost } from "./orgs/[orgId]/invites.js";
+import { onRequestPost as redeemInvite } from "./invites/redeem.js";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+};
+
+function withCors(resp) {
+  const h = new Headers(resp.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) h.set(k, v);
+  return new Response(resp.body, {
+    status: resp.status,
+    statusText: resp.statusText,
+    headers: h,
+  });
+}
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...CORS_HEADERS,
+    },
+  });
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
 
   const url = new URL(request.url);
-  const segments = Array.isArray(params?.path) ? params.path : (params?.path ? [params.path] : []);
+  const segments = Array.isArray(params?.path)
+    ? params.path
+    : params?.path
+      ? [params.path]
+      : [];
 
-  // Local invite codes (KV backed)
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  // =====================
+  // Local invite routes
+  // =====================
+  // These routes are implemented as Pages Functions in this repo.
+  // If this catch-all ends up handling them (common in dev/proxy setups),
+  // we delegate to the real handlers so you don’t get a mystery 500.
+
   // Route: /api/orgs/:orgId/invites  (GET, POST)
-  // This lets the frontend create and list invite codes without requiring changes in the upstream backend.
-  // Requires a KV binding named BF_INVITES (Cloudflare Pages -> Settings -> Functions -> KV bindings).
   if (segments.length === 3 && segments[0] === "orgs" && segments[2] === "invites") {
     const orgId = decodeURIComponent(segments[1] || "");
-    const kv = env.BF_INVITES;
+    const ctx2 = { ...context, params: { ...(context.params || {}), orgId } };
 
-    if (!kv) {
-      return json({ ok: false, error: "Invite storage not configured (BF_INVITES KV binding missing)." }, 500);
-    }
-
-    const key = `org:${orgId}:invites`;
-    const now = Date.now();
-
-    if (request.method === "GET") {
-      const raw = await kv.get(key);
-      const invites = raw ? safeJson(raw, []) : [];
-      // prune expired
-      const pruned = invites.filter((i) => !i.expires_at || i.expires_at > now);
-      if (pruned.length !== invites.length) await kv.put(key, JSON.stringify(pruned));
-      return json({ ok: true, invites: pruned });
-    }
-
-    if (request.method === "POST") {
-      const body = await request.json().catch(() => ({}));
-      const role = (body?.role || "member").toString();
-      const expiresInDays = clampInt(body?.expiresInDays, 14, 1, 365);
-      const maxUses = clampInt(body?.maxUses, 1, 1, 100);
-
-      const raw = await kv.get(key);
-      const invites = raw ? safeJson(raw, []) : [];
-
-      const code = makeCode();
-      const invite = {
-        code,
-        role,
-        uses: 0,
-        max_uses: maxUses,
-        expires_at: now + expiresInDays * 24 * 60 * 60 * 1000,
-        created_at: now,
-      };
-
-      invites.unshift(invite);
-      await kv.put(key, JSON.stringify(invites));
-      return json({ ok: true, invite });
-    }
+    if (request.method === "GET") return withCors(await orgInvitesGet(ctx2));
+    if (request.method === "POST") return withCors(await orgInvitesPost(ctx2));
 
     return json({ ok: false, error: "Method not allowed" }, 405);
   }
 
-  const upstreamBase = (env.BACKEND_URL || "").replace(/\/+$/, "");
-  if (!upstreamBase) {
-    return new Response("BACKEND_URL is not set.", { status: 500 });
+  // Route: /api/invites/redeem (POST)
+  if (segments.length === 2 && segments[0] === "invites" && segments[1] === "redeem") {
+    if (request.method === "POST") return withCors(await redeemInvite(context));
+    return json({ ok: false, error: "Method not allowed" }, 405);
   }
 
-  const upstreamUrl = new URL(upstreamBase + "/api/" + segments.map(encodeURIComponent).join("/"));
+  // =====================
+  // Proxy to upstream backend
+  // =====================
+  const upstreamBase = (env.BACKEND_URL || "").replace(/\/+$/, "");
+  if (!upstreamBase) {
+    return json({ ok: false, error: "BACKEND_URL is not set." }, 500);
+  }
 
-  // Copy query string
+  const upstreamUrl = new URL(
+    upstreamBase + "/api/" + segments.map(encodeURIComponent).join("/")
+  );
   upstreamUrl.search = url.search;
 
   // Forward headers (strip host)
@@ -79,39 +92,8 @@ export async function onRequest(context) {
   const res = await fetch(upstreamUrl.toString(), init);
   const outHeaders = new Headers(res.headers);
 
-  // CORS for local dev
-  outHeaders.set("Access-Control-Allow-Origin", "*");
-  outHeaders.set("Access-Control-Allow-Headers", "authorization, content-type");
-  outHeaders.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: outHeaders });
-  }
+  // CORS for cross-origin API_BASE usage
+  for (const [k, v] of Object.entries(CORS_HEADERS)) outHeaders.set(k, v);
 
   return new Response(res.body, { status: res.status, headers: outHeaders });
-}
-
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" },
-  });
-}
-
-function safeJson(s, fallback) {
-  try { return JSON.parse(s); } catch { return fallback; }
-}
-
-function clampInt(v, def, min, max) {
-  const n = Number.parseInt(v, 10);
-  if (!Number.isFinite(n)) return def;
-  return Math.max(min, Math.min(max, n));
-}
-
-function makeCode() {
-  // short, human pasteable, no ambiguous chars
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < 10; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return out;
 }

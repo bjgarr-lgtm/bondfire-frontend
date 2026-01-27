@@ -14,25 +14,54 @@ function getToken() {
 
 async function authFetch(path, opts = {}) {
   const token = getToken();
-  const url = path.startsWith("http")
+
+  const relative = path.startsWith("/") ? path : `/${path}`;
+  const remote = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  // Invites are frequently hosted on Pages Functions even when the rest of the API is elsewhere.
+  // So we try same-origin first for invite endpoints, then fall back to API_BASE.
+  const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
+
   const headers = {
     "Content-Type": "application/json",
     ...(opts.headers || {}),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(url, {
-    ...opts,
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || j.ok === false) {
-    throw new Error(j.error || j.message || `HTTP ${res.status}`);
+  const doReq = async (u) => {
+    const res = await fetch(u, {
+      ...opts,
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok === false) {
+      throw new Error(j.error || j.message || `HTTP ${res.status}`);
+    }
+    return j;
+  };
+
+  // Prefer local functions for invites.
+  if (isInviteEndpoint && API_BASE && remote !== relative) {
+    try {
+      return await doReq(relative);
+    } catch (e) {
+      return await doReq(remote);
+    }
   }
-  return j;
+
+  try {
+    return await doReq(remote);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    // fallback if remote isn't serving this path (or is borked)
+    if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
+      return await doReq(relative);
+    }
+    throw e;
+  }
 }
 
 export default function OrgDash() {
@@ -83,7 +112,7 @@ export default function OrgDash() {
 
   const joinWithInvite = async (e) => {
     e?.preventDefault();
-    const code = (inviteCode || "").trim();
+    const code = (inviteCode || "").trim().toUpperCase();
     if (!code) return;
     setBusy(true);
     setMsg("");

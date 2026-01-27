@@ -48,13 +48,25 @@ function safeIdForEvent(ev) {
 }
 
 function eventToMsg(ev) {
-  const body = ev?.getContent?.()?.body;
+  const content = ev?.getContent?.() || {};
+  const body = content?.body;
+  const msgtype = content?.msgtype;
+
+  // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
+  // and/or provides isDecryptionFailure(). Some homeservers also stuff a human-readable string into body.
+  const undecryptable =
+    !!ev?.isDecryptionFailure?.() ||
+    msgtype === "m.bad.encrypted" ||
+    (typeof body === "string" && /unable to decrypt|decryptionerror/i.test(body));
+
   return {
     id: safeIdForEvent(ev),
     body: typeof body === "string" ? body : "",
     sender: ev?.getSender?.() || "",
     ts: ev?.getTs?.() || Date.now(),
     encrypted: !!ev?.isEncrypted?.(),
+    undecryptable,
+    msgtype: msgtype || "",
   };
 }
 
@@ -248,6 +260,17 @@ export default function BondfireChat() {
         log("Crypto init failed:", e?.message || e);
       }
 
+      // If a verification request already exists (e.g. app reloaded mid-flow),
+      // hydrate it so the UI actually shows something.
+      try {
+        const crypto = client.getCrypto?.();
+        const myUid = client.getUserId?.() || uid;
+        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid);
+        if (pending && pending.length) onVerificationReq(pending[0]);
+      } catch {
+        // ignore
+      }
+
       client.on("sync", (state) => {
         if (state === "PREPARED") {
           setReady(true);
@@ -272,6 +295,43 @@ export default function BondfireChat() {
   }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId]);
 
   /* -------- verification actions -------- */
+  async function requestOwnVerification() {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      setVerifyMsg("");
+      const crypto = client.getCrypto?.();
+      if (!crypto?.requestOwnUserVerification) {
+        setVerifyMsg("This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate.");
+        return;
+      }
+      const req = await crypto.requestOwnUserVerification();
+      setVerificationReq(req);
+      setSasData(null);
+      setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
+    } catch (e) {
+      setVerifyMsg(e?.message || String(e));
+    }
+  }
+
+  function checkPendingVerification() {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const crypto = client.getCrypto?.();
+      const myUid = client.getUserId?.() || saved?.userId || userId;
+      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      if (pending.length) {
+        setVerificationReq(pending[0]);
+        setVerifyMsg("Found an in-progress verification. Continue below.");
+      } else {
+        setVerifyMsg("No in-progress verification found.");
+      }
+    } catch (e) {
+      setVerifyMsg(e?.message || String(e));
+    }
+  }
+
   async function acceptVerification() {
     const req = verificationReq;
     if (!req) return;
@@ -491,7 +551,7 @@ export default function BondfireChat() {
   );
 
   const shownMessages = useMemo(() => {
-    const base = hideUndecryptable ? messages.filter((m) => !!m.body) : messages;
+    const base = hideUndecryptable ? messages.filter((m) => !m.undecryptable) : messages;
     const sorted = [...base].sort((a, b) => a.ts - b.ts);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
@@ -528,67 +588,95 @@ export default function BondfireChat() {
       )}
 
       {/* Verification banner */}
-      {verificationReq && (
+      {loggedIn && (
         <div className="card" style={{ padding: 12, marginTop: 12 }}>
           <h3 className="section-title" style={{ marginTop: 0 }}>
             Verify this session
           </h3>
-          <div className="helper">
-            From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
-          </div>
 
-          {sasData?.emoji || sasData?.decimal ? (
+          {!cryptoReady ? (
+            <div className="helper">
+              Crypto isn’t ready yet, so verification can’t start. If this stays
+              yellow, your homeserver or build is missing E2EE support.
+            </div>
+          ) : verificationReq ? (
             <>
-              {sasData.emoji ? (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    marginTop: 12,
-                  }}
-                >
-                  {sasData.emoji.map(([emoji, name], i) => (
+              <div className="helper">
+                From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
+              </div>
+
+              {sasData?.emoji || sasData?.decimal ? (
+                <>
+                  {sasData.emoji ? (
                     <div
-                      key={i}
                       style={{
                         display: "flex",
-                        flexDirection: "column",
+                        gap: 12,
+                        flexWrap: "wrap",
                         alignItems: "center",
-                        minWidth: 56,
+                        marginTop: 12,
                       }}
                     >
-                      <div style={{ fontSize: 28, lineHeight: 1 }}>{emoji}</div>
-                      <div style={{ fontSize: 11, opacity: 0.8 }}>{name}</div>
+                      {sasData.emoji.map(([emoji, name], i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            minWidth: 56,
+                          }}
+                        >
+                          <div style={{ fontSize: 28, lineHeight: 1 }}>{emoji}</div>
+                          <div style={{ fontSize: 11, opacity: 0.8 }}>{name}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  ) : (
+                    <div className="helper" style={{ marginTop: 12 }}>
+                      Code:{" "}
+                      {Array.isArray(sasData.decimal)
+                        ? sasData.decimal.join(" ")
+                        : ""}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button className="btn" onClick={confirmSas}>
+                      Confirm match
+                    </button>
+                    <button className="btn" onClick={mismatchSas}>
+                      Doesn’t match
+                    </button>
+                  </div>
+                </>
               ) : (
-                <div className="helper" style={{ marginTop: 12 }}>
-                  Code:{" "}
-                  {Array.isArray(sasData.decimal) ? sasData.decimal.join(" ") : ""}
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button className="btn" onClick={acceptVerification}>
+                    Accept
+                  </button>
+                  <button className="btn" onClick={startSas}>
+                    Start SAS
+                  </button>
                 </div>
               )}
-
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button className="btn" onClick={confirmSas}>
-                  Confirm match
+            </>
+          ) : (
+            <>
+              <div className="helper">
+                No active verification request. If you have another device (or
+                another client) for this Matrix account, request verification
+                below or start it from the other side.
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <button className="btn" onClick={requestOwnVerification}>
+                  Request verification
                 </button>
-                <button className="btn" onClick={mismatchSas}>
-                  Doesn’t match
+                <button className="btn" onClick={checkPendingVerification}>
+                  Check pending
                 </button>
               </div>
             </>
-          ) : (
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn" onClick={acceptVerification}>
-                Accept
-              </button>
-              <button className="btn" onClick={startSas}>
-                Start SAS
-              </button>
-            </div>
           )}
 
           {verifyMsg && (

@@ -1,5 +1,8 @@
 export async function ensureSchema(env) {
-  const db = env.DB;
+  // Support multiple binding names across environments.
+  // (This project uses BF_DB in several places.)
+  const db = env?.BF_DB || env?.DB || env?.db;
+  if (!db) throw new Error("NO_DB_BINDING");
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS orgs (

@@ -1,13 +1,23 @@
 import { ensureSchema } from "../_lib/schema";
-import { json } from "../_lib/http";
+import { json, bad } from "../_lib/http";
+import { getDb, requireUser } from "../_lib/auth";
 
 export async function onRequestPost({ request, env }) {
   await ensureSchema(env);
 
-  const { code, userId } = await request.json();
-  const cleanCode = code.trim().toUpperCase();
+  const u = await requireUser({ env, request });
+  if (!u.ok) return u.resp;
+  const userId = u.user?.sub;
+  if (!userId) return bad(401, "UNAUTHORIZED");
 
-  const invite = await env.DB
+  const db = getDb(env);
+  if (!db) return bad(500, "NO_DB_BINDING");
+
+  const body = await request.json().catch(() => ({}));
+  const cleanCode = String(body.code || "").trim().toUpperCase();
+  if (!cleanCode) return json({ ok: false, error: "Missing invite code" }, 400);
+
+  const invite = await db
     .prepare("SELECT * FROM invites WHERE code = ?")
     .bind(cleanCode)
     .first();
@@ -24,19 +34,30 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "Invite exhausted" }, 400);
   }
 
-  await env.DB
+  const role = String(invite.role || "member");
+
+  await db
     .prepare(`
       INSERT OR IGNORE INTO org_memberships
       (org_id, user_id, role, created_at)
       VALUES (?, ?, ?, ?)
     `)
-    .bind(invite.org_id, userId, invite.role, Date.now())
+    .bind(invite.org_id, userId, role, Date.now())
     .run();
 
-  await env.DB
+  await db
     .prepare("UPDATE invites SET uses = uses + 1 WHERE code = ?")
     .bind(cleanCode)
     .run();
 
-  return json({ ok: true, orgId: invite.org_id });
+  const org = await db
+    .prepare("SELECT id, name FROM orgs WHERE id = ?")
+    .bind(invite.org_id)
+    .first();
+
+  return json({
+    ok: true,
+    org: org ? { id: org.id, name: org.name } : { id: invite.org_id },
+    membership: { role },
+  });
 }

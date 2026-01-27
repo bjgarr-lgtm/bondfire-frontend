@@ -4,12 +4,14 @@ import { ensureSchema } from "../../_lib/schema";
 
 export async function onRequestGet(ctx) {
   await ensureSchema(ctx.env);
-  // existing logic
+  // Delegate to the unified handler below.
+  return onRequest(ctx);
 }
 
 export async function onRequestPost(ctx) {
   await ensureSchema(ctx.env);
-  // existing logic
+  // Delegate to the unified handler below.
+  return onRequest(ctx);
 }
 
 function randCode(len = 10) {

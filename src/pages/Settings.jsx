@@ -5,14 +5,25 @@ import PublicPage from "./PublicPage.jsx";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-function authFetch(path, opts = {}) {
-  const token =
-    localStorage.getItem("bf_auth_token") ||
-    sessionStorage.getItem("bf_auth_token");
 
-  const url = path.startsWith("http")
+function getToken() {
+  return (
+    localStorage.getItem("bf_auth_token") ||
+    sessionStorage.getItem("bf_auth_token") ||
+    ""
+  );
+}
+async function authFetch(path, opts = {}) {
+  const token = getToken();
+
+  const relative = path.startsWith("/") ? path : `/${path}`;
+  const remote = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  // Invites are frequently hosted on Pages Functions even when the rest of the API is elsewhere.
+  // So we try same-origin first for invite endpoints, then fall back to API_BASE.
+  const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
 
   const headers = {
     "Content-Type": "application/json",
@@ -20,18 +31,38 @@ function authFetch(path, opts = {}) {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  return fetch(url, {
-    ...opts,
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  }).then(async (r) => {
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.ok === false) {
-      const err = j.error || j.message || `HTTP ${r.status}`;
-      throw new Error(err);
+  const doReq = async (u) => {
+    const res = await fetch(u, {
+      ...opts,
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok === false) {
+      throw new Error(j.error || j.message || `HTTP ${res.status}`);
     }
     return j;
-  });
+  };
+
+  // Prefer local functions for invites.
+  if (isInviteEndpoint && API_BASE && remote !== relative) {
+    try {
+      return await doReq(relative);
+    } catch (e) {
+      return await doReq(remote);
+    }
+  }
+
+  try {
+    return await doReq(remote);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    // fallback if remote isn't serving this path (or is borked)
+    if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
+      return await doReq(relative);
+    }
+    throw e;
+  }
 }
 
 /* ---------- local org settings helpers ---------- */

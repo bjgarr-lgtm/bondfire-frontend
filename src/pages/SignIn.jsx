@@ -59,7 +59,7 @@ async function handleSubmit(e) {
     }
 
     // Optional invite join flow (login mode)
-    const trimmedCode = (inviteCode || "").trim();
+    const trimmedCode = (inviteCode || "").trim().toUpperCase();
     if (trimmedCode) {
       const jRes = await fetch("/api/invites/redeem", {
         method: "POST",

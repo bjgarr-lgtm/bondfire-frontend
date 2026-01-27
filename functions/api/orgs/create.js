@@ -25,6 +25,9 @@ export async function onRequestPost({ request, env }) {
   if (auth.resp) return auth.resp;
   const me = auth.user;
 
+  const meId = me?.sub || me?.id || me?.userId;
+  if (!meId) return bad(401, "UNAUTHORIZED");
+
   const db = env.BF_DB || env.DB || env.db;
   if (!db) return bad(500, "NO_DB_BINDING");
 
@@ -46,7 +49,7 @@ export async function onRequestPost({ request, env }) {
     .prepare(
       "INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)"
     )
-    .bind(orgId, me.id, "owner", t)
+    .bind(orgId, meId, "owner", t)
     .run();
 
   return json({ ok: true, org: { id: orgId, name }, membership: { role: "owner" } });
