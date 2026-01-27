@@ -367,9 +367,18 @@ export default function BondfireChat() {
       verifier.on(VerifierEvent.ShowSas, (sas) => {
         // matrix-js-sdk gives { sas: {emoji|decimal}, confirm, mismatch }
         const payload = sas?.sas || {};
-        const emoji = payload.emoji
-          ? payload.emoji.map((e) => [e.emoji, e.description])
+        const emoji = Array.isArray(payload.emoji)
+          ? payload.emoji
+              .map((e) => {
+                // tuple form: ["🐶", "dog"]
+                if (Array.isArray(e)) return [e[0], e[1]];
+                // object form: { emoji: "🐶", description: "dog" }
+                if (e && typeof e === "object") return [e.emoji, e.description || e.name];
+                return null;
+              })
+              .filter((pair) => Array.isArray(pair) && pair[0])
           : null;
+
         const decimal = payload.decimal ? payload.decimal : null;
 
         setSasData({

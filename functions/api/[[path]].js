@@ -33,8 +33,8 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const segments = Array.isArray(params?.path)
     ? params.path
-    : params?.path
-      ? [params.path]
+    : typeof params?.path === "string"
+      ? params.path.split("/").filter(Boolean)
       : [];
 
   if (request.method === "OPTIONS") {
