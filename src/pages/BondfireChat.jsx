@@ -200,10 +200,24 @@ export default function BondfireChat() {
             ...prev,
             {
               id: ev.getId(),
-              body: ev.getContent()?.body || "",
+              body: (() => {
+                const c = ev.getContent?.() || {};
+                // When crypto can't decrypt, the SDK often marks the event as a decryption failure.
+                const fail =
+                  (typeof ev.isDecryptionFailure === "function" &&
+                    ev.isDecryptionFailure()) ||
+                  c?.msgtype === "m.bad.encrypted" ||
+                  /unable to decrypt/i.test(String(c?.body || ""));
+                if (fail) return "(unable to decrypt)";
+                return c?.body || "";
+              })(),
               sender: ev.getSender(),
               ts: ev.getTs(),
               encrypted: !!ev.isEncrypted?.(),
+              undecryptable:
+                (typeof ev.isDecryptionFailure === "function" &&
+                  ev.isDecryptionFailure()) ||
+                (ev.getContent?.() || {})?.msgtype === "m.bad.encrypted",
             },
           ]);
         }
@@ -456,10 +470,23 @@ export default function BondfireChat() {
     setMessages(
       evs.map((ev) => ({
         id: ev.getId(),
-        body: ev.getContent()?.body || "",
+        body: (() => {
+          const c = ev.getContent?.() || {};
+          const fail =
+            (typeof ev.isDecryptionFailure === "function" &&
+              ev.isDecryptionFailure()) ||
+            c?.msgtype === "m.bad.encrypted" ||
+            /unable to decrypt/i.test(String(c?.body || ""));
+          if (fail) return "(unable to decrypt)";
+          return c?.body || "";
+        })(),
         sender: ev.getSender(),
         ts: ev.getTs(),
         encrypted: !!ev.isEncrypted?.(),
+        undecryptable:
+          (typeof ev.isDecryptionFailure === "function" &&
+            ev.isDecryptionFailure()) ||
+          (ev.getContent?.() || {})?.msgtype === "m.bad.encrypted",
       }))
     );
   };
@@ -491,7 +518,7 @@ export default function BondfireChat() {
   const displayMessages = useMemo(() => {
     const arr = Array.isArray(messages) ? [...messages] : [];
     const filtered = hideUndecryptable
-      ? arr.filter((m) => !(m.encrypted && !m.body))
+      ? arr.filter((m) => !m.undecryptable && !(m.encrypted && !m.body))
       : arr;
     filtered.sort((a, b) => (newestFirst ? b.ts - a.ts : a.ts - b.ts));
     return filtered;

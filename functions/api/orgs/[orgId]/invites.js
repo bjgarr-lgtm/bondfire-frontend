@@ -13,6 +13,26 @@ function toInt(v, fallback) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+async function ensureInvitesTable(db) {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS invites (
+        code TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        uses INTEGER NOT NULL DEFAULT 0,
+        max_uses INTEGER NOT NULL DEFAULT 1,
+        expires_at INTEGER,
+        created_at INTEGER NOT NULL,
+        created_by TEXT NOT NULL
+      )`
+    )
+    .run();
+  await db
+    .prepare(`CREATE INDEX IF NOT EXISTS idx_invites_org ON invites (org_id)`)
+    .run();
+}
+
 export async function onRequest(ctx) {
   const { request, env, params } = ctx;
 
@@ -27,6 +47,7 @@ export async function onRequest(ctx) {
   if (!roleCheck.ok) return roleCheck.resp;
 
   try {
+    await ensureInvitesTable(db);
     if (request.method === "GET") {
       const rows = await db
         .prepare(
