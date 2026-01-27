@@ -68,7 +68,13 @@ export default function BondfireChat() {
 
   const clientRef = useRef(null);
   const verifierRef = useRef(null);
+  const activeRoomIdRef = useRef(null);
   const log = (...a) => setStatus(`[${ts()}] ${a.join(" ")}`);
+
+  // Avoid stale closures in Matrix event handlers.
+  useEffect(() => {
+    activeRoomIdRef.current = activeRoomId;
+  }, [activeRoomId]);
 
   // persist UI prefs
   useEffect(() => {
@@ -194,7 +200,8 @@ export default function BondfireChat() {
       // Live messages
       client.on("Room.timeline", (ev, room, toStartOfTimeline) => {
         if (toStartOfTimeline) return;
-        if (!activeRoomId || room.roomId !== activeRoomId) return;
+        const currentRoomId = activeRoomIdRef.current;
+        if (!currentRoomId || room.roomId !== currentRoomId) return;
         if (ev.getType() === "m.room.message") {
           setMessages((prev) => [
             ...prev,
@@ -214,10 +221,15 @@ export default function BondfireChat() {
               sender: ev.getSender(),
               ts: ev.getTs(),
               encrypted: !!ev.isEncrypted?.(),
-              undecryptable:
-                (typeof ev.isDecryptionFailure === "function" &&
-                  ev.isDecryptionFailure()) ||
-                (ev.getContent?.() || {})?.msgtype === "m.bad.encrypted",
+              undecryptable: (() => {
+                const c = ev.getContent?.() || {};
+                const fail =
+                  (typeof ev.isDecryptionFailure === "function" &&
+                    ev.isDecryptionFailure()) ||
+                  c?.msgtype === "m.bad.encrypted" ||
+                  /unable to decrypt/i.test(String(c?.body || ""));
+                return !!fail;
+              })(),
             },
           ]);
         }

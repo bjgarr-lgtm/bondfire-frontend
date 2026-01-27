@@ -115,9 +115,11 @@ export async function onRequest(ctx) {
           code,
           role,
           maxUses,
-          expiresAt ? expiresAt.toISOString() : null,
-          auth.user.id,
-          now.toISOString()
+          // D1 wants primitives. Store timestamps as epoch ms.
+          expiresAt ? expiresAt.getTime() : null,
+          // our JWT payload should use `sub`, but fall back just in case
+          auth.user?.sub || auth.user?.userId || auth.user?.id || null,
+          now.getTime()
         )
         .run();
 
