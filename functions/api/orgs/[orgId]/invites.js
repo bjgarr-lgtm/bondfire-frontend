@@ -1,5 +1,16 @@
 import { ok, bad } from "../../_lib/http";
 import { requireAuth, requireOrgRole, getDb } from "../../_lib/auth";
+import { ensureSchema } from "../../_lib/schema";
+
+export async function onRequestGet(ctx) {
+  await ensureSchema(ctx.env);
+  // existing logic
+}
+
+export async function onRequestPost(ctx) {
+  await ensureSchema(ctx.env);
+  // existing logic
+}
 
 function randCode(len = 10) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoids 0/O/1/I
