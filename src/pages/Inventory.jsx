@@ -125,9 +125,10 @@ export default function Inventory() {
 
   const cellInputStyle = {
     width: "100%",
-    minWidth: 80,
+    minWidth: 0,
     boxSizing: "border-box",
   };
+
 
   return (
     <div>
@@ -153,21 +154,22 @@ export default function Inventory() {
           style={{ marginTop: 12 }}
         />
 
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
+        <div style={{ marginTop: 12 }}>
           <table
             className="table"
-            style={{ width: "100%", tableLayout: "fixed", minWidth: 980 }}
+            style={{ width: "100%", tableLayout: "fixed" }}
           >
+
             <thead>
               <tr>
-                <th style={{ width: "22%" }}>Name</th>
-                <th style={{ width: "10%" }}>Qty</th>
-                <th style={{ width: "10%" }}>Unit</th>
+                <th style={{ width: "21%" }}>Name</th>
+                <th style={{ width: "8%" }}>Qty</th>
+                <th style={{ width: "9%" }}>Unit</th>
                 <th style={{ width: "14%" }}>Category</th>
                 <th style={{ width: "14%" }}>Location</th>
                 <th style={{ width: "22%" }}>Notes</th>
                 <th style={{ width: "4%" }}>Pub</th>
-                <th style={{ width: "4%" }} />
+                <th style={{ width: "8%" }} />
               </tr>
             </thead>
             <tbody>
@@ -268,10 +270,12 @@ export default function Inventory() {
                   <td>
                     <button
                       className="btn"
+                      style={{ padding: "8px 10px", borderRadius: 10, whiteSpace: "nowrap" }}
                       onClick={() => delItem(i.id).catch(console.error)}
                     >
-                      Delete
+                      Del
                     </button>
+
                   </td>
                 </tr>
               ))}

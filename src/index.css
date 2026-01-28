@@ -14,6 +14,23 @@ a{text-decoration:none;color:inherit}
 button{background:var(--red);border:1px solid var(--red-2);color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
 button:hover{filter:brightness(1.1)}
 input,select,textarea{background:#0e0e0e;border:1px solid var(--border);color:var(--text);padding:10px;border-radius:10px}
+
+/* Make native date and time pickers usable on dark UI */
+input[type="date"], input[type="time"], input[type="datetime-local"]{
+  color-scheme: dark;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator{
+  filter: invert(1) brightness(1.25);
+  opacity: 0.9;
+  cursor: pointer;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover{
+  opacity: 1;
+}
 .table{width:100%;border-collapse:collapse}
 .table th,.table td{border-bottom:1px solid var(--border);padding:10px 8px;text-align:left}
 .app{min-height:100%;display:grid;grid-template-rows:auto 1fr auto}
