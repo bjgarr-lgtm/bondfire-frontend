@@ -23,6 +23,27 @@ function asInt(v, fallback = null) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+// UI sends urgency as free text ("high") but DB stores priority as int (NOT NULL).
+function parsePriority(v, fallback = 0) {
+  if (v == null || v === "") return fallback;
+
+  if (typeof v === "number") {
+    return Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : fallback;
+  }
+
+  const s = asString(v).trim().toLowerCase();
+  if (!s) return fallback;
+
+  const n = Number(s);
+  if (Number.isFinite(n)) return Math.max(0, Math.trunc(n));
+
+  if (["high", "urgent", "h"].includes(s)) return 3;
+  if (["medium", "med", "m"].includes(s)) return 2;
+  if (["low", "l"].includes(s)) return 1;
+
+  return fallback;
+}
+
 async function safeLog(env, payload) {
   try {
     await logActivity(env, payload);
@@ -38,7 +59,21 @@ export async function onRequestGet({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   const r = await env.BF_DB.prepare(
-    `SELECT id, title, description, status, urgency, is_public, created_at, updated_at
+    `SELECT
+       id,
+       title,
+       description,
+       status,
+       priority,
+       CASE
+         WHEN priority >= 3 THEN 'high'
+         WHEN priority = 2 THEN 'medium'
+         WHEN priority = 1 THEN 'low'
+         ELSE ''
+       END AS urgency,
+       is_public,
+       created_at,
+       updated_at
      FROM needs
      WHERE org_id = ?
      ORDER BY COALESCE(updated_at, created_at) DESC`
@@ -57,21 +92,24 @@ export async function onRequestPost({ env, request, params }) {
   const body = await request.json().catch(() => ({}));
 
   const title = asString(body.title).trim();
-  if (!title) return bad("BAD_REQUEST", "Title is required", 400);
+  if (!title) return bad(400, "Title is required");
 
   const description = asString(body.description).trim();
   const status = asString(body.status).trim() || "open";
-  const urgency = body.urgency == null ? null : asInt(body.urgency, null);
+
+  // Always an int, never null, because DB column is NOT NULL
+  const priority = parsePriority(body.priority ?? body.urgency, 0);
+
   const is_public = asBool(body.is_public, false) ? 1 : 0;
 
   const id = uuid();
   const t = now();
 
   await env.BF_DB.prepare(
-    `INSERT INTO needs (id, org_id, title, description, status, urgency, is_public, created_at, updated_at)
+    `INSERT INTO needs (id, org_id, title, description, status, priority, is_public, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, orgId, title, description, status, urgency, is_public, t, t)
+    .bind(id, orgId, title, description, status, priority, is_public, t, t)
     .run();
 
   await safeLog(env, {
@@ -94,17 +132,17 @@ export async function onRequestPut({ env, request, params }) {
 
   const body = await request.json().catch(() => ({}));
   const id = asString(body.id).trim();
-  if (!id) return bad("BAD_REQUEST", "id is required", 400);
+  if (!id) return bad(400, "id is required");
 
   const existing = await env.BF_DB.prepare(
-    `SELECT id, title, description, status, urgency, is_public
+    `SELECT id, title, description, status, priority, is_public
      FROM needs
      WHERE org_id = ? AND id = ?`
   )
     .bind(orgId, id)
     .first();
 
-  if (!existing) return bad("NOT_FOUND", "Need not found", 404);
+  if (!existing) return bad(404, "Need not found");
 
   const nextTitle =
     body.title === undefined ? existing.title : asString(body.title).trim();
@@ -114,8 +152,16 @@ export async function onRequestPut({ env, request, params }) {
       : asString(body.description).trim();
   const nextStatus =
     body.status === undefined ? existing.status : asString(body.status).trim();
-  const nextUrgency =
-    body.urgency === undefined ? existing.urgency : asInt(body.urgency, null);
+
+  const basePriority = Number.isFinite(Number(existing.priority))
+    ? Math.max(0, Math.trunc(Number(existing.priority)))
+    : 0;
+
+  const nextPriority =
+    body.priority === undefined && body.urgency === undefined
+      ? basePriority
+      : parsePriority(body.priority ?? body.urgency, basePriority);
+
   const nextPublic =
     body.is_public === undefined
       ? existing.is_public
@@ -127,14 +173,14 @@ export async function onRequestPut({ env, request, params }) {
 
   await env.BF_DB.prepare(
     `UPDATE needs
-     SET title = ?, description = ?, status = ?, urgency = ?, is_public = ?, updated_at = ?
+     SET title = ?, description = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
      WHERE org_id = ? AND id = ?`
   )
     .bind(
       nextTitle,
       nextDescription,
       nextStatus,
-      nextUrgency,
+      nextPriority,
       nextPublic,
       t,
       orgId,
@@ -145,7 +191,7 @@ export async function onRequestPut({ env, request, params }) {
   await safeLog(env, {
     orgId,
     kind: "need.updated",
-    message: (nextTitle || id),
+    message: nextTitle || id,
     actorUserId: a?.user?.sub || null,
     entityType: "need",
     entityId: id,
@@ -164,12 +210,11 @@ export async function onRequestDelete({ env, request, params }) {
   let id = url.searchParams.get("id");
 
   if (!id) {
-    // allow JSON body too (some clients can't send query params easily)
     const body = await request.json().catch(() => ({}));
     id = asString(body.id).trim();
   }
   id = asString(id).trim();
-  if (!id) return bad("BAD_REQUEST", "id is required", 400);
+  if (!id) return bad(400, "id is required");
 
   const before = await env.BF_DB.prepare(
     `SELECT title FROM needs WHERE org_id = ? AND id = ?`
@@ -184,7 +229,7 @@ export async function onRequestDelete({ env, request, params }) {
   await safeLog(env, {
     orgId,
     kind: "need.deleted",
-    message: (before?.title || id),
+    message: before?.title || id,
     actorUserId: a?.user?.sub || null,
     entityType: "need",
     entityId: id,
