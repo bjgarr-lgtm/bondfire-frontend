@@ -13,6 +13,7 @@ function getToken() {
     ""
   );
 }
+
 async function authFetch(path, opts = {}) {
   const token = getToken();
 
@@ -21,9 +22,10 @@ async function authFetch(path, opts = {}) {
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 
-  // Invites are frequently hosted on Pages Functions even when the rest of the API is elsewhere.
-  // So we try same-origin first for invite endpoints, then fall back to API_BASE.
-  const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
+  // Invites and members may be hosted on Pages Functions even when the rest of the API is elsewhere.
+  // Try same origin first for those endpoints, then fall back to API_BASE.
+  const isSpecialEndpoint =
+    /^\/api\/(orgs\/[^/]+\/(invites|members)|invites\/redeem)\b/.test(relative);
 
   const headers = {
     "Content-Type": "application/json",
@@ -37,18 +39,25 @@ async function authFetch(path, opts = {}) {
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
-    const j = await res.json().catch(() => ({}));
+
+    // Cloudflare 500s sometimes return HTML, not JSON
+    let j = {};
+    try {
+      j = await res.json();
+    } catch {
+      j = {};
+    }
+
     if (!res.ok || j.ok === false) {
       throw new Error(j.error || j.message || `HTTP ${res.status}`);
     }
     return j;
   };
 
-  // Prefer local functions for invites.
-  if (isInviteEndpoint && API_BASE && remote !== relative) {
+  if (isSpecialEndpoint && API_BASE && remote !== relative) {
     try {
       return await doReq(relative);
-    } catch (e) {
+    } catch {
       return await doReq(remote);
     }
   }
@@ -57,8 +66,11 @@ async function authFetch(path, opts = {}) {
     return await doReq(remote);
   } catch (e) {
     const msg = String(e?.message || "");
-    // fallback if remote isn't serving this path (or is borked)
-    if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
+    if (
+      API_BASE &&
+      !path.startsWith("http") &&
+      (msg.includes("HTTP 404") || msg.includes("HTTP 500"))
+    ) {
       return await doReq(relative);
     }
     throw e;
@@ -67,6 +79,7 @@ async function authFetch(path, opts = {}) {
 
 /* ---------- local org settings helpers ---------- */
 const orgSettingsKey = (orgId) => `bf_org_settings_${orgId}`;
+
 const readJSON = (k, fallback = {}) => {
   try {
     return JSON.parse(localStorage.getItem(k) || JSON.stringify(fallback));
@@ -74,6 +87,7 @@ const readJSON = (k, fallback = {}) => {
     return fallback;
   }
 };
+
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 export default function Settings() {
@@ -83,6 +97,53 @@ export default function Settings() {
   const [invites, setInvites] = React.useState([]);
   const [inviteMsg, setInviteMsg] = React.useState("");
   const [inviteBusy, setInviteBusy] = React.useState(false);
+
+  const loadInvites = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "GET",
+      });
+      setInvites(Array.isArray(r.invites) ? r.invites : []);
+      setInviteMsg("");
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to load invites");
+    }
+  }, [orgId]);
+
+  const createInvite = async () => {
+    if (!orgId) return;
+    setInviteBusy(true);
+    setInviteMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "POST",
+        body: { role: "member", expiresInDays: 14, maxUses: 1 },
+      });
+
+      if (r?.invite) {
+        setInvites((prev) => [r.invite, ...prev]);
+        setInviteMsg(`Invite created: ${r.invite.code}`);
+      } else {
+        await loadInvites();
+        setInviteMsg("Invite created.");
+      }
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to create invite");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const copyInvite = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setInviteMsg("Copied.");
+      setTimeout(() => setInviteMsg(""), 900);
+    } catch {
+      setInviteMsg("Clipboard blocked. Copy it manually.");
+    }
+  };
 
   /* ========== MEMBERS + ROLES (backend, admin only) ========== */
   const [members, setMembers] = React.useState([]);
@@ -101,7 +162,6 @@ export default function Settings() {
       setMembersAllowed(true);
     } catch (e) {
       const msg = String(e?.message || "");
-      // Non admins should not see scary errors
       if (msg.includes("INSUFFICIENT_ROLE") || msg.includes("NOT_A_MEMBER")) {
         setMembersAllowed(false);
         setMembers([]);
@@ -119,7 +179,6 @@ export default function Settings() {
     if (!userId) return;
     if (nextRole === currentRole) return;
 
-    // Keep the “oops I deleted production” vibes out of role changes
     if (currentRole === "owner" && nextRole !== "owner") {
       const ok = confirm(`Demote owner ${email || userId} to ${nextRole}?`);
       if (!ok) return;
@@ -146,11 +205,10 @@ export default function Settings() {
     }
   };
 
-  const removeMember = async (userId, role, email) => {
+  const removeMember = async (userId, email) => {
     if (!orgId) return;
     if (!userId) return;
 
-    // Avoid oops clicks
     const ok = confirm(`Remove ${email || userId} from this org?`);
     if (!ok) return;
 
@@ -171,139 +229,10 @@ export default function Settings() {
     }
   };
 
-
-  const loadInvites = React.useCallback(async () => {
-    if (!orgId) return;
-    try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "GET",
-      });
-      setInvites(Array.isArray(r.invites) ? r.invites : []);
-      setInviteMsg("");
-    } catch (e) {
-      setInviteMsg(e.message || "Failed to load invites");
-    }
-  }, [orgId]);
-
   React.useEffect(() => {
     loadInvites();
     loadMembers();
   }, [loadInvites, loadMembers]);
-
-
-  const createInvite = async () => {
-    if (!orgId) return;
-    setInviteBusy(true);
-    setInviteMsg("");
-    try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
-        method: "POST",
-        body: { role: "member", expiresInDays: 14, maxUses: 1 },
-      });
-      if (r?.invite) {
-        setInvites((prev) => [r.invite, ...prev]);
-        // Make it obvious we actually generated something.
-        setInviteMsg(`Invite created: ${r.invite.code}`);
-      } else {
-        await loadInvites();
-        setInviteMsg("Invite created.");
-      }
-    } catch (e) {
-      setInviteMsg(e.message || "Failed to create invite");
-    } finally {
-      setInviteBusy(false);
-    }
-  };
-
-  const copyInvite = async (code) => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setInviteMsg("Copied.");
-      setTimeout(() => setInviteMsg(""), 900);
-    } catch {
-      setInviteMsg("Clipboard blocked. Copy it manually.");
-    }
-  };
-
-      {/* ---------- Members + Roles (admin only) ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Members and Roles</h2>
-
-        {!membersAllowed ? (
-          <div className="helper">
-            Admins and owners can manage membership roles.
-            {membersMsg ? <div className="error" style={{ marginTop: 8 }}>{membersMsg}</div> : null}
-          </div>
-        ) : (
-          <>
-            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
-                {membersBusy ? "Refreshing…" : "Refresh"}
-              </button>
-              {membersMsg ? (
-                <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
-                  {membersMsg}
-                </span>
-              ) : null}
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              {members.length === 0 ? (
-                <div className="helper">No members found.</div>
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Email</th>
-                      <th>Name</th>
-                      <th>Role</th>
-                      <th>Remove</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m) => (
-                      <tr key={m.userId}>
-                        <td><code>{m.email || m.userId}</code></td>
-                        <td>{m.name || ""}</td>
-                        <td>
-                          <select
-                            className="input"
-                            defaultValue={m.role || "member"}
-                            onChange={(e) =>
-                              setMemberRole(m.userId, e.target.value, m.role, m.email)
-                            }
-                            disabled={membersBusy}
-                          >
-                            <option value="viewer">viewer</option>
-                            <option value="member">member</option>
-                            <option value="admin">admin</option>
-                            <option value="owner">owner</option>
-                          </select>
-                        </td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {m.role === "owner" ? (
-                            <span className="helper">owner</span>
-                          ) : (
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => removeMember(m.userId, m.role, m.email)}
-                              disabled={membersBusy}
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
 
   /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
@@ -327,9 +256,7 @@ export default function Settings() {
     const key = orgSettingsKey(orgId);
     const prev = readJSON(key);
     writeJSON(key, { ...prev, name: (orgName || "").trim(), logoDataUrl });
-    window.dispatchEvent(
-      new CustomEvent("bf:org_settings_changed", { detail: { orgId } })
-    );
+    window.dispatchEvent(new CustomEvent("bf:org_settings_changed", { detail: { orgId } }));
     alert("Organization settings saved.");
   };
 
@@ -345,10 +272,9 @@ export default function Settings() {
   const genSlug = async () => {
     setMsg("");
     try {
-      const r = await authFetch(
-        `/api/orgs/${encodeURIComponent(orgId)}/public/generate`,
-        { method: "POST" }
-      );
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/generate`, {
+        method: "POST",
+      });
       setSlug(r.public?.slug || "");
       setMsg("Generated new link.");
       setTimeout(() => setMsg(""), 1200);
@@ -378,17 +304,17 @@ export default function Settings() {
           })
           .filter(Boolean),
       };
-      const r = await authFetch(
-        `/api/orgs/${encodeURIComponent(orgId)}/public/save`,
-        { method: "POST", body: payload }
-      );
+
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/save`, {
+        method: "POST",
+        body: payload,
+      });
+
       setSlug(r.public?.slug || payload.slug);
       setTitle(r.public?.title ?? payload.title);
       setAbout(r.public?.about ?? payload.about);
       setFeatures(
-        Array.isArray(r.public?.features)
-          ? r.public.features.join("\n")
-          : features
+        Array.isArray(r.public?.features) ? r.public.features.join("\n") : features
       );
       setLinks(
         Array.isArray(r.public?.links)
@@ -396,6 +322,7 @@ export default function Settings() {
           : links
       );
       setEnabled(!!r.public?.enabled);
+
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -460,7 +387,14 @@ export default function Settings() {
             Refresh
           </button>
           {inviteMsg && (
-            <span className={inviteMsg.toLowerCase().includes("fail") || inviteMsg.toLowerCase().includes("http") ? "error" : "helper"}>
+            <span
+              className={
+                inviteMsg.toLowerCase().includes("fail") ||
+                inviteMsg.toLowerCase().includes("http")
+                  ? "error"
+                  : "helper"
+              }
+            >
               {inviteMsg}
             </span>
           )}
@@ -472,11 +406,7 @@ export default function Settings() {
           ) : (
             <div className="grid" style={{ gap: 10 }}>
               {invites.map((inv) => (
-                <div
-                  key={inv.code}
-                  className="card"
-                  style={{ padding: 12, border: "1px solid #222" }}
-                >
+                <div key={inv.code} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                   <div className="row" style={{ gap: 8, alignItems: "center" }}>
                     <code style={{ fontSize: 16 }}>{inv.code}</code>
                     <button className="btn" onClick={() => copyInvite(inv.code)}>
@@ -494,14 +424,101 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* ---------- Members + Roles (admin only) ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Members and Roles</h2>
+
+        {!membersAllowed ? (
+          <div className="helper">
+            Admins and owners can manage membership roles.
+            {membersMsg ? (
+              <div className="error" style={{ marginTop: 8 }}>
+                {membersMsg}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
+                {membersBusy ? "Refreshing…" : "Refresh"}
+              </button>
+              {membersMsg ? (
+                <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
+                  {membersMsg}
+                </span>
+              ) : null}
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              {members.length === 0 ? (
+                <div className="helper">No members found.</div>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th>Remove</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.map((m) => (
+                      <tr key={m.userId}>
+                        <td>
+                          <code>{m.email || m.userId}</code>
+                        </td>
+                        <td>{m.name || ""}</td>
+                        <td>
+                          <select
+                            className="input"
+                            value={m.role || "member"}
+                            onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
+                            disabled={membersBusy}
+                          >
+                            <option value="viewer">viewer</option>
+                            <option value="member">member</option>
+                            <option value="admin">admin</option>
+                            <option value="owner">owner</option>
+                          </select>
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {m.role === "owner" ? (
+                            <span className="helper">owner</span>
+                          ) : (
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => removeMember(m.userId, m.email)}
+                              disabled={membersBusy}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
       {/* ---------- Public Page ---------- */}
       <div className="card" style={{ padding: 16 }}>
         <h2 style={{ marginTop: 0 }}>Public Page</h2>
-        <p className="helper">Share a read‑only page for your org. Only what you enable is shown.</p>
+        <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
 
         <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
           <label className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
             <span>Enable public page</span>
           </label>
 
@@ -574,9 +591,7 @@ export default function Settings() {
               rows={3}
               value={links}
               onChange={(e) => setLinks(e.target.value)}
-              placeholder={
-                "Website | https://example.org\nTwitter | https://x.com/yourorg"
-              }
+              placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
             />
           </label>
 
