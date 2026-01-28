@@ -242,9 +242,6 @@ export default function Overview() {
             <button className="btn" onClick={() => nav("meetings")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            Notes and decisions, tied to people and needs.
-          </div>
         </div>
 
         {/* Recent Activity */}
