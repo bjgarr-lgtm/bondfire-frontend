@@ -1,102 +1,113 @@
 import { json } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 
-function extractUuid(s) {
-  const m = String(s || "").match(
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i
-  );
-  return m ? m[0] : null;
-}
-
-function kindToEntityTable(kind) {
-  const k = String(kind || "").toLowerCase();
-  if (k.startsWith("need.")) return { table: "needs", titleCol: "title" };
-  if (k.startsWith("person.")) return { table: "people", titleCol: "name" };
-  if (k.startsWith("inventory.")) return { table: "inventory", titleCol: "name" };
-  if (k.startsWith("meeting.")) return { table: "meetings", titleCol: "title" };
-  return null;
-}
-
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
-  const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
-  if (!a.ok) return a.resp;
 
-  const people = await env.BF_DB.prepare(
-    "SELECT COUNT(*) as c FROM people WHERE org_id = ?"
-  ).bind(orgId).first();
+  const gate = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
+  if (!gate.ok) return gate.resp;
 
-  const needsOpen = await env.BF_DB.prepare(
-    "SELECT COUNT(*) as c FROM needs WHERE org_id = ? AND status = 'open'"
-  ).bind(orgId).first();
-
-  const needsAll = await env.BF_DB.prepare(
-    "SELECT COUNT(*) as c FROM needs WHERE org_id = ?"
-  ).bind(orgId).first();
-
-  const inventory = await env.BF_DB.prepare(
-    "SELECT COUNT(*) as c FROM inventory WHERE org_id = ?"
-  ).bind(orgId).first();
+  const db = env.BF_DB;
+  if (!db) return json({ ok: false, error: "NO_DB_BINDING" }, 500);
 
   const nowMs = Date.now();
-  const meetingsUpcoming = await env.BF_DB.prepare(
-    "SELECT COUNT(*) as c FROM meetings WHERE org_id = ? AND (starts_at IS NULL OR starts_at >= ?)"
-  ).bind(orgId, nowMs).first();
 
-  // Pull raw activity
-  const activityRes = await env.BF_DB.prepare(
-    "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 10"
-  ).bind(orgId).all();
+  const peopleCount = await db
+    .prepare("SELECT COUNT(*) as c FROM people WHERE org_id = ?")
+    .bind(orgId)
+    .first();
 
-  const raw = activityRes?.results || [];
+  const needsOpen = await db
+    .prepare("SELECT COUNT(*) as c FROM needs WHERE org_id = ? AND status = 'open'")
+    .bind(orgId)
+    .first();
 
-  // Enrich with entity titles when possible.
-  // Strategy:
-  // - Try to extract UUID from message.
-  // - Infer entity table from kind prefix.
-  // - Query that table for title/name if it still exists.
-  //
-  // Deleted entities won't exist anymore. That is fine.
-  // We will still provide entity_id so frontend can show short id.
-  const enriched = [];
-  for (const row of raw) {
-    const entity_id = extractUuid(row.message);
-    const info = kindToEntityTable(row.kind);
+  const needsAll = await db
+    .prepare("SELECT COUNT(*) as c FROM needs WHERE org_id = ?")
+    .bind(orgId)
+    .first();
 
-    let entity_title = null;
+  const inventoryCount = await db
+    .prepare("SELECT COUNT(*) as c FROM inventory WHERE org_id = ?")
+    .bind(orgId)
+    .first();
 
-    if (entity_id && info) {
-      try {
-        const found = await env.BF_DB.prepare(
-          `SELECT ${info.titleCol} as t FROM ${info.table} WHERE org_id = ? AND id = ?`
-        ).bind(orgId, entity_id).first();
+  const meetingsUpcoming = await db
+    .prepare(
+      "SELECT COUNT(*) as c FROM meetings WHERE org_id = ? AND (starts_at IS NULL OR starts_at >= ?)"
+    )
+    .bind(orgId, nowMs)
+    .first();
 
-        if (found && found.t != null) {
-          entity_title = String(found.t || "").trim() || null;
-        }
-      } catch {
-        // ignore enrichment errors; activity still returns
-      }
-    }
+  // Small previews for the dashboard cards
+  const people = await db
+    .prepare(
+      "SELECT id, name, email FROM people WHERE org_id = ? ORDER BY created_at DESC LIMIT 5"
+    )
+    .bind(orgId)
+    .all();
 
-    enriched.push({
-      ...row,
-      entity_id: entity_id || null,
-      entity_title,
-    });
-  }
+  const inventory = await db
+    .prepare(
+      "SELECT id, name, qty, unit FROM inventory WHERE org_id = ? ORDER BY created_at DESC LIMIT 5"
+    )
+    .bind(orgId)
+    .all();
+
+  const needs = await db
+    .prepare(
+      "SELECT id, title, status FROM needs WHERE org_id = ? ORDER BY created_at DESC LIMIT 5"
+    )
+    .bind(orgId)
+    .all();
+
+  const meetings = await db
+    .prepare(
+      `SELECT id, title, starts_at, ends_at, location
+       FROM meetings
+       WHERE org_id = ? AND (starts_at IS NULL OR starts_at >= ?)
+       ORDER BY
+         CASE WHEN starts_at IS NULL THEN 1 ELSE 0 END,
+         starts_at ASC,
+         created_at DESC
+       LIMIT 5`
+    )
+    .bind(orgId, nowMs)
+    .all();
+
+  // More useful activity: include actor info if present
+  const activity = await db
+    .prepare(
+      `SELECT
+         a.id,
+         a.kind,
+         a.message,
+         a.actor_user_id,
+         u.email AS actor_email,
+         u.name AS actor_name,
+         a.created_at
+       FROM activity a
+       LEFT JOIN users u ON u.id = a.actor_user_id
+       WHERE a.org_id = ?
+       ORDER BY a.created_at DESC
+       LIMIT 25`
+    )
+    .bind(orgId)
+    .all();
 
   return json({
     ok: true,
     counts: {
-      people: people?.c || 0,
-      needsOpen: needsOpen?.c || 0,
-      needsAll: needsAll?.c || 0,
-      inventory: inventory?.c || 0,
-      meetingsUpcoming: meetingsUpcoming?.c || 0,
+      people: Number(peopleCount?.c || 0),
+      needsOpen: Number(needsOpen?.c || 0),
+      needsAll: Number(needsAll?.c || 0),
+      inventory: Number(inventoryCount?.c || 0),
+      meetingsUpcoming: Number(meetingsUpcoming?.c || 0),
     },
-    people: [], // dashboard can add these later if you want previews again
-    needs: [],
-    activity: enriched,
+    people: people?.results || [],
+    inventory: inventory?.results || [],
+    needs: needs?.results || [],
+    meetings: meetings?.results || [],
+    activity: activity?.results || [],
   });
 }

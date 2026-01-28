@@ -1,5 +1,4 @@
-// src/pages/Overview.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../utils/api.js";
 
@@ -23,7 +22,6 @@ function readOrgInfo(orgId) {
   }
 }
 
-
 function shortId(s) {
   const t = String(s || "");
   if (!t) return "";
@@ -33,35 +31,34 @@ function shortId(s) {
 
 function normalizeKind(kind) {
   const k = String(kind || "").trim().toLowerCase();
-
   const map = {
-    "inventory.deleted": "Inventory deleted",
-    "inventory.delete": "Inventory deleted",
-    "inventory.created": "Inventory added",
-    "inventory.create": "Inventory added",
-    "inventory.updated": "Inventory updated",
-    "inventory.update": "Inventory updated",
-
-    "need.deleted": "Need deleted",
-    "need.delete": "Need deleted",
     "need.created": "Need created",
     "need.create": "Need created",
     "need.updated": "Need updated",
     "need.update": "Need updated",
+    "need.deleted": "Need deleted",
+    "need.delete": "Need deleted",
 
-    "person.deleted": "Person removed",
-    "person.delete": "Person removed",
     "person.created": "Person added",
     "person.create": "Person added",
     "person.updated": "Person updated",
     "person.update": "Person updated",
+    "person.deleted": "Person removed",
+    "person.delete": "Person removed",
 
-    "meeting.deleted": "Meeting deleted",
-    "meeting.delete": "Meeting deleted",
+    "inventory.created": "Inventory added",
+    "inventory.create": "Inventory added",
+    "inventory.updated": "Inventory updated",
+    "inventory.update": "Inventory updated",
+    "inventory.deleted": "Inventory removed",
+    "inventory.delete": "Inventory removed",
+
     "meeting.created": "Meeting created",
     "meeting.create": "Meeting created",
     "meeting.updated": "Meeting updated",
     "meeting.update": "Meeting updated",
+    "meeting.deleted": "Meeting deleted",
+    "meeting.delete": "Meeting deleted",
 
     "invite.created": "Invite created",
     "invite.redeemed": "Invite redeemed",
@@ -69,42 +66,25 @@ function normalizeKind(kind) {
 
   if (map[k]) return map[k];
 
-  // fallback: Title Case the last segment
   const last = k.split(".").filter(Boolean).slice(-1)[0] || k;
   return last ? last.charAt(0).toUpperCase() + last.slice(1) : "Activity";
 }
 
-function prettyMessage(a) {
-  const title =
-    String(
-      a?.entity_title ||
-        a?.entity_name ||
-        a?.title ||
-        a?.name ||
-        ""
-    ).trim();
+function cleanMessage(msg = "") {
+  let s = String(msg || "").trim();
+  if (!s) return "";
 
-  const entId = String(a?.entity_id || "").trim();
+  // If message contains "x: y", keep y.
+  const i = s.indexOf(":");
+  if (i !== -1) s = s.slice(i + 1).trim();
 
-  if (title) {
-    return entId ? `${title} (${shortId(entId)})` : title;
-  }
-
-  const raw = String(a?.message || "").trim();
-  if (!raw) return "";
-
+  // Reduce UUID noise
   const uuidRe =
     /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+  s = s.replace(uuidRe, (m) => shortId(m));
 
-  const shortened = raw.replace(uuidRe, (m) => shortId(m));
-
-  const kind = String(a?.kind || "").toLowerCase();
-  const normalizedPrefix = kind.includes("delete") ? /deleted:\s*/i : null;
-  const cleaned = normalizedPrefix ? shortened.replace(normalizedPrefix, "") : shortened;
-
-  return cleaned;
+  return s || String(msg || "");
 }
-
 
 function groupActivity(activity) {
   const arr = Array.isArray(activity) ? activity : [];
@@ -112,7 +92,7 @@ function groupActivity(activity) {
 
   for (const a of arr) {
     const label = normalizeKind(a?.kind);
-    const msg = prettyMessage(a);
+    const msg = cleanMessage(a?.message);
     const key = `${label}::${msg}`;
 
     const last = grouped[grouped.length - 1];
@@ -133,9 +113,17 @@ function groupActivity(activity) {
   return grouped.slice(0, 10);
 }
 
+function fmtWhen(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return "";
+  }
+}
 
 export default function Overview() {
-
   const nav = useNavigate();
   const orgId = getOrgId();
 
@@ -150,7 +138,6 @@ export default function Overview() {
     window.addEventListener("bf:org_settings_changed", onChange);
     return () => window.removeEventListener("bf:org_settings_changed", onChange);
   }, [orgId]);
-
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -176,8 +163,12 @@ export default function Overview() {
 
   const counts = data?.counts || {};
   const people = Array.isArray(data?.people) ? data.people : [];
+  const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
   const needs = Array.isArray(data?.needs) ? data.needs : [];
+  const meetings = Array.isArray(data?.meetings) ? data.meetings : [];
   const activity = Array.isArray(data?.activity) ? data.activity : [];
+
+  const activityGrouped = useMemo(() => groupActivity(activity), [activity]);
 
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
 
@@ -190,22 +181,35 @@ export default function Overview() {
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
-
-        {err && <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div>}
+        {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}
+      >
         {/* People */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-              <button className="btn" onClick={() => nav("people")}>View all</button>
+            <button className="btn" onClick={() => nav("people")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}</div>
+
+          <div className="helper" style={{ marginTop: 10 }}>
+            {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
+          </div>
+
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
             {people.map((p) => (
-              <li key={p.id}>{p.name}</li>
+              <li key={p.id}>
+                {String(p.name || "").trim() || String(p.email || "").trim() || shortId(p.id)}
+              </li>
             ))}
+            {people.length === 0 ? (
+              <li className="helper">
+                {(counts.people || 0) > 0 ? "Members exist, but no preview loaded." : "No people yet."}
+              </li>
+            ) : null}
           </ul>
         </div>
 
@@ -215,7 +219,27 @@ export default function Overview() {
             <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
             <button className="btn" onClick={() => nav("inventory")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}</div>        </div>
+
+          <div className="helper" style={{ marginTop: 10 }}>
+            {counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}
+          </div>
+
+          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+            {inventory.map((it) => (
+              <li key={it.id}>
+                {String(it.name || "").trim() || shortId(it.id)}
+                {typeof it.qty !== "undefined" && it.qty !== null && String(it.qty) !== ""
+                  ? ` · ${it.qty}${it.unit ? ` ${it.unit}` : ""}`
+                  : ""}
+              </li>
+            ))}
+            {inventory.length === 0 ? (
+              <li className="helper">
+                {(counts.inventory || 0) > 0 ? "Items exist, but no preview loaded." : "No inventory yet."}
+              </li>
+            ) : null}
+          </ul>
+        </div>
 
         {/* Needs */}
         <div className="card" style={{ padding: 16 }}>
@@ -223,15 +247,23 @@ export default function Overview() {
             <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
             <button className="btn" onClick={() => nav("needs")}>View all</button>
           </div>
+
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.needsAll || 0} total, {counts.needsOpen || 0} open
           </div>
+
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
             {needs.map((n) => (
               <li key={n.id}>
-                {n.title} {n.status ? `— ${n.status}` : ""}
+                {String(n.title || "").trim() || shortId(n.id)}
+                {n.status ? ` · ${n.status}` : ""}
               </li>
             ))}
+            {needs.length === 0 ? (
+              <li className="helper">
+                {(counts.needsAll || 0) > 0 ? "Needs exist, but no preview loaded." : "No needs yet."}
+              </li>
+            ) : null}
           </ul>
         </div>
 
@@ -241,38 +273,55 @@ export default function Overview() {
             <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
             <button className="btn" onClick={() => nav("meetings")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
+
           <div className="helper" style={{ marginTop: 10 }}>
-            Notes and decisions, tied to people and needs.
+            {counts.meetingsUpcoming || 0} upcoming
           </div>
+
+          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+            {meetings.map((m) => (
+              <li key={m.id}>
+                {String(m.title || "").trim() || shortId(m.id)}
+                {m.starts_at ? ` · ${fmtWhen(m.starts_at)}` : ""}
+                {m.location ? ` · ${m.location}` : ""}
+              </li>
+            ))}
+            {meetings.length === 0 ? (
+              <li className="helper">
+                {(counts.meetingsUpcoming || 0) > 0 ? "Meetings exist, but no preview loaded." : "No upcoming meetings."}
+              </li>
+            ) : null}
+          </ul>
         </div>
 
         {/* Recent Activity */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Activity</h2>
-            <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>Refresh</button>
+            <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+              Refresh
+            </button>
           </div>
+
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {typeof groupActivity === "function"
-              ? groupActivity(activity).map((g) => (
-                  <li key={g.raw?.id || g.key}>
-                    <strong>{g.label}</strong>
-                    {g.count > 1 ? ` x${g.count}` : ""}
-                    {g.msg ? `: ${g.msg}` : ""}
-                  </li>
-                ))
-              : activity.slice(0, 10).map((a) => (
-                  <li key={a.id || `${a.kind}-${a.created_at}`}>
-                    <strong>{a.kind}</strong>
-                    {a.message ? `: ${a.message}` : ""}
-                  </li>
-                ))}
+            {activityGrouped.map((g) => {
+              const a = g.raw || {};
+              const who =
+                String(a.actor_name || "").trim() ||
+                String(a.actor_email || "").trim() ||
+                (a.actor_user_id ? shortId(a.actor_user_id) : "");
 
-            {groupActivity(activity).length === 0 && <li className="helper">No activity yet.</li>}
+              return (
+                <li key={a.id || g.key}>
+                  <strong>{g.label}</strong>
+                  {g.count > 1 ? ` x${g.count}` : ""}
+                  {g.msg ? `: ${g.msg}` : ""}
+                  {who ? <span className="helper"> · {who}</span> : null}
+                </li>
+              );
+            })}
+            {activityGrouped.length === 0 ? <li className="helper">No activity yet.</li> : null}
           </ul>
-
-
         </div>
       </div>
     </div>
