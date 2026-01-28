@@ -145,6 +145,76 @@ export default function Settings() {
     }
   };
 
+  const deleteInvite = async (code) => {
+    if (!orgId) return;
+    const c = String(code || "").trim().toUpperCase();
+    if (!c) return;
+
+    const ok = confirm(`Delete invite ${c}?`);
+    if (!ok) return;
+
+    setInviteBusy(true);
+    setInviteMsg("");
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+        method: "DELETE",
+        body: { code: c },
+      });
+      setInvites((prev) => prev.filter((x) => String(x.code || "").toUpperCase() !== c));
+      setInviteMsg("Deleted.");
+      setTimeout(() => setInviteMsg(""), 900);
+    } catch (e) {
+      setInviteMsg(e.message || "Failed to delete invite");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const deleteInactiveInvites = async () => {
+    if (!orgId) return;
+
+    const now = Date.now();
+    const inactive = (invites || []).filter((inv) => {
+      const uses = Number(inv.uses || 0);
+      const max = Number(inv.max_uses || 0);
+      const exp = inv.expires_at ? Number(inv.expires_at) : null;
+
+      const exhausted = max > 0 && uses >= max;
+      const expired = exp && now > exp;
+      return exhausted || expired;
+    });
+
+    if (inactive.length === 0) {
+      setInviteMsg("No used or expired invites to delete.");
+      setTimeout(() => setInviteMsg(""), 900);
+      return;
+    }
+
+    const ok = confirm(`Delete ${inactive.length} used or expired invites?`);
+    if (!ok) return;
+
+    setInviteBusy(true);
+    setInviteMsg("");
+    try {
+      for (const inv of inactive) {
+        const c = String(inv.code || "").trim().toUpperCase();
+        if (!c) continue;
+        await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+          method: "DELETE",
+          body: { code: c },
+        });
+      }
+      await loadInvites();
+      setInviteMsg("Deleted used and expired invites.");
+      setTimeout(() => setInviteMsg(""), 1200);
+    } catch (e) {
+      setInviteMsg(e.message || "Cleanup failed");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+
   /* ========== MEMBERS + ROLES (backend, admin only) ========== */
   const [members, setMembers] = React.useState([]);
   const [membersMsg, setMembersMsg] = React.useState("");
@@ -386,6 +456,9 @@ export default function Settings() {
           <button className="btn" type="button" onClick={loadInvites}>
             Refresh
           </button>
+          <button className="btn" type="button" onClick={deleteInactiveInvites} disabled={inviteBusy}>
+            Delete used and expired
+          </button>
           {inviteMsg && (
             <span
               className={
@@ -412,6 +485,10 @@ export default function Settings() {
                     <button className="btn" onClick={() => copyInvite(inv.code)}>
                       Copy
                     </button>
+                    <button className="btn" type="button" onClick={() => deleteInvite(inv.code)} disabled={inviteBusy}>
+                      Delete
+                    </button>
+
                     <div className="helper" style={{ marginLeft: "auto" }}>
                       role: {inv.role || "member"} · uses: {inv.uses || 0}/{inv.max_uses || 1}
                       {inv.expires_at ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}` : ""}

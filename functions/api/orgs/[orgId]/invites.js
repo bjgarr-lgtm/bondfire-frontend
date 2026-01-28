@@ -143,7 +143,30 @@ export async function onRequest(ctx) {
       });
     }
 
-    return bad(405, "Method not allowed");
+    if (request.method === "DELETE") {
+      let body = {};
+      try {
+        body = await request.json();
+      } catch {
+        body = {};
+      }
+
+      const code = String(body.code || "").trim().toUpperCase();
+      if (!code) return bad(400, "MISSING_CODE");
+
+      const res = await db
+        .prepare("DELETE FROM invites WHERE org_id = ? AND code = ?")
+        .bind(orgId, code)
+        .run();
+
+      // D1 returns meta info, but not always consistent across versions
+      const changed = Number(res?.meta?.changes || 0);
+      if (!changed) return bad(404, "INVITE_NOT_FOUND");
+
+      return ok({ deleted: true, code });
+    }
+
+    return bad(405, "METHOD_NOT_ALLOWED");
   } catch (e) {
     return bad(500, e?.message || "INVITES_ERROR");
   }
