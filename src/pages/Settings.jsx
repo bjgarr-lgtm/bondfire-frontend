@@ -84,6 +84,94 @@ export default function Settings() {
   const [inviteMsg, setInviteMsg] = React.useState("");
   const [inviteBusy, setInviteBusy] = React.useState(false);
 
+  /* ========== MEMBERS + ROLES (backend, admin only) ========== */
+  const [members, setMembers] = React.useState([]);
+  const [membersMsg, setMembersMsg] = React.useState("");
+  const [membersAllowed, setMembersAllowed] = React.useState(false);
+  const [membersBusy, setMembersBusy] = React.useState(false);
+
+  const loadMembers = React.useCallback(async () => {
+    if (!orgId) return;
+    setMembersMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "GET",
+      });
+      setMembers(Array.isArray(r.members) ? r.members : []);
+      setMembersAllowed(true);
+    } catch (e) {
+      const msg = String(e?.message || "");
+      // Non admins should not see scary errors
+      if (msg.includes("INSUFFICIENT_ROLE") || msg.includes("NOT_A_MEMBER")) {
+        setMembersAllowed(false);
+        setMembers([]);
+        setMembersMsg("");
+      } else {
+        setMembersAllowed(false);
+        setMembers([]);
+        setMembersMsg(msg || "Failed to load members");
+      }
+    }
+  }, [orgId]);
+
+  const setMemberRole = async (userId, nextRole, currentRole, email) => {
+    if (!orgId) return;
+    if (!userId) return;
+    if (nextRole === currentRole) return;
+
+    // Keep the “oops I deleted production” vibes out of role changes
+    if (currentRole === "owner" && nextRole !== "owner") {
+      const ok = confirm(`Demote owner ${email || userId} to ${nextRole}?`);
+      if (!ok) return;
+    }
+    if (nextRole === "owner") {
+      const ok = confirm(`Promote ${email || userId} to owner?`);
+      if (!ok) return;
+    }
+
+    setMembersBusy(true);
+    setMembersMsg("");
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "PUT",
+        body: { userId, role: nextRole },
+      });
+      setMembersMsg("Updated.");
+      setTimeout(() => setMembersMsg(""), 900);
+      await loadMembers();
+    } catch (e) {
+      setMembersMsg(e.message || "Failed to update role");
+    } finally {
+      setMembersBusy(false);
+    }
+  };
+
+  const removeMember = async (userId, role, email) => {
+    if (!orgId) return;
+    if (!userId) return;
+
+    // Avoid oops clicks
+    const ok = confirm(`Remove ${email || userId} from this org?`);
+    if (!ok) return;
+
+    setMembersBusy(true);
+    setMembersMsg("");
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "DELETE",
+        body: { userId },
+      });
+      setMembersMsg("Removed.");
+      setTimeout(() => setMembersMsg(""), 900);
+      await loadMembers();
+    } catch (e) {
+      setMembersMsg(e.message || "Failed to remove member");
+    } finally {
+      setMembersBusy(false);
+    }
+  };
+
+
   const loadInvites = React.useCallback(async () => {
     if (!orgId) return;
     try {
@@ -99,7 +187,9 @@ export default function Settings() {
 
   React.useEffect(() => {
     loadInvites();
-  }, [loadInvites]);
+    loadMembers();
+  }, [loadInvites, loadMembers]);
+
 
   const createInvite = async () => {
     if (!orgId) return;
@@ -134,6 +224,86 @@ export default function Settings() {
       setInviteMsg("Clipboard blocked. Copy it manually.");
     }
   };
+
+      {/* ---------- Members + Roles (admin only) ---------- */}
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Members and Roles</h2>
+
+        {!membersAllowed ? (
+          <div className="helper">
+            Admins and owners can manage membership roles.
+            {membersMsg ? <div className="error" style={{ marginTop: 8 }}>{membersMsg}</div> : null}
+          </div>
+        ) : (
+          <>
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
+                {membersBusy ? "Refreshing…" : "Refresh"}
+              </button>
+              {membersMsg ? (
+                <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
+                  {membersMsg}
+                </span>
+              ) : null}
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              {members.length === 0 ? (
+                <div className="helper">No members found.</div>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th>Remove</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.map((m) => (
+                      <tr key={m.userId}>
+                        <td><code>{m.email || m.userId}</code></td>
+                        <td>{m.name || ""}</td>
+                        <td>
+                          <select
+                            className="input"
+                            defaultValue={m.role || "member"}
+                            onChange={(e) =>
+                              setMemberRole(m.userId, e.target.value, m.role, m.email)
+                            }
+                            disabled={membersBusy}
+                          >
+                            <option value="viewer">viewer</option>
+                            <option value="member">member</option>
+                            <option value="admin">admin</option>
+                            <option value="owner">owner</option>
+                          </select>
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {m.role === "owner" ? (
+                            <span className="helper">owner</span>
+                          ) : (
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => removeMember(m.userId, m.role, m.email)}
+                              disabled={membersBusy}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
 
   /* ========== ORG BASICS (local) ========== */
   const [orgName, setOrgName] = React.useState("");
