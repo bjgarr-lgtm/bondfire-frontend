@@ -23,38 +23,6 @@ function readOrgInfo(orgId) {
   }
 }
 
-function humanKind(kind = "") {
-  const k = String(kind || "");
-  const map = {
-    "need.created": "Need created",
-    "need.updated": "Need updated",
-    "need.deleted": "Need deleted",
-    "person.created": "Person added",
-    "person.updated": "Person updated",
-    "person.deleted": "Person removed",
-    "inventory.created": "Inventory added",
-    "inventory.updated": "Inventory updated",
-    "inventory.deleted": "Inventory removed",
-    "meeting.created": "Meeting created",
-    "meeting.updated": "Meeting updated",
-    "meeting.deleted": "Meeting deleted",
-  };
-  return map[k] || k;
-}
-
-function cleanMessage(msg = "") {
-  let s = String(msg || "").trim();
-
-  // If message contains "X: Y", keep Y.
-  const i = s.indexOf(":");
-  if (i !== -1) s = s.slice(i + 1).trim();
-
-  // Strip redundant prefixes like "Need deleted:" again if they survived
-  s = s.replace(/^(need|person|inventory|meeting)\s+(created|updated|deleted|removed)\s*:\s*/i, "").trim();
-
-  return s || String(msg || "");
-}
-
 
 function shortId(s) {
   const t = String(s || "");
@@ -107,21 +75,36 @@ function normalizeKind(kind) {
 }
 
 function prettyMessage(a) {
+  const title =
+    String(
+      a?.entity_title ||
+        a?.entity_name ||
+        a?.title ||
+        a?.name ||
+        ""
+    ).trim();
+
+  const entId = String(a?.entity_id || "").trim();
+
+  if (title) {
+    return entId ? `${title} (${shortId(entId)})` : title;
+  }
+
   const raw = String(a?.message || "").trim();
   if (!raw) return "";
 
-  // If message contains UUIDs, shorten them (keeps it readable)
-  const uuidRe = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+  const uuidRe =
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
   const shortened = raw.replace(uuidRe, (m) => shortId(m));
 
-  // Remove redundant "X deleted:" style repeats
-  // Example: "need deleted: <uuid>" becomes "<uuid>"
   const kind = String(a?.kind || "").toLowerCase();
   const normalizedPrefix = kind.includes("delete") ? /deleted:\s*/i : null;
   const cleaned = normalizedPrefix ? shortened.replace(normalizedPrefix, "") : shortened;
 
   return cleaned;
 }
+
 
 function groupActivity(activity) {
   const arr = Array.isArray(activity) ? activity : [];
@@ -170,7 +153,7 @@ export default function Overview() {
 
 
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("...");
+  const [err, setErr] = useState("");
   const [data, setData] = useState(null);
 
   async function refresh() {
@@ -277,15 +260,24 @@ export default function Overview() {
             <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>Refresh</button>
           </div>
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {groupActivity(activity).map((g) => (
-              <li key={a.id || `${a.kind}-${a.created_at}`}>
-                <strong>{humanKind(a.kind)}</strong>
-                <span>: {cleanMessage(a.message)}</span>
-              </li>
+            {typeof groupActivity === "function"
+              ? groupActivity(activity).map((g) => (
+                  <li key={g.raw?.id || g.key}>
+                    <strong>{g.label}</strong>
+                    {g.count > 1 ? ` x${g.count}` : ""}
+                    {g.msg ? `: ${g.msg}` : ""}
+                  </li>
+                ))
+              : activity.slice(0, 10).map((a) => (
+                  <li key={a.id || `${a.kind}-${a.created_at}`}>
+                    <strong>{a.kind}</strong>
+                    {a.message ? `: ${a.message}` : ""}
+                  </li>
+                ))}
 
-            ))}
-            {activity.length === 0 && <li className="helper">No activity yet.</li>}
+            {groupActivity(activity).length === 0 && <li className="helper">No activity yet.</li>}
           </ul>
+
 
         </div>
       </div>
