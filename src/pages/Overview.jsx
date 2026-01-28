@@ -23,6 +23,134 @@ function readOrgInfo(orgId) {
   }
 }
 
+function humanKind(kind = "") {
+  const k = String(kind || "");
+  const map = {
+    "need.created": "Need created",
+    "need.updated": "Need updated",
+    "need.deleted": "Need deleted",
+    "person.created": "Person added",
+    "person.updated": "Person updated",
+    "person.deleted": "Person removed",
+    "inventory.created": "Inventory added",
+    "inventory.updated": "Inventory updated",
+    "inventory.deleted": "Inventory removed",
+    "meeting.created": "Meeting created",
+    "meeting.updated": "Meeting updated",
+    "meeting.deleted": "Meeting deleted",
+  };
+  return map[k] || k;
+}
+
+function cleanMessage(msg = "") {
+  let s = String(msg || "").trim();
+
+  // If message contains "X: Y", keep Y.
+  const i = s.indexOf(":");
+  if (i !== -1) s = s.slice(i + 1).trim();
+
+  // Strip redundant prefixes like "Need deleted:" again if they survived
+  s = s.replace(/^(need|person|inventory|meeting)\s+(created|updated|deleted|removed)\s*:\s*/i, "").trim();
+
+  return s || String(msg || "");
+}
+
+
+function shortId(s) {
+  const t = String(s || "");
+  if (!t) return "";
+  if (t.length <= 10) return t;
+  return `${t.slice(0, 4)}…${t.slice(-4)}`;
+}
+
+function normalizeKind(kind) {
+  const k = String(kind || "").trim().toLowerCase();
+
+  const map = {
+    "inventory.deleted": "Inventory deleted",
+    "inventory.delete": "Inventory deleted",
+    "inventory.created": "Inventory added",
+    "inventory.create": "Inventory added",
+    "inventory.updated": "Inventory updated",
+    "inventory.update": "Inventory updated",
+
+    "need.deleted": "Need deleted",
+    "need.delete": "Need deleted",
+    "need.created": "Need created",
+    "need.create": "Need created",
+    "need.updated": "Need updated",
+    "need.update": "Need updated",
+
+    "person.deleted": "Person removed",
+    "person.delete": "Person removed",
+    "person.created": "Person added",
+    "person.create": "Person added",
+    "person.updated": "Person updated",
+    "person.update": "Person updated",
+
+    "meeting.deleted": "Meeting deleted",
+    "meeting.delete": "Meeting deleted",
+    "meeting.created": "Meeting created",
+    "meeting.create": "Meeting created",
+    "meeting.updated": "Meeting updated",
+    "meeting.update": "Meeting updated",
+
+    "invite.created": "Invite created",
+    "invite.redeemed": "Invite redeemed",
+  };
+
+  if (map[k]) return map[k];
+
+  // fallback: Title Case the last segment
+  const last = k.split(".").filter(Boolean).slice(-1)[0] || k;
+  return last ? last.charAt(0).toUpperCase() + last.slice(1) : "Activity";
+}
+
+function prettyMessage(a) {
+  const raw = String(a?.message || "").trim();
+  if (!raw) return "";
+
+  // If message contains UUIDs, shorten them (keeps it readable)
+  const uuidRe = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+  const shortened = raw.replace(uuidRe, (m) => shortId(m));
+
+  // Remove redundant "X deleted:" style repeats
+  // Example: "need deleted: <uuid>" becomes "<uuid>"
+  const kind = String(a?.kind || "").toLowerCase();
+  const normalizedPrefix = kind.includes("delete") ? /deleted:\s*/i : null;
+  const cleaned = normalizedPrefix ? shortened.replace(normalizedPrefix, "") : shortened;
+
+  return cleaned;
+}
+
+function groupActivity(activity) {
+  const arr = Array.isArray(activity) ? activity : [];
+  const grouped = [];
+
+  for (const a of arr) {
+    const label = normalizeKind(a?.kind);
+    const msg = prettyMessage(a);
+    const key = `${label}::${msg}`;
+
+    const last = grouped[grouped.length - 1];
+    if (last && last.key === key) {
+      last.count += 1;
+      continue;
+    }
+
+    grouped.push({
+      key,
+      label,
+      msg,
+      count: 1,
+      raw: a,
+    });
+  }
+
+  return grouped.slice(0, 10);
+}
+
+
 export default function Overview() {
 
   const nav = useNavigate();
@@ -88,7 +216,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-              <button className="btn" onClick={() => go("people")}>View all</button>
+              <button className="btn" onClick={() => nav("people")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}</div>
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
@@ -149,13 +277,16 @@ export default function Overview() {
             <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>Refresh</button>
           </div>
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {activity.map((a) => (
+            {groupActivity(activity).map((g) => (
               <li key={a.id || `${a.kind}-${a.created_at}`}>
-                <strong>{a.kind}</strong>: {a.message}
+                <strong>{humanKind(a.kind)}</strong>
+                <span>: {cleanMessage(a.message)}</span>
               </li>
+
             ))}
             {activity.length === 0 && <li className="helper">No activity yet.</li>}
           </ul>
+
         </div>
       </div>
     </div>

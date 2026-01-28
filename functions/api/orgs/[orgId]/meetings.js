@@ -144,27 +144,23 @@ export async function onRequestDelete({ env, request, params }) {
     .bind(id, orgId)
     .run();
 
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "meeting.deleted",
-    message: `meeting deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
+const prev = await env.BF_DB.prepare(
+  "SELECT title FROM meetings WHERE id = ? AND org_id = ?"
+).bind(id, orgId).first();
 
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "meeting.deleted",
-    message: `meeting deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
+const shortId = (x) =>
+  typeof x === "string" && x.length > 12 ? `${x.slice(0, 8)}…${x.slice(-4)}` : (x || "");
+
+const title = String(prev?.title || "").trim();
+const label = title || shortId(id);
+
+logActivity(env, {
+  orgId,
+  kind: "meeting.deleted",
+  message: `Meeting deleted: ${label} (${shortId(id)})`,
+  actorUserId: a?.user?.sub || a?.user?.id || null,
+}).catch(() => {});
+
 
   return json({ ok: true });
 }

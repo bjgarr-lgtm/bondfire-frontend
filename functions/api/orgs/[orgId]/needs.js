@@ -2,6 +2,11 @@ import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
 
+const shortId = (id) =>
+  typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : (id || "");
+
+const actorId = (a) => a?.user?.sub || a?.user?.id || null;
+
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
@@ -9,7 +14,9 @@ export async function onRequestGet({ env, request, params }) {
 
   const res = await env.BF_DB.prepare(
     "SELECT id, title, description, urgency, status, is_public, created_at, updated_at FROM needs WHERE org_id = ? ORDER BY created_at DESC"
-  ).bind(orgId).all();
+  )
+    .bind(orgId)
+    .all();
 
   return json({ ok: true, needs: res.results || [] });
 }
@@ -26,57 +33,32 @@ export async function onRequestPost({ env, request, params }) {
   const id = uuid();
   const t = now();
 
+  const statusRaw = String(body.status || "open");
+  const status = ["open", "in-progress", "resolved"].includes(statusRaw) ? statusRaw : "open";
+
   await env.BF_DB.prepare(
     `INSERT INTO needs (id, org_id, title, description, urgency, status, is_public, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(
-    id,
-    orgId,
-    title,
-    String(body.description || ""),
-    String(body.urgency || ""),
-    (["open","in-progress","resolved"].includes(String(body.status || "open")) 
-      ? String(body.status || "open") 
-      : "open"),
-    body.is_public ? 1 : 0,
-    t,
-    t
-  ).run();
+  )
+    .bind(
+      id,
+      orgId,
+      title,
+      String(body.description || ""),
+      String(body.urgency || ""),
+      status,
+      body.is_public ? 1 : 0,
+      t,
+      t
+    )
+    .run();
 
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.updated",
-    message: `need updated: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  // best-effort activity log
-  try {
-    await logActivity(env, {
+  logActivity(env, {
     orgId,
     kind: "need.created",
-    message: `need created: ${title}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  // Best-effort activity log
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.create",
-    message: `Need created: ${title}`,
-    actorUserId: a.user?.sub || null,
+    message: `Need created: ${title} (${shortId(id)})`,
+    actorUserId: actorId(a),
   }).catch(() => {});
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
 
   return json({ ok: true, id });
 }
@@ -87,11 +69,27 @@ export async function onRequestPut({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   const body = await request.json().catch(() => ({}));
-  const id = String(body.id || "");
+  const id = String(body.id || "").trim();
   if (!id) return bad(400, "MISSING_ID");
+
+  const prev = await env.BF_DB.prepare(
+    "SELECT title FROM needs WHERE id = ? AND org_id = ?"
+  )
+    .bind(id, orgId)
+    .first();
+
+  const nextTitle = String(body.title ?? prev?.title ?? "").trim();
+  const label = nextTitle || shortId(id);
 
   const isPublic =
     typeof body.is_public === "boolean" ? (body.is_public ? 1 : 0) : null;
+
+  const status =
+    body.status == null
+      ? null
+      : (["open", "in-progress", "resolved"].includes(String(body.status))
+          ? String(body.status)
+          : null);
 
   await env.BF_DB.prepare(
     `UPDATE needs
@@ -102,42 +100,25 @@ export async function onRequestPut({ env, request, params }) {
          is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
-  ).bind(
-    body.title ?? null,
-    body.description ?? null,
-    body.urgency ?? null,
-    (body.status == null
-      ? null
-      : (["open","in-progress","resolved"].includes(String(body.status))
-          ? String(body.status)
-          : null)),
-    isPublic,
-    now(),
-    id,
-    orgId
-  ).run();
+  )
+    .bind(
+      body.title ?? null,
+      body.description ?? null,
+      body.urgency ?? null,
+      status,
+      isPublic,
+      now(),
+      id,
+      orgId
+    )
+    .run();
 
-  try {
-    await logActivity(env, {
+  logActivity(env, {
     orgId,
     kind: "need.updated",
-    message: `need updated: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.update",
-    message: `Need updated: ${id}`,
-    actorUserId: a.user?.sub || null,
+    message: `Need updated: ${label} (${shortId(id)})`,
+    actorUserId: actorId(a),
   }).catch(() => {});
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
 
   return json({ ok: true });
 }
@@ -148,56 +129,28 @@ export async function onRequestDelete({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   const url = new URL(request.url);
-  const id = url.searchParams.get("id");
+  const id = String(url.searchParams.get("id") || "").trim();
   if (!id) return bad(400, "MISSING_ID");
+
+  const prev = await env.BF_DB.prepare(
+    "SELECT title FROM needs WHERE id = ? AND org_id = ?"
+  )
+    .bind(id, orgId)
+    .first();
+
+  const title = String(prev?.title || "").trim();
+  const label = title || shortId(id);
 
   await env.BF_DB.prepare("DELETE FROM needs WHERE id = ? AND org_id = ?")
     .bind(id, orgId)
     .run();
 
-  try {
-    await logActivity(env, {
+  logActivity(env, {
     orgId,
     kind: "need.deleted",
-    message: `need deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.deleted",
-    message: `need deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.deleted",
-    message: `need deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
-
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "need.delete",
-    message: `Need deleted: ${id}`,
-    actorUserId: a.user?.sub || null,
+    message: `Need deleted: ${label} (${shortId(id)})`,
+    actorUserId: actorId(a),
   }).catch(() => {});
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
 
   return json({ ok: true });
 }

@@ -107,19 +107,27 @@ export async function onRequestDelete({ env, request, params }) {
   const id = url.searchParams.get("id");
   if (!id) return bad(400, "MISSING_ID");
 
-  await env.BF_DB.prepare("DELETE FROM people WHERE id = ? AND org_id = ?")
-    .bind(id, orgId).run();
+const prev = await env.BF_DB.prepare(
+  "SELECT name FROM people WHERE id = ? AND org_id = ?"
+).bind(id, orgId).first();
 
-  try {
-    await logActivity(env, {
-    orgId,
-    kind: "person.deleted",
-    message: `person deleted: ${id}`,
-    actorUserId: a?.user?.sub || null,
-  });
-  } catch (e) {
-    console.error("ACTIVITY_FAIL", e);
-  }
+const shortId = (x) =>
+  typeof x === "string" && x.length > 12 ? `${x.slice(0, 8)}…${x.slice(-4)}` : (x || "");
+
+const name = String(prev?.name || "").trim();
+const label = name || shortId(id);
+
+await env.BF_DB.prepare("DELETE FROM people WHERE id = ? AND org_id = ?")
+  .bind(id, orgId)
+  .run();
+
+logActivity(env, {
+  orgId,
+  kind: "person.deleted",
+  message: `Person removed: ${label} (${shortId(id)})`,
+  actorUserId: a?.user?.sub || a?.user?.id || null,
+}).catch(() => {});
+
 
   return json({ ok: true });
 }
