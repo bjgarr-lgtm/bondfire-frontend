@@ -1,16 +1,11 @@
 import { ok, bad } from "../../_lib/http";
 import { requireAuth, requireOrgRole, getDb } from "../../_lib/auth";
-import { ensureSchema } from "../../_lib/schema";
 
 export async function onRequestGet(ctx) {
-  await ensureSchema(ctx.env);
-  // Delegate to the unified handler below.
   return onRequest(ctx);
 }
 
 export async function onRequestPost(ctx) {
-  await ensureSchema(ctx.env);
-  // Delegate to the unified handler below.
   return onRequest(ctx);
 }
 
