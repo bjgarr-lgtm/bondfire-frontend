@@ -206,7 +206,6 @@ export default function Overview() {
             {people.map((p) => (
               <li key={p.id}>{p.name}</li>
             ))}
-            {people.length === 0 && <li className="helper">No people yet.</li>}
           </ul>
         </div>
 
@@ -216,11 +215,7 @@ export default function Overview() {
             <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
             <button className="btn" onClick={() => nav("inventory")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}</div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            Manage supplies and public-facing items.
-          </div>
-        </div>
+          <div className="helper" style={{ marginTop: 10 }}>{counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}</div>        </div>
 
         {/* Needs */}
         <div className="card" style={{ padding: 16 }}>
@@ -237,7 +232,6 @@ export default function Overview() {
                 {n.title} {n.status ? `— ${n.status}` : ""}
               </li>
             ))}
-            {needs.length === 0 && <li className="helper">No needs yet.</li>}
           </ul>
         </div>
 
