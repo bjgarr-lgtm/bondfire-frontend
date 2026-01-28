@@ -6,7 +6,9 @@
   --border:#222;
   --red:#8a1111;
   --red-2:#b01515;
+  color-scheme: dark;
 }
+
 *{box-sizing:border-box}
 html,body,#root{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
@@ -14,6 +16,28 @@ a{text-decoration:none;color:inherit}
 button{background:var(--red);border:1px solid var(--red-2);color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
 button:hover{filter:brightness(1.1)}
 input,select,textarea{background:#0e0e0e;border:1px solid var(--border);color:var(--text);padding:10px;border-radius:10px}
+
+/* Make native date/time pickers actually visible on dark UI */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"]{
+  color-scheme: dark;
+  padding-right: 38px; /* keeps the icon area visible */
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator{
+  filter: invert(1) brightness(1.7) contrast(1.2);
+  opacity: 1;
+  cursor: pointer;
+}
+
+input[type="datetime-local"]::-webkit-clear-button,
+input[type="datetime-local"]::-webkit-inner-spin-button{
+  filter: invert(1) brightness(1.5);
+  opacity: 1;
+}
 
 /* Make native date and time pickers usable on dark UI */
 input[type="date"], input[type="time"], input[type="datetime-local"]{

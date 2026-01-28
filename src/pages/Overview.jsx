@@ -12,9 +12,34 @@ function getOrgId() {
   }
 }
 
+function readOrgInfo(orgId) {
+  try {
+    const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
+    const orgs = JSON.parse(localStorage.getItem("bf_orgs") || "[]");
+    const o = orgs.find((x) => x?.id === orgId) || {};
+    return { name: (s.name || o.name || orgId || "Dashboard").trim() };
+  } catch {
+    return { name: orgId || "Dashboard" };
+  }
+}
+
 export default function Overview() {
+
   const nav = useNavigate();
   const orgId = getOrgId();
+
+  const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
+
+  useEffect(() => {
+    setOrgInfo(readOrgInfo(orgId));
+    const onChange = (e) => {
+      const changedId = e?.detail?.orgId;
+      if (!changedId || changedId === orgId) setOrgInfo(readOrgInfo(orgId));
+    };
+    window.addEventListener("bf:org_settings_changed", onChange);
+    return () => window.removeEventListener("bf:org_settings_changed", onChange);
+  }, [orgId]);
+
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("...");
@@ -49,7 +74,7 @@ export default function Overview() {
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0, flex: 1 }}>Bondfire Dashboard</h1>
+          <h1 style={{ margin: 0, flex: 1 }}>{orgInfo?.name || "Dashboard"}</h1>
           <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
