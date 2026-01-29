@@ -17,16 +17,18 @@ export default function Inventory() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [err, setErr] = useState("");
 
   async function refresh() {
     if (!orgId) return;
     setLoading(true);
+    setErr("");
     try {
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-      // backend returns { inventory: [...] }
       setItems(Array.isArray(d.inventory) ? d.inventory : []);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || String(e));
     } finally {
       setLoading(false);
     }
@@ -82,7 +84,6 @@ export default function Inventory() {
     const notes = String(f.get("notes") || "");
     const is_public = String(f.get("is_public") || "") === "on";
 
-    // POST
     const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -97,7 +98,6 @@ export default function Inventory() {
       }),
     });
 
-    // optimistic insert if API returns id
     if (data?.id) {
       setItems((prev) => [
         {
@@ -116,12 +116,10 @@ export default function Inventory() {
 
     e.currentTarget.reset();
 
-    // reconcile fetch to keep canonical
     setTimeout(() => {
       refresh().catch(console.error);
     }, 500);
   }
-
 
   const cellInputStyle = {
     width: "100%",
@@ -129,6 +127,12 @@ export default function Inventory() {
     boxSizing: "border-box",
   };
 
+  const compactBtnStyle = {
+    width: "100%",
+    padding: "6px 0",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+  };
 
   return (
     <div>
@@ -154,22 +158,41 @@ export default function Inventory() {
           style={{ marginTop: 12 }}
         />
 
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 8 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        {err ? (
+          <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
+            {err}
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 12 }}>
+          <table
+            className="table"
+            style={{ width: "100%", tableLayout: "fixed" }}
+          >
+            <colgroup>
+              <col /> {/* Name */}
+              <col style={{ width: 90 }} /> {/* Qty */}
+              <col style={{ width: 90 }} /> {/* Unit */}
+              <col style={{ width: 150 }} /> {/* Category */}
+              <col style={{ width: 150 }} /> {/* Location */}
+              <col /> {/* Notes */}
+              <col style={{ width: 64 }} /> {/* Pub */}
+              <col style={{ width: 120 }} /> {/* Delete */}
+            </colgroup>
 
             <thead>
               <tr>
-                <th style={{ width: "20%" }}>Name</th>
-                <th style={{ width: "8%" }}>Qty</th>
-                <th style={{ width: "8%" }}>Unit</th>
-                <th style={{ width: "12%" }}>Category</th>
-                <th style={{ width: "12%" }}>Location</th>
-                <th style={{ width: "28%" }}>Notes</th>
-                <th style={{ width: "15%" }}>Public</th>
-                <th style={{ width: "7%" }} />
-
+                <th>Name</th>
+                <th>Qty</th>
+                <th>Unit</th>
+                <th>Category</th>
+                <th>Location</th>
+                <th>Notes</th>
+                <th style={{ textAlign: "center" }}>Pub</th>
+                <th />
               </tr>
             </thead>
+
             <tbody>
               {list.map((i) => (
                 <tr key={i.id}>
@@ -185,6 +208,7 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
@@ -206,6 +230,7 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
@@ -218,6 +243,7 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
@@ -230,6 +256,7 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
@@ -242,6 +269,7 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
@@ -254,9 +282,11 @@ export default function Inventory() {
                       }}
                     />
                   </td>
+
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
+                      style={{ margin: 0 }}
                       defaultChecked={!!i.is_public}
                       onChange={(e) =>
                         putItem(i.id, { is_public: e.target.checked }).catch(
@@ -265,15 +295,15 @@ export default function Inventory() {
                       }
                     />
                   </td>
+
                   <td>
                     <button
                       className="btn"
-                      style={{ padding: "16px 20px", minWidth: 0, whiteSpace: "nowrap" }}
+                      style={compactBtnStyle}
                       onClick={() => delItem(i.id).catch(console.error)}
                     >
-                      Del
+                      Delete
                     </button>
-
                   </td>
                 </tr>
               ))}
