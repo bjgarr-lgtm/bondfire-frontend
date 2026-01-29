@@ -165,7 +165,7 @@ export default function Inventory() {
                 <th style={{ width: "12%" }}>Category</th>
                 <th style={{ width: "12%" }}>Location</th>
                 <th style={{ width: "28%" }}>Notes</th>
-                <th style={{ width: "5%" }}>Pub</th>
+                <th style={{ width: "15%" }}>Public</th>
                 <th style={{ width: "7%" }} />
 
               </tr>
@@ -268,7 +268,7 @@ export default function Inventory() {
                   <td>
                     <button
                       className="btn"
-                      style={{ padding: "6px 10px", minWidth: 0, whiteSpace: "nowrap" }}
+                      style={{ padding: "16px 20px", minWidth: 0, whiteSpace: "nowrap" }}
                       onClick={() => delItem(i.id).catch(console.error)}
                     >
                       Del
