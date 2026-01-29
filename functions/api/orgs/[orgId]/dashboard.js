@@ -43,6 +43,18 @@ export async function onRequestGet({ env, request, params }) {
     "SELECT COUNT(*) as c FROM meetings WHERE org_id = ? AND (starts_at IS NULL OR starts_at >= ?)"
   ).bind(orgId, nowMs).first();
 
+  // Next scheduled meeting (starts_at must be present)
+  const nextMeeting = await env.BF_DB.prepare(
+    `SELECT id, title, starts_at, location
+     FROM meetings
+     WHERE org_id = ?
+       AND starts_at IS NOT NULL
+       AND starts_at >= ?
+     ORDER BY starts_at ASC
+     LIMIT 1`
+  ).bind(orgId, nowMs).first();
+
+
   // Pull raw activity
   const activityRes = await env.BF_DB.prepare(
     "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 10"
@@ -93,10 +105,9 @@ export async function onRequestGet({ env, request, params }) {
       needsOpen: needsOpen?.c || 0,
       needsAll: needsAll?.c || 0,
       inventory: inventory?.c || 0,
-      meetingsUpcoming: meetingsUpcoming?.c || 0,
+      meetingsUpcoming: meetingsUpcoming?.c || 0
     },
-    people: [], // dashboard can add these later if you want previews again
-    needs: [],
-    activity: enriched,
+    nextMeeting: nextMeeting || null,
+    activity: activity?.results || []
   });
 }

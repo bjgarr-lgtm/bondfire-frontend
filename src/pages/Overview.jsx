@@ -133,6 +133,21 @@ function groupActivity(activity) {
   return grouped.slice(0, 10);
 }
 
+function formatMeetingWhen(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return new Date(n).toLocaleString();
+  }
+}
 
 export default function Overview() {
 
@@ -186,6 +201,8 @@ export default function Overview() {
   const people = Array.isArray(data?.people) ? data.people : [];
   const needs = Array.isArray(data?.needs) ? data.needs : [];
   const activity = Array.isArray(data?.activity) ? data.activity : [];
+  const nextMeeting = data?.nextMeeting || null;
+
 
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
 
@@ -249,7 +266,20 @@ export default function Overview() {
             <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
               <button className="btn" onClick={() => go("meetings")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
+          <div className="helper" style={{ marginTop: 10 }}>
+            {counts.meetingsUpcoming || 0} upcoming
+          </div>
+
+          {nextMeeting?.starts_at ? (
+            <div className="helper" style={{ marginTop: 8 }}>
+              Next: <strong>{formatMeetingWhen(nextMeeting.starts_at)}</strong>
+              {nextMeeting.title ? ` · ${nextMeeting.title}` : ""}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 8 }}>
+              Next: <strong>not scheduled</strong>
+            </div>
+          )}
         </div>
 
         {/* Recent Activity */}
