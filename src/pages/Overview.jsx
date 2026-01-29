@@ -139,6 +139,14 @@ export default function Overview() {
   const nav = useNavigate();
   const orgId = getOrgId();
 
+  const go = (section) => {
+    if (!orgId) return;
+    const base = `/org/${encodeURIComponent(orgId)}`;
+    const next = String(section || "").trim();
+    nav(next ? `${base}/${next}` : base);
+  };
+
+
   const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
 
   useEffect(() => {
@@ -199,7 +207,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-              <button className="btn" onClick={() => nav("people")}>View all</button>
+              <button className="btn" onClick={() => go("people")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}</div>
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
@@ -213,7 +221,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
-            <button className="btn" onClick={() => nav("inventory")}>View all</button>
+            <button className="btn" onClick={() => go("inventory")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}</div>        </div>
 
@@ -221,7 +229,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
-            <button className="btn" onClick={() => nav("needs")}>View all</button>
+              <button className="btn" onClick={() => go("needs")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.needsAll || 0} total, {counts.needsOpen || 0} open
@@ -239,7 +247,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
-            <button className="btn" onClick={() => nav("meetings")}>View all</button>
+              <button className="btn" onClick={() => go("meetings")}>View all</button>
           </div>
           <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
         </div>
