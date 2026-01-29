@@ -176,7 +176,7 @@ export default function Inventory() {
               <col style={{ width: 150 }} /> {/* Category */}
               <col style={{ width: 150 }} /> {/* Location */}
               <col /> {/* Notes */}
-              <col style={{ width: 64 }} /> {/* Pub */}
+              <col style={{ width: 64 }} /> {/* Public */}
               <col style={{ width: 120 }} /> {/* Delete */}
             </colgroup>
 
@@ -188,7 +188,7 @@ export default function Inventory() {
                 <th>Category</th>
                 <th>Location</th>
                 <th>Notes</th>
-                <th style={{ textAlign: "center" }}>Pub</th>
+                <th style={{ textAlign: "center" }}>Public</th>
                 <th />
               </tr>
             </thead>
