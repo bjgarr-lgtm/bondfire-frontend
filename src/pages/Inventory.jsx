@@ -154,22 +154,20 @@ export default function Inventory() {
           style={{ marginTop: 12 }}
         />
 
-        <div style={{ marginTop: 12 }}>
-          <table
-            className="table"
-            style={{ width: "100%", tableLayout: "fixed" }}
-          >
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
 
             <thead>
               <tr>
-                <th style={{ width: "21%" }}>Name</th>
+                <th style={{ width: "20%" }}>Name</th>
                 <th style={{ width: "8%" }}>Qty</th>
-                <th style={{ width: "9%" }}>Unit</th>
-                <th style={{ width: "14%" }}>Category</th>
-                <th style={{ width: "14%" }}>Location</th>
-                <th style={{ width: "22%" }}>Notes</th>
-                <th style={{ width: "4%" }}>Pub</th>
-                <th style={{ width: "8%" }} />
+                <th style={{ width: "8%" }}>Unit</th>
+                <th style={{ width: "12%" }}>Category</th>
+                <th style={{ width: "12%" }}>Location</th>
+                <th style={{ width: "28%" }}>Notes</th>
+                <th style={{ width: "5%" }}>Pub</th>
+                <th style={{ width: "7%" }} />
+
               </tr>
             </thead>
             <tbody>
@@ -270,7 +268,7 @@ export default function Inventory() {
                   <td>
                     <button
                       className="btn"
-                      style={{ padding: "8px 10px", borderRadius: 10, whiteSpace: "nowrap" }}
+                      style={{ padding: "6px 10px", minWidth: 0, whiteSpace: "nowrap" }}
                       onClick={() => delItem(i.id).catch(console.error)}
                     >
                       Del
