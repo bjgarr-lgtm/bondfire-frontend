@@ -131,6 +131,7 @@ export default function Overview() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
+  const [peoplePreview, setPeoplePreview] = useState([]);
 
   async function refresh() {
     if (!orgId) return;
@@ -139,6 +140,18 @@ export default function Overview() {
     try {
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
       setData(d);
+
+      const countPeople = Number(d?.counts?.people || 0);
+      const hasPeoplePreview = Array.isArray(d?.people) && d.people.length > 0;
+
+      if (hasPeoplePreview) {
+        setPeoplePreview(d.people);
+      } else if (countPeople > 0) {
+        const p = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+        setPeoplePreview(Array.isArray(p?.people) ? p.people.slice(0, 5) : []);
+      } else {
+        setPeoplePreview([]);
+      }
     } catch (e) {
       setErr(e?.message || "Failed to load dashboard");
     } finally {
@@ -151,7 +164,7 @@ export default function Overview() {
   }, [orgId]);
 
   const counts = data?.counts || {};
-  const people = Array.isArray(data?.people) ? data.people : [];
+  const people = Array.isArray(data?.people) && data.people.length > 0 ? data.people : peoplePreview;
   const needs = Array.isArray(data?.needs) ? data.needs : [];
   const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
   const activity = Array.isArray(data?.activity) ? data.activity : [];
@@ -204,22 +217,25 @@ export default function Overview() {
               View all
             </button>
           </div>
+
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
           </div>
-          {Array.isArray(people) && people.length > 0 ? (
-          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {people.map((p) => (
-              <li key={p.id}>{p.name}</li>
-            ))}
-          </ul>
-        ) : (
-          <div className="helper" style={{ marginTop: 10 }}>
-            {(counts.people || 0) === 0 ? "No people yet." : "Members exist. Click View all to see them."}
-          </div>
-        )}
 
+          {/* Only show the empty-state if count is truly zero */}
+          {(counts.people || 0) === 0 ? (
+            <div className="helper" style={{ marginTop: 10 }}>
+              No people yet.
+            </div>
+          ) : Array.isArray(people) && people.length > 0 ? (
+            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+              {people.slice(0, 5).map((p) => (
+                <li key={p.id}>{p.name}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
+
 
         {/* Inventory */}
         <div className="card" style={{ padding: 16 }}>
