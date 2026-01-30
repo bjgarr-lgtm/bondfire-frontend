@@ -12,19 +12,22 @@ function getOrgId() {
   }
 }
 
-function toInputDT(ms) {
-  if (!ms) return "";
-  const d = new Date(Number(ms));
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
-}
-
 function fromInputDT(value) {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function formatDT(ms) {
+  if (!ms) return "";
+  const d = new Date(Number(ms));
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function CalendarIcon({ size = 16 }) {
@@ -49,18 +52,16 @@ function CalendarIcon({ size = 16 }) {
   );
 }
 
-function DateTimeField({ name, defaultValue, onBlur }) {
+function DateTimeField({ name, value, onChange }) {
   const ref = React.useRef(null);
 
   const openPicker = () => {
     const el = ref.current;
     if (!el) return;
-
     if (typeof el.showPicker === "function") {
       el.showPicker();
       return;
     }
-
     el.focus();
     el.click();
   };
@@ -72,8 +73,8 @@ function DateTimeField({ name, defaultValue, onBlur }) {
         className="input dt-input"
         type="datetime-local"
         name={name}
-        defaultValue={defaultValue}
-        onBlur={onBlur}
+        value={value}
+        onChange={onChange}
       />
       <button
         type="button"
@@ -96,6 +97,15 @@ export default function Meetings() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  // Controlled add form so it clears reliably
+  const [form, setForm] = useState({
+    title: "",
+    starts_at: "",
+    ends_at: "",
+    location: "",
+    agenda: "",
+  });
+
   async function refresh() {
     if (!orgId) return;
     setLoading(true);
@@ -113,7 +123,6 @@ export default function Meetings() {
 
   useEffect(() => {
     refresh().catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
   const list = useMemo(() => {
@@ -125,25 +134,11 @@ export default function Meetings() {
     );
   }, [items, q]);
 
-  async function putMeeting(id, patch) {
-    if (!orgId || !id) return;
-    await api(
-      `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...patch }),
-      }
-    );
-    refresh().catch(console.error);
-  }
-
   async function delMeeting(id) {
     if (!orgId || !id) return;
-    await api(
-      `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`,
-      { method: "DELETE" }
-    );
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     refresh().catch(console.error);
   }
 
@@ -151,15 +146,15 @@ export default function Meetings() {
     e.preventDefault();
     if (!orgId) return;
 
-    const f = new FormData(e.currentTarget);
+    setErr("");
 
-    const title = String(f.get("title") || "").trim();
+    const title = String(form.title || "").trim();
     if (!title) return;
 
-    const starts_at = fromInputDT(String(f.get("starts_at") || ""));
-    const ends_at = fromInputDT(String(f.get("ends_at") || ""));
-    const location = String(f.get("location") || "").trim();
-    const agenda = String(f.get("agenda") || "").trim();
+    const starts_at = fromInputDT(form.starts_at);
+    const ends_at = fromInputDT(form.ends_at);
+    const location = String(form.location || "").trim();
+    const agenda = String(form.agenda || "").trim();
 
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
@@ -168,13 +163,11 @@ export default function Meetings() {
     });
 
     if (res?.id) {
-      setItems((prev) => [
-        { id: res.id, title, starts_at, ends_at, location, agenda },
-        ...prev,
-      ]);
+      setItems((prev) => [{ id: res.id, title, starts_at, ends_at, location, agenda }, ...prev]);
     }
 
-    e.currentTarget.reset();
+    // Clear add form immediately
+    setForm({ title: "", starts_at: "", ends_at: "", location: "", agenda: "" });
 
     setTimeout(() => {
       refresh().catch(console.error);
@@ -188,11 +181,7 @@ export default function Meetings() {
           <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
             Meetings
           </h2>
-          <button
-            className="btn"
-            onClick={() => refresh().catch(console.error)}
-            disabled={loading}
-          >
+          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
@@ -211,14 +200,15 @@ export default function Meetings() {
           </div>
         )}
 
-        <div style={{ marginTop: 12 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
+        {/* Read only list */}
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
             <thead>
               <tr>
-                <th style={{ width: "28%" }}>Title</th>
+                <th style={{ width: "34%" }}>Title</th>
                 <th style={{ width: "18%" }}>Starts</th>
                 <th style={{ width: "18%" }}>Ends</th>
-                <th style={{ width: "24%" }}>Location</th>
+                <th style={{ width: "18%" }}>Location</th>
                 <th style={{ width: "12%" }} />
               </tr>
             </thead>
@@ -226,75 +216,23 @@ export default function Meetings() {
               {list.map((m) => (
                 <tr key={m.id}>
                   <td>
-                    <input
-                      className="input"
-                      defaultValue={m.title || ""}
-                      onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (m.title || "")) {
-                          putMeeting(m.id, { title: v }).catch(console.error);
-                        }
-                      }}
-                    />
+                    <div style={{ fontWeight: 600 }}>{m.title || ""}</div>
                     <div className="helper" style={{ marginTop: 6 }}>
-                      <Link
-                        to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(
-                          m.id
-                        )}`}
-                      >
+                      <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
                         Open
                       </Link>
                     </div>
                   </td>
-
+                  <td className="helper">{formatDT(m.starts_at) || "not scheduled"}</td>
+                  <td className="helper">{formatDT(m.ends_at) || ""}</td>
+                  <td>{m.location || ""}</td>
                   <td>
-                    <DateTimeField
-                      defaultValue={toInputDT(m.starts_at)}
-                      onBlur={(e) => {
-                        const ms = fromInputDT(e.target.value);
-                        if ((ms ?? null) !== (m.starts_at ?? null)) {
-                          putMeeting(m.id, { starts_at: ms }).catch(console.error);
-                        }
-                      }}
-                    />
-                  </td>
-
-                  <td>
-                    <DateTimeField
-                      defaultValue={toInputDT(m.ends_at)}
-                      onBlur={(e) => {
-                        const ms = fromInputDT(e.target.value);
-                        if ((ms ?? null) !== (m.ends_at ?? null)) {
-                          putMeeting(m.id, { ends_at: ms }).catch(console.error);
-                        }
-                      }}
-                    />
-                  </td>
-
-                  <td>
-                    <input
-                      className="input"
-                      defaultValue={m.location || ""}
-                      onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (m.location || "")) {
-                          putMeeting(m.id, { location: v }).catch(console.error);
-                        }
-                      }}
-                    />
-                  </td>
-
-                  <td>
-                    <button
-                      className="btn"
-                      onClick={() => delMeeting(m.id).catch(console.error)}
-                    >
+                    <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
                       Delete
                     </button>
                   </td>
                 </tr>
               ))}
-
               {list.length === 0 && (
                 <tr>
                   <td colSpan={5} className="helper">
@@ -306,14 +244,45 @@ export default function Meetings() {
           </table>
         </div>
 
+        {/* Add form */}
         <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
-          <input className="input" name="title" placeholder="Title" required />
+          <input
+            className="input"
+            name="title"
+            placeholder="Title"
+            required
+            value={form.title}
+            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+          />
 
-          <DateTimeField name="starts_at" defaultValue="" />
-          <DateTimeField name="ends_at" defaultValue="" />
+          <DateTimeField
+            name="starts_at"
+            value={form.starts_at}
+            onChange={(e) => setForm((p) => ({ ...p, starts_at: e.target.value }))}
+          />
 
-          <input className="input" name="location" placeholder="Location" />
-          <input className="input" name="agenda" placeholder="Agenda (short)" />
+          <DateTimeField
+            name="ends_at"
+            value={form.ends_at}
+            onChange={(e) => setForm((p) => ({ ...p, ends_at: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="location"
+            placeholder="Location"
+            value={form.location}
+            onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="agenda"
+            placeholder="Agenda (short)"
+            value={form.agenda}
+            onChange={(e) => setForm((p) => ({ ...p, agenda: e.target.value }))}
+          />
+
           <button className="btn">Add Meeting</button>
         </form>
       </div>

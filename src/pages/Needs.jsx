@@ -11,29 +11,51 @@ function getOrgId() {
   }
 }
 
+const URGENCY_OPTIONS = [
+  { value: "", label: "unspecified" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "critical", label: "critical" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "open", label: "open" },
+  { value: "in-progress", label: "in-progress" },
+  { value: "resolved", label: "resolved" },
+];
+
 export default function Needs() {
   const orgId = getOrgId();
 
   const [needs, setNeeds] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [err, setErr] = useState("");
 
+  // Controlled add form so it clears reliably
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    urgency: "",
+    status: "open",
+    is_public: false,
+  });
+
   async function refreshNeeds() {
-  if (!orgId) return;
-  setLoading(true);
-  setErr("");
-  try {
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-    setNeeds(Array.isArray(data.needs) ? data.needs : []);
-  } catch (e) {
-    console.error(e);
-    setErr(e?.message || String(e));
-  } finally {
-    setLoading(false);
+    if (!orgId) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+      setNeeds(Array.isArray(data.needs) ? data.needs : []);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   useEffect(() => {
     refreshNeeds().catch(console.error);
@@ -62,10 +84,9 @@ export default function Needs() {
 
   async function delNeed(id) {
     if (!orgId || !id) return;
-    await api(
-      `/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(id)}`,
-      { method: "DELETE" }
-    );
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/needs?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setNeeds((prev) => prev.filter((x) => x.id !== id));
     refreshNeeds().catch(console.error);
   }
@@ -74,14 +95,17 @@ export default function Needs() {
     e.preventDefault();
     if (!orgId) return;
 
-    const f = new FormData(e.currentTarget);
+    setErr("");
+
+    const title = String(form.title || "").trim();
+    if (!title) return;
 
     const payload = {
-      title: f.get("title"),
-      description: f.get("description") || "",
-      urgency: f.get("urgency") || "",
-      status: f.get("status") || "open",
-      is_public: String(f.get("is_public") || "") === "on",
+      title,
+      description: String(form.description || "").trim(),
+      urgency: String(form.urgency || "").trim(),
+      status: String(form.status || "open").trim() || "open",
+      is_public: !!form.is_public,
     };
 
     const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
@@ -105,10 +129,11 @@ export default function Needs() {
       refreshNeeds().catch(console.error);
     }
 
-    e.currentTarget.reset();
-  };
+    // Clear add form
+    setForm({ title: "", description: "", urgency: "", status: "open", is_public: false });
+  }
 
-  const cellInputStyle = { width: "100%", minWidth: 80, boxSizing: "border-box" };
+  const cellStyle = { width: "100%", minWidth: 0, boxSizing: "border-box" };
 
   return (
     <div>
@@ -129,25 +154,26 @@ export default function Needs() {
           placeholder="Search needs"
           style={{ marginTop: 12 }}
         />
+
         {err && (
           <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
             {err}
           </div>
         )}
 
-
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 760 }}>
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 900 }}>
             <thead>
               <tr>
-                <th style={{ width: "20%" }}>Title</th>
+                <th style={{ width: "22%" }}>Title</th>
                 <th style={{ width: "36%" }}>Description</th>
                 <th style={{ width: "14%" }}>Urgency</th>
                 <th style={{ width: "14%" }}>Status</th>
                 <th style={{ width: "8%" }}>Public</th>
-                <th style={{ width: "8%" }} />
+                <th style={{ width: "6%" }} />
               </tr>
             </thead>
+
             <tbody>
               {list.map((n) => (
                 <tr key={n.id}>
@@ -155,47 +181,56 @@ export default function Needs() {
                     <input
                       className="input"
                       defaultValue={n.title || ""}
-                      style={cellInputStyle}
+                      style={cellStyle}
                       onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (n.title || "")) putNeed(n.id, { title: v }).catch(console.error);
+                        const v = String(e.target.value || "").trim();
+                        if (v !== String(n.title || "")) putNeed(n.id, { title: v }).catch(console.error);
                       }}
                     />
                   </td>
+
                   <td>
                     <input
                       className="input"
                       defaultValue={n.description || ""}
-                      style={cellInputStyle}
+                      style={cellStyle}
                       onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (n.description || "")) putNeed(n.id, { description: v }).catch(console.error);
+                        const v = String(e.target.value || "").trim();
+                        if (v !== String(n.description || "")) putNeed(n.id, { description: v }).catch(console.error);
                       }}
                     />
                   </td>
-                  <td>
-                    <input
-                      className="input"
-                      defaultValue={n.urgency || ""}
-                      style={cellInputStyle}
-                      onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (n.urgency || "")) putNeed(n.id, { urgency: v }).catch(console.error);
-                      }}
-                    />
-                  </td>
+
                   <td>
                     <select
                       className="input"
-                      defaultValue={n.status || "open"}
-                      style={cellInputStyle}
-                      onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
+                      style={cellStyle}
+                      value={String(n.urgency || "")}
+                      onChange={(e) => putNeed(n.id, { urgency: e.target.value }).catch(console.error)}
                     >
-                      <option value="open">open</option>
-                      <option value="in-progress">in-progress</option>
-                      <option value="resolved">resolved</option>
+                      {URGENCY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
                     </select>
                   </td>
+
+                  <td>
+                    <select
+                      className="input"
+                      style={cellStyle}
+                      value={String(n.status || "open")}
+                      onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
+                    >
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
@@ -203,6 +238,7 @@ export default function Needs() {
                       onChange={(e) => putNeed(n.id, { is_public: e.target.checked }).catch(console.error)}
                     />
                   </td>
+
                   <td>
                     <button className="btn" onClick={() => delNeed(n.id).catch(console.error)}>
                       Delete
@@ -210,6 +246,7 @@ export default function Needs() {
                   </td>
                 </tr>
               ))}
+
               {list.length === 0 && (
                 <tr>
                   <td colSpan={6} className="helper">
@@ -222,18 +259,59 @@ export default function Needs() {
         </div>
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
-          <input className="input" name="title" placeholder="Title" required />
-          <input className="input" name="description" placeholder="Description" />
-          <input className="input" name="urgency" placeholder="Urgency (e.g. high)" />
-          <select className="input" name="status" defaultValue="open">
-            <option value="open">open</option>
-            <option value="in-progress">in-progress</option>
-            <option value="resolved">resolved</option>
+          <input
+            className="input"
+            name="title"
+            placeholder="Title"
+            required
+            value={form.title}
+            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="description"
+            placeholder="Description"
+            value={form.description}
+            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+          />
+
+          <select
+            className="input"
+            name="urgency"
+            value={form.urgency}
+            onChange={(e) => setForm((p) => ({ ...p, urgency: e.target.value }))}
+          >
+            {URGENCY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
+
+          <select
+            className="input"
+            name="status"
+            value={form.status}
+            onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" name="is_public" />
+            <input
+              type="checkbox"
+              name="is_public"
+              checked={form.is_public}
+              onChange={(e) => setForm((p) => ({ ...p, is_public: e.target.checked }))}
+            />
             Public
           </label>
+
           <div />
           <button className="btn">Add Need</button>
         </form>

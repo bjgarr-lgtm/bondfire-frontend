@@ -11,6 +11,12 @@ function getOrgId() {
   }
 }
 
+function uniqSorted(arr) {
+  return Array.from(
+    new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
 export default function Inventory() {
   const orgId = getOrgId();
 
@@ -18,6 +24,21 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  // Controlled add form so it actually clears every time
+  const [form, setForm] = useState({
+    name: "",
+    qty: "",
+    unit: "",
+    category: "",
+    location: "",
+    notes: "",
+    is_public: false,
+  });
+
+  const unitOptions = useMemo(() => uniqSorted(items.map((i) => i.unit)), [items]);
+  const categoryOptions = useMemo(() => uniqSorted(items.map((i) => i.category)), [items]);
+  const locationOptions = useMemo(() => uniqSorted(items.map((i) => i.location)), [items]);
 
   async function refresh() {
     if (!orgId) return;
@@ -72,17 +93,27 @@ export default function Inventory() {
     e.preventDefault();
     if (!orgId) return;
 
-    const f = new FormData(e.currentTarget);
+    setErr("");
 
-    const name = String(f.get("name") || "").trim();
+    const name = String(form.name || "").trim();
     if (!name) return;
 
-    const qty = String(f.get("qty") || "");
-    const unit = String(f.get("unit") || "");
-    const category = String(f.get("category") || "");
-    const location = String(f.get("location") || "");
-    const notes = String(f.get("notes") || "");
-    const is_public = String(f.get("is_public") || "") === "on";
+    const qtyRaw = String(form.qty ?? "").trim();
+    let qty = null;
+    if (qtyRaw !== "") {
+      const n = Number(qtyRaw);
+      if (!Number.isFinite(n)) {
+        setErr("Qty must be a number.");
+        return;
+      }
+      qty = n;
+    }
+
+    const unit = String(form.unit || "").trim();
+    const category = String(form.category || "").trim();
+    const location = String(form.location || "").trim();
+    const notes = String(form.notes || "").trim();
+    const is_public = !!form.is_public;
 
     const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
@@ -114,7 +145,16 @@ export default function Inventory() {
       ]);
     }
 
-    e.currentTarget.reset();
+    // Clear fields immediately, reliably
+    setForm({
+      name: "",
+      qty: "",
+      unit: "",
+      category: "",
+      location: "",
+      notes: "",
+      is_public: false,
+    });
 
     setTimeout(() => {
       refresh().catch(console.error);
@@ -164,19 +204,17 @@ export default function Inventory() {
           </div>
         ) : null}
 
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 12 }}>
-          <table
-            className="table"
-            style={{ width: "100%", tableLayout: "fixed" }}
-          >
+        {/* Extra right padding so Pub/Delete do not get clipped by card edge */}
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 28 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
             <colgroup>
               <col /> {/* Name */}
               <col style={{ width: 90 }} /> {/* Qty */}
-              <col style={{ width: 90 }} /> {/* Unit */}
-              <col style={{ width: 150 }} /> {/* Category */}
-              <col style={{ width: 150 }} /> {/* Location */}
+              <col style={{ width: 100 }} /> {/* Unit */}
+              <col style={{ width: 160 }} /> {/* Category */}
+              <col style={{ width: 160 }} /> {/* Location */}
               <col /> {/* Notes */}
-              <col style={{ width: 64 }} /> {/* Public */}
+              <col style={{ width: 84 }} /> {/* Public */}
               <col style={{ width: 120 }} /> {/* Delete */}
             </colgroup>
 
@@ -203,8 +241,7 @@ export default function Inventory() {
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.name || ""))
-                          putItem(i.id, { name: v }).catch(console.error);
+                        if (v !== (i.name || "")) putItem(i.id, { name: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -214,19 +251,14 @@ export default function Inventory() {
                       className="input"
                       type="number"
                       step="any"
-                      defaultValue={
-                        i.qty === null || typeof i.qty === "undefined" ? "" : i.qty
-                      }
+                      defaultValue={i.qty === null || typeof i.qty === "undefined" ? "" : i.qty}
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const raw = e.target.value;
                         const v = raw === "" ? null : Number(raw);
                         const curr =
-                          i.qty === null || typeof i.qty === "undefined"
-                            ? null
-                            : Number(i.qty);
-                        if (v !== curr)
-                          putItem(i.id, { qty: v }).catch(console.error);
+                          i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
+                        if (v !== curr) putItem(i.id, { qty: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -234,12 +266,12 @@ export default function Inventory() {
                   <td>
                     <input
                       className="input"
+                      list="bf_inv_units"
                       defaultValue={i.unit || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (i.unit || ""))
-                          putItem(i.id, { unit: v }).catch(console.error);
+                        const v = (e.target.value || "").trim();
+                        if (v !== (i.unit || "")) putItem(i.id, { unit: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -247,12 +279,12 @@ export default function Inventory() {
                   <td>
                     <input
                       className="input"
+                      list="bf_inv_categories"
                       defaultValue={i.category || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (i.category || ""))
-                          putItem(i.id, { category: v }).catch(console.error);
+                        const v = (e.target.value || "").trim();
+                        if (v !== (i.category || "")) putItem(i.id, { category: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -260,12 +292,12 @@ export default function Inventory() {
                   <td>
                     <input
                       className="input"
+                      list="bf_inv_locations"
                       defaultValue={i.location || ""}
                       style={cellInputStyle}
                       onBlur={(e) => {
-                        const v = e.target.value || "";
-                        if (v !== (i.location || ""))
-                          putItem(i.id, { location: v }).catch(console.error);
+                        const v = (e.target.value || "").trim();
+                        if (v !== (i.location || "")) putItem(i.id, { location: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -277,8 +309,7 @@ export default function Inventory() {
                       style={cellInputStyle}
                       onBlur={(e) => {
                         const v = e.target.value || "";
-                        if (v !== (i.notes || ""))
-                          putItem(i.id, { notes: v }).catch(console.error);
+                        if (v !== (i.notes || "")) putItem(i.id, { notes: v }).catch(console.error);
                       }}
                     />
                   </td>
@@ -288,20 +319,12 @@ export default function Inventory() {
                       type="checkbox"
                       style={{ margin: 0 }}
                       defaultChecked={!!i.is_public}
-                      onChange={(e) =>
-                        putItem(i.id, { is_public: e.target.checked }).catch(
-                          console.error
-                        )
-                      }
+                      onChange={(e) => putItem(i.id, { is_public: e.target.checked }).catch(console.error)}
                     />
                   </td>
 
                   <td>
-                    <button
-                      className="btn"
-                      style={compactBtnStyle}
-                      onClick={() => delItem(i.id).catch(console.error)}
-                    >
+                    <button className="btn" style={compactBtnStyle} onClick={() => delItem(i.id).catch(console.error)}>
                       Delete
                     </button>
                   </td>
@@ -317,25 +340,90 @@ export default function Inventory() {
               )}
             </tbody>
           </table>
+
+          {/* datalists for consistent values */}
+          <datalist id="bf_inv_units">
+            {unitOptions.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="bf_inv_categories">
+            {categoryOptions.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="bf_inv_locations">
+            {locationOptions.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </div>
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
-          <input className="input" name="name" placeholder="Name" required />
+          <input
+            className="input"
+            name="name"
+            placeholder="Name"
+            required
+            value={form.name}
+            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+          />
+
           <input
             className="input"
             name="qty"
             placeholder="Qty"
             type="number"
             step="any"
+            value={form.qty}
+            onChange={(e) => setForm((p) => ({ ...p, qty: e.target.value }))}
           />
-          <input className="input" name="unit" placeholder="Unit" />
-          <input className="input" name="category" placeholder="Category" />
-          <input className="input" name="location" placeholder="Location" />
-          <input className="input" name="notes" placeholder="Notes" />
+
+          <input
+            className="input"
+            name="unit"
+            placeholder="Unit"
+            list="bf_inv_units"
+            value={form.unit}
+            onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="category"
+            placeholder="Category"
+            list="bf_inv_categories"
+            value={form.category}
+            onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="location"
+            placeholder="Location"
+            list="bf_inv_locations"
+            value={form.location}
+            onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+          />
+
+          <input
+            className="input"
+            name="notes"
+            placeholder="Notes"
+            value={form.notes}
+            onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+          />
+
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" name="is_public" />
+            <input
+              type="checkbox"
+              name="is_public"
+              checked={form.is_public}
+              onChange={(e) => setForm((p) => ({ ...p, is_public: e.target.checked }))}
+            />
             Public
           </label>
+
           <div />
           <button className="btn">Add Item</button>
         </form>

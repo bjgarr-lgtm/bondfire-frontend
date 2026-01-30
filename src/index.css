@@ -121,3 +121,34 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
 .cell-center {
   display: flex; align-items: center; justify-content: center;
 }
+
+.dt-wrap {
+  position: relative;
+}
+
+.dt-input {
+  padding-right: 44px;
+}
+
+/* Hide the native calendar icon so you only see YOUR button */
+.dt-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
+/* Your calendar button */
+.dt-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 6px;
+  color: inherit;
+  opacity: 0.9;
+}
+
+.dt-btn:hover {
+  opacity: 1;
+}
