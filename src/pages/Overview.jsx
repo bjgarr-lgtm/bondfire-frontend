@@ -207,14 +207,18 @@ export default function Overview() {
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
           </div>
+          {Array.isArray(people) && people.length > 0 ? (
           <ul style={{ marginTop: 10, paddingLeft: 18 }}>
             {people.map((p) => (
               <li key={p.id}>{p.name}</li>
             ))}
-            {people.length === 0 && (
-              <li className="helper">No people yet.</li>
-            )}
           </ul>
+        ) : (
+          <div className="helper" style={{ marginTop: 10 }}>
+            {(counts.people || 0) === 0 ? "No people yet." : "Members exist. Click View all to see them."}
+          </div>
+        )}
+
         </div>
 
         {/* Inventory */}
