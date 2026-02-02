@@ -1,6 +1,6 @@
 // src/pages/Settings.jsx
 import * as React from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import PublicPage from "./PublicPage.jsx";
 
 /* ---------- API helper ---------- */
@@ -22,8 +22,11 @@ async function authFetch(path, opts = {}) {
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 
+  // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
-    /^\/api\/(orgs\/[^/]+\/(invites|members)|invites\/redeem)\b/.test(relative);
+    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges)|invites\/redeem)\b/.test(
+      relative
+    );
 
   const headers = {
     "Content-Type": "application/json",
@@ -87,6 +90,10 @@ const readJSON = (k, fallback = {}) => {
 
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
+function safeMailto(s) {
+  return encodeURIComponent(String(s || ""));
+}
+
 export default function Settings() {
   const { orgId } = useParams();
 
@@ -112,6 +119,8 @@ export default function Settings() {
       ["invites", "Invites"],
       ["members", "Members"],
       ["public", "Public page"],
+      ["newsletter", "Newsletter"],
+      ["pledges", "Pledges"],
     ],
     []
   );
@@ -428,6 +437,235 @@ export default function Settings() {
 
   const publicUrl = slug ? `${location.origin}/#/p/${slug}` : "";
 
+  /* ========== NEWSLETTER (backend, Riseup sends) ========== */
+  const [nlEnabled, setNlEnabled] = React.useState(false);
+  const [nlListAddress, setNlListAddress] = React.useState("");
+  const [nlBlurb, setNlBlurb] = React.useState("");
+  const [nlMsg, setNlMsg] = React.useState("");
+  const [nlBusy, setNlBusy] = React.useState(false);
+  const [subscribers, setSubscribers] = React.useState([]);
+
+  const loadNewsletter = React.useCallback(async () => {
+    if (!orgId) return;
+    setNlMsg("");
+    setNlBusy(true);
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter`, {
+        method: "GET",
+      });
+      const cfg = r?.newsletter || r?.settings || r || {};
+      setNlEnabled(!!cfg.enabled);
+      setNlListAddress(String(cfg.list_address || cfg.listAddress || ""));
+      setNlBlurb(String(cfg.blurb || ""));
+    } catch (e) {
+      setNlMsg(e.message || "Failed to load newsletter settings");
+    } finally {
+      setNlBusy(false);
+    }
+  }, [orgId]);
+
+  const loadSubscribers = React.useCallback(async () => {
+    if (!orgId) return;
+    setNlMsg("");
+    setNlBusy(true);
+    try {
+      const r = await authFetch(
+        `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`,
+        { method: "GET" }
+      );
+      setSubscribers(Array.isArray(r.subscribers) ? r.subscribers : []);
+    } catch (e) {
+      setSubscribers([]);
+      setNlMsg(e.message || "Failed to load subscribers");
+    } finally {
+      setNlBusy(false);
+    }
+  }, [orgId]);
+
+  const saveNewsletter = async () => {
+    if (!orgId) return;
+    setNlMsg("");
+    setNlBusy(true);
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter`, {
+        method: "PUT",
+        body: {
+          enabled: !!nlEnabled,
+          list_address: (nlListAddress || "").trim(),
+          blurb: (nlBlurb || "").trim(),
+        },
+      });
+      setNlMsg("Saved.");
+      setTimeout(() => setNlMsg(""), 1200);
+    } catch (e) {
+      setNlMsg(e.message || "Failed to save newsletter settings");
+    } finally {
+      setNlBusy(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (tab === "newsletter") {
+      loadNewsletter();
+      loadSubscribers();
+    }
+  }, [tab, loadNewsletter, loadSubscribers]);
+
+  const csvHref = orgId
+    ? `/#/org/${encodeURIComponent(orgId)}/settings?tab=newsletter`
+    : "";
+
+  const csvDownloadUrl = orgId
+    ? `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`
+    : "";
+
+  const openRiseupDraft = () => {
+    const to = (nlListAddress || "").trim();
+    if (!to) {
+      setNlMsg("Set a Riseup list address first.");
+      setTimeout(() => setNlMsg(""), 1400);
+      return;
+    }
+    const subject = `${orgName || "Bondfire"} newsletter`;
+    const body =
+      (nlBlurb ? `${nlBlurb}\n\n` : "") +
+      `Hello,\n\n` +
+      `Here is the latest update.\n\n` +
+      `Needs:\n- \n\n` +
+      `Pledges:\n- \n\n` +
+      `Thanks,\n${orgName || ""}`;
+
+    const href = `mailto:${safeMailto(to)}?subject=${safeMailto(subject)}&body=${safeMailto(
+      body
+    )}`;
+    window.location.href = href;
+  };
+
+  /* ========== PLEDGES (backend) ========== */
+  const [pledges, setPledges] = React.useState([]);
+  const [pledgesMsg, setPledgesMsg] = React.useState("");
+  const [pledgesBusy, setPledgesBusy] = React.useState(false);
+
+  const [needs, setNeeds] = React.useState([]);
+
+  const loadNeedsForPledges = React.useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+        method: "GET",
+      });
+      setNeeds(Array.isArray(r.needs) ? r.needs : []);
+    } catch {
+      setNeeds([]);
+    }
+  }, [orgId]);
+
+  const loadPledges = React.useCallback(async () => {
+    if (!orgId) return;
+    setPledgesMsg("");
+    setPledgesBusy(true);
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/pledges`, {
+        method: "GET",
+      });
+      setPledges(Array.isArray(r.pledges) ? r.pledges : []);
+    } catch (e) {
+      setPledges([]);
+      setPledgesMsg(e.message || "Failed to load pledges");
+    } finally {
+      setPledgesBusy(false);
+    }
+  }, [orgId]);
+
+  React.useEffect(() => {
+    if (tab === "pledges") {
+      loadNeedsForPledges();
+      loadPledges();
+    }
+  }, [tab, loadNeedsForPledges, loadPledges]);
+
+  const upsertPledge = async (id, patch) => {
+    if (!orgId) return;
+    setPledgesMsg("");
+    setPledgesBusy(true);
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/pledges`, {
+        method: "PUT",
+        body: { id, ...patch },
+      });
+      await loadPledges();
+      setPledgesMsg("Saved.");
+      setTimeout(() => setPledgesMsg(""), 900);
+    } catch (e) {
+      setPledgesMsg(e.message || "Failed to save pledge");
+    } finally {
+      setPledgesBusy(false);
+    }
+  };
+
+  const deletePledge = async (id) => {
+    if (!orgId) return;
+    const ok = confirm("Delete this pledge?");
+    if (!ok) return;
+    setPledgesMsg("");
+    setPledgesBusy(true);
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/pledges`, {
+        method: "DELETE",
+        body: { id },
+      });
+      await loadPledges();
+      setPledgesMsg("Deleted.");
+      setTimeout(() => setPledgesMsg(""), 900);
+    } catch (e) {
+      setPledgesMsg(e.message || "Failed to delete pledge");
+    } finally {
+      setPledgesBusy(false);
+    }
+  };
+
+  const onAddPledge = async (e) => {
+    e.preventDefault();
+    if (!orgId) return;
+
+    const f = new FormData(e.currentTarget);
+
+    const payload = {
+      pledger_name: String(f.get("pledger_name") || "").trim(),
+      pledger_email: String(f.get("pledger_email") || "").trim(),
+      type: String(f.get("type") || "").trim(),
+      amount: String(f.get("amount") || "").trim(),
+      unit: String(f.get("unit") || "").trim(),
+      note: String(f.get("note") || "").trim(),
+      status: String(f.get("status") || "offered").trim(),
+      need_id: String(f.get("need_id") || "").trim() || null,
+      is_public: String(f.get("is_public") || "") === "on",
+    };
+
+    setPledgesMsg("");
+    setPledgesBusy(true);
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/pledges`, {
+        method: "POST",
+        body: payload,
+      });
+      e.currentTarget.reset();
+      await loadPledges();
+      setPledgesMsg("Added.");
+      setTimeout(() => setPledgesMsg(""), 900);
+    } catch (err) {
+      setPledgesMsg(err.message || "Failed to add pledge");
+    } finally {
+      setPledgesBusy(false);
+    }
+  };
+
+  const needTitleById = React.useMemo(() => {
+    const m = new Map();
+    for (const n of needs) m.set(String(n.id), String(n.title || ""));
+    return m;
+  }, [needs]);
+
   return (
     <div className="grid" style={{ gap: 16, padding: 16 }}>
       {/* Submenu */}
@@ -467,12 +705,7 @@ export default function Settings() {
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Logo</span>
-              <input
-                className="input"
-                type="file"
-                accept="image/*"
-                onChange={onLogo}
-              />
+              <input className="input" type="file" accept="image/*" onChange={onLogo} />
               {logoDataUrl && (
                 <img
                   src={logoDataUrl}
@@ -503,22 +736,14 @@ export default function Settings() {
           <h2 style={{ marginTop: 0 }}>Invites</h2>
           <p className="helper">Generate invite codes so someone can join this org.</p>
 
-          <div
-            className="row"
-            style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
-          >
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
               {inviteBusy ? "Generating…" : "Generate invite"}
             </button>
             <button className="btn" type="button" onClick={loadInvites}>
               Refresh
             </button>
-            <button
-              className="btn"
-              type="button"
-              onClick={deleteInactiveInvites}
-              disabled={inviteBusy}
-            >
+            <button className="btn" type="button" onClick={deleteInactiveInvites} disabled={inviteBusy}>
               Delete used and expired
             </button>
 
@@ -542,31 +767,19 @@ export default function Settings() {
             ) : (
               <div className="grid" style={{ gap: 10 }}>
                 {invites.map((inv) => (
-                  <div
-                    key={inv.code}
-                    className="card"
-                    style={{ padding: 12, border: "1px solid #222" }}
-                  >
+                  <div key={inv.code} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                     <div className="row" style={{ gap: 8, alignItems: "center" }}>
                       <code style={{ fontSize: 16 }}>{inv.code}</code>
                       <button className="btn" onClick={() => copyInvite(inv.code)}>
                         Copy
                       </button>
-                      <button
-                        className="btn"
-                        type="button"
-                        onClick={() => deleteInvite(inv.code)}
-                        disabled={inviteBusy}
-                      >
+                      <button className="btn" type="button" onClick={() => deleteInvite(inv.code)} disabled={inviteBusy}>
                         Delete
                       </button>
 
                       <div className="helper" style={{ marginLeft: "auto" }}>
-                        role: {inv.role || "member"} · uses: {inv.uses || 0}/
-                        {inv.max_uses || 1}
-                        {inv.expires_at
-                          ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}`
-                          : ""}
+                        role: {inv.role || "member"} · uses: {inv.uses || 0}/{inv.max_uses || 1}
+                        {inv.expires_at ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}` : ""}
                       </div>
                     </div>
                   </div>
@@ -593,24 +806,12 @@ export default function Settings() {
             </div>
           ) : (
             <>
-              <div
-                className="row"
-                style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={loadMembers}
-                  disabled={membersBusy}
-                >
+              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
                   {membersBusy ? "Refreshing…" : "Refresh"}
                 </button>
                 {membersMsg ? (
-                  <span
-                    className={
-                      membersMsg.toLowerCase().includes("fail") ? "error" : "helper"
-                    }
-                  >
+                  <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
                     {membersMsg}
                   </span>
                 ) : null}
@@ -640,9 +841,7 @@ export default function Settings() {
                             <select
                               className="input"
                               value={m.role || "member"}
-                              onChange={(e) =>
-                                setMemberRole(m.userId, e.target.value, m.role, m.email)
-                              }
+                              onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
                               disabled={membersBusy}
                             >
                               <option value="viewer">viewer</option>
@@ -655,12 +854,7 @@ export default function Settings() {
                             {m.role === "owner" ? (
                               <span className="helper">owner</span>
                             ) : (
-                              <button
-                                className="btn"
-                                type="button"
-                                onClick={() => removeMember(m.userId, m.email)}
-                                disabled={membersBusy}
-                              >
+                              <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
                                 Remove
                               </button>
                             )}
@@ -680,56 +874,27 @@ export default function Settings() {
       {tab === "public" && (
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Public Page</h2>
-          <p className="helper">
-            Share a read-only page for your org. Only what you enable is shown.
-          </p>
+          <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
 
-          <form
-            onSubmit={savePublic}
-            className="grid"
-            style={{ gap: 10, marginTop: 8 }}
-          >
+          <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
             <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-              />
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
               <span>Enable public page</span>
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Share URL (slug)</span>
               <div className="row" style={{ gap: 8 }}>
-                <input
-                  className="input"
-                  style={{ flex: 1 }}
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="e.g. bondfire-team"
-                />
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={genSlug}
-                  title="Generate a nice slug"
-                >
+                <input className="input" style={{ flex: 1 }} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="e.g. bondfire-team" />
+                <button type="button" className="btn" onClick={genSlug} title="Generate a nice slug">
                   Generate
                 </button>
               </div>
 
               {slug && (
-                <div
-                  className="row"
-                  style={{ gap: 8, alignItems: "center", marginTop: 8 }}
-                >
+                <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
                   <span className="helper">Public link:</span>
-                  <a
-                    className="helper"
-                    href={`/#/p/${encodeURIComponent(slug)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a className="helper" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">
                     {publicUrl}
                   </a>
                 </div>
@@ -738,56 +903,29 @@ export default function Settings() {
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Title</span>
-              <input
-                className="input"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Public page title"
-              />
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Public page title" />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">About</span>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={about}
-                onChange={(e) => setAbout(e.target.value)}
-                placeholder="Short description"
-              />
+              <textarea className="textarea" rows={3} value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Short description" />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Features (one per line)</span>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={features}
-                onChange={(e) => setFeatures(e.target.value)}
-                placeholder={"Donations tracker\nVolunteers\nEvents"}
-              />
+              <textarea className="textarea" rows={3} value={features} onChange={(e) => setFeatures(e.target.value)} placeholder={"Donations tracker\nVolunteers\nEvents"} />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Links (Text | URL per line)</span>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={links}
-                onChange={(e) => setLinks(e.target.value)}
-                placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
-              />
+              <textarea className="textarea" rows={3} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"} />
             </label>
 
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
               <button className="btn-red" type="submit">
                 Save
               </button>
-              {msg && (
-                <span className={msg.includes("Saved") ? "success" : "error"}>
-                  {msg}
-                </span>
-              )}
+              {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
             </div>
           </form>
 
@@ -815,6 +953,269 @@ export default function Settings() {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Newsletter */}
+      {tab === "newsletter" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Newsletter</h2>
+          <div className="helper">
+            Bondfire collects subscribers. Riseup sends. Because of course nothing can be simple.
+          </div>
+
+          <div className="grid" style={{ gap: 10, marginTop: 10 }}>
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={nlEnabled} onChange={(e) => setNlEnabled(e.target.checked)} />
+              <span>Enable newsletter signup on public page</span>
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Riseup list address</span>
+              <input
+                className="input"
+                value={nlListAddress}
+                onChange={(e) => setNlListAddress(e.target.value)}
+                placeholder="example-list@riseup.net"
+              />
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Default blurb</span>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={nlBlurb}
+                onChange={(e) => setNlBlurb(e.target.value)}
+                placeholder="One paragraph you usually include at the top."
+              />
+            </label>
+
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button className="btn-red" type="button" onClick={saveNewsletter} disabled={nlBusy}>
+                {nlBusy ? "Saving…" : "Save"}
+              </button>
+              <button className="btn" type="button" onClick={openRiseupDraft}>
+                Open email draft
+              </button>
+              <button className="btn" type="button" onClick={() => loadSubscribers()} disabled={nlBusy}>
+                Refresh subscribers
+              </button>
+
+              <a className="btn" href={csvDownloadUrl} target="_blank" rel="noreferrer">
+                Export CSV
+              </a>
+
+              {nlMsg && <span className={nlMsg.toLowerCase().includes("fail") ? "error" : "helper"}>{nlMsg}</span>}
+            </div>
+
+            <div className="card" style={{ padding: 12, border: "1px solid #222" }}>
+              <h3 style={{ marginTop: 0 }}>Subscribers</h3>
+              {subscribers.length === 0 ? (
+                <div className="helper">No subscribers yet.</div>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Name</th>
+                      <th>Joined</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subscribers.slice(0, 200).map((s) => (
+                      <tr key={s.id || s.email}>
+                        <td>
+                          <code>{s.email}</code>
+                        </td>
+                        <td>{s.name || ""}</td>
+                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {subscribers.length > 200 ? (
+                <div className="helper" style={{ marginTop: 8 }}>
+                  Showing first 200. Use Export CSV for the full list.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pledges */}
+      {tab === "pledges" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Pledges</h2>
+
+          <div className="helper" style={{ marginTop: 6 }}>
+            Pledges can be linked to a Need so you can match supply to demand instead of chaos.
+          </div>
+
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+            <button className="btn" type="button" onClick={() => loadPledges()} disabled={pledgesBusy}>
+              {pledgesBusy ? "Loading…" : "Refresh"}
+            </button>
+            <Link className="btn" to={`/org/${encodeURIComponent(orgId)}/needs`}>
+              Go to Needs
+            </Link>
+            {pledgesMsg && <span className={pledgesMsg.toLowerCase().includes("fail") ? "error" : "helper"}>{pledgesMsg}</span>}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {pledges.length === 0 ? (
+              <div className="helper">No pledges yet.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="table" style={{ minWidth: 980 }}>
+                  <thead>
+                    <tr>
+                      <th>Pledger</th>
+                      <th>Email</th>
+                      <th>Need</th>
+                      <th>Type</th>
+                      <th>Amount</th>
+                      <th>Unit</th>
+                      <th>Status</th>
+                      <th>Public</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pledges.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.pledger_name || ""}</td>
+                        <td>
+                          <code>{p.pledger_email || ""}</code>
+                        </td>
+                        <td>
+                          <select
+                            className="input"
+                            value={p.need_id || ""}
+                            onChange={(e) => upsertPledge(p.id, { need_id: e.target.value || null })}
+                            disabled={pledgesBusy}
+                          >
+                            <option value="">unassigned</option>
+                            {needs.map((n) => (
+                              <option key={n.id} value={n.id}>
+                                {n.title || n.id}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            defaultValue={p.type || ""}
+                            onBlur={(e) => {
+                              const v = String(e.target.value || "");
+                              if (v !== String(p.type || "")) upsertPledge(p.id, { type: v });
+                            }}
+                            disabled={pledgesBusy}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            defaultValue={p.amount || ""}
+                            onBlur={(e) => {
+                              const v = String(e.target.value || "");
+                              if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
+                            }}
+                            disabled={pledgesBusy}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            defaultValue={p.unit || ""}
+                            onBlur={(e) => {
+                              const v = String(e.target.value || "");
+                              if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
+                            }}
+                            disabled={pledgesBusy}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="input"
+                            value={p.status || "offered"}
+                            onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
+                            disabled={pledgesBusy}
+                          >
+                            <option value="offered">offered</option>
+                            <option value="accepted">accepted</option>
+                            <option value="fulfilled">fulfilled</option>
+                            <option value="cancelled">cancelled</option>
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            defaultChecked={!!p.is_public}
+                            onChange={(e) => upsertPledge(p.id, { is_public: e.target.checked })}
+                            disabled={pledgesBusy}
+                          />
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 12, border: "1px solid #222", marginTop: 14 }}>
+            <h3 style={{ marginTop: 0 }}>Add pledge</h3>
+            <form onSubmit={onAddPledge} className="grid" style={{ gap: 10 }}>
+              <div className="grid cols-2" style={{ gap: 10 }}>
+                <input className="input" name="pledger_name" placeholder="Pledger name" />
+                <input className="input" name="pledger_email" placeholder="Pledger email" />
+              </div>
+
+              <select className="input" name="need_id" defaultValue="">
+                <option value="">Link to need (optional)</option>
+                {needs.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.title || n.id}
+                  </option>
+                ))}
+              </select>
+
+              <div className="grid cols-3" style={{ gap: 10 }}>
+                <input className="input" name="type" placeholder="Type (money, food, labor)" />
+                <input className="input" name="amount" placeholder="Amount" />
+                <input className="input" name="unit" placeholder="Unit (USD, hours, boxes)" />
+              </div>
+
+              <textarea className="textarea" name="note" rows={2} placeholder="Note" />
+
+              <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <select className="input" name="status" defaultValue="offered">
+                  <option value="offered">offered</option>
+                  <option value="accepted">accepted</option>
+                  <option value="fulfilled">fulfilled</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+
+                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" name="is_public" />
+                  <span>Public</span>
+                </label>
+
+                <button className="btn-red" type="submit" disabled={pledgesBusy}>
+                  {pledgesBusy ? "Saving…" : "Add"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
