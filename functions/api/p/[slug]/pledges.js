@@ -1,5 +1,5 @@
-import { json, err } from "../../../_lib/http.js";
-import { getOrgIdBySlug } from "../../../_lib/public.js";
+import { json, err } from "../../../../_lib/http.js";
+import { getOrgIdBySlug } from "../../../../_lib/public.js";
 
 export async function onRequest(context) {
   const { request, env, params } = context;
