@@ -1,6 +1,6 @@
 // src/pages/Settings.jsx
 import * as React from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import PublicPage from "./PublicPage.jsx";
 
 /* ---------- API helper ---------- */
@@ -22,8 +22,6 @@ async function authFetch(path, opts = {}) {
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 
-  // Invites and members may be hosted on Pages Functions even when the rest of the API is elsewhere.
-  // Try same origin first for those endpoints, then fall back to API_BASE.
   const isSpecialEndpoint =
     /^\/api\/(orgs\/[^/]+\/(invites|members)|invites\/redeem)\b/.test(relative);
 
@@ -40,7 +38,6 @@ async function authFetch(path, opts = {}) {
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
 
-    // Cloudflare 500s sometimes return HTML, not JSON
     let j = {};
     try {
       j = await res.json();
@@ -92,6 +89,32 @@ const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 export default function Settings() {
   const { orgId } = useParams();
+
+  /* ---------- Submenu tabs ---------- */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = String(searchParams.get("tab") || "org").toLowerCase();
+
+  const setTab = (next) => {
+    const n = String(next || "org").toLowerCase();
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("tab", n);
+        return p;
+      },
+      { replace: true }
+    );
+  };
+
+  const tabs = React.useMemo(
+    () => [
+      ["org", "Organization"],
+      ["invites", "Invites"],
+      ["members", "Members"],
+      ["public", "Public page"],
+    ],
+    []
+  );
 
   /* ========== INVITES (backend) ========== */
   const [invites, setInvites] = React.useState([]);
@@ -160,7 +183,9 @@ export default function Settings() {
         method: "DELETE",
         body: { code: c },
       });
-      setInvites((prev) => prev.filter((x) => String(x.code || "").toUpperCase() !== c));
+      setInvites((prev) =>
+        prev.filter((x) => String(x.code || "").toUpperCase() !== c)
+      );
       setInviteMsg("Deleted.");
       setTimeout(() => setInviteMsg(""), 900);
     } catch (e) {
@@ -178,7 +203,6 @@ export default function Settings() {
       const uses = Number(inv.uses || 0);
       const max = Number(inv.max_uses || 0);
       const exp = inv.expires_at ? Number(inv.expires_at) : null;
-
       const exhausted = max > 0 && uses >= max;
       const expired = exp && now > exp;
       return exhausted || expired;
@@ -213,7 +237,6 @@ export default function Settings() {
       setInviteBusy(false);
     }
   };
-
 
   /* ========== MEMBERS + ROLES (backend, admin only) ========== */
   const [members, setMembers] = React.useState([]);
@@ -326,7 +349,9 @@ export default function Settings() {
     const key = orgSettingsKey(orgId);
     const prev = readJSON(key);
     writeJSON(key, { ...prev, name: (orgName || "").trim(), logoDataUrl });
-    window.dispatchEvent(new CustomEvent("bf:org_settings_changed", { detail: { orgId } }));
+    window.dispatchEvent(
+      new CustomEvent("bf:org_settings_changed", { detail: { orgId } })
+    );
     alert("Organization settings saved.");
   };
 
@@ -342,9 +367,10 @@ export default function Settings() {
   const genSlug = async () => {
     setMsg("");
     try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/generate`, {
-        method: "POST",
-      });
+      const r = await authFetch(
+        `/api/orgs/${encodeURIComponent(orgId)}/public/generate`,
+        { method: "POST" }
+      );
       setSlug(r.public?.slug || "");
       setMsg("Generated new link.");
       setTimeout(() => setMsg(""), 1200);
@@ -375,10 +401,10 @@ export default function Settings() {
           .filter(Boolean),
       };
 
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/save`, {
-        method: "POST",
-        body: payload,
-      });
+      const r = await authFetch(
+        `/api/orgs/${encodeURIComponent(orgId)}/public/save`,
+        { method: "POST", body: payload }
+      );
 
       setSlug(r.public?.slug || payload.slug);
       setTitle(r.public?.title ?? payload.title);
@@ -404,307 +430,393 @@ export default function Settings() {
 
   return (
     <div className="grid" style={{ gap: 16, padding: 16 }}>
-      {/* ---------- Org Basics ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Organization</h2>
-        <div className="grid" style={{ gap: 10 }}>
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Name</span>
-            <input
-              className="input"
-              value={orgName}
-              onChange={(e) => setOrgName(e.target.value)}
-              placeholder="Your org name"
-            />
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Logo</span>
-            <input className="input" type="file" accept="image/*" onChange={onLogo} />
-            {logoDataUrl && (
-              <img
-                src={logoDataUrl}
-                alt="Logo preview"
-                style={{
-                  width: 96,
-                  height: 96,
-                  borderRadius: 12,
-                  objectFit: "cover",
-                  marginTop: 8,
-                }}
-              />
-            )}
-          </label>
-
-          <div>
-            <button className="btn-red" onClick={saveBasics}>
-              Save
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ---------- Invites ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Invites</h2>
-        <p className="helper">Generate invite codes so someone can join this org.</p>
-
-        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
-            {inviteBusy ? "Generating…" : "Generate invite"}
-          </button>
-          <button className="btn" type="button" onClick={loadInvites}>
-            Refresh
-          </button>
-          <button className="btn" type="button" onClick={deleteInactiveInvites} disabled={inviteBusy}>
-            Delete used and expired
-          </button>
-          {inviteMsg && (
-            <span
-              className={
-                inviteMsg.toLowerCase().includes("fail") ||
-                inviteMsg.toLowerCase().includes("http")
-                  ? "error"
-                  : "helper"
-              }
-            >
-              {inviteMsg}
-            </span>
-          )}
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          {invites.length === 0 ? (
-            <div className="helper">No invites yet</div>
-          ) : (
-            <div className="grid" style={{ gap: 10 }}>
-              {invites.map((inv) => (
-                <div key={inv.code} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                    <code style={{ fontSize: 16 }}>{inv.code}</code>
-                    <button className="btn" onClick={() => copyInvite(inv.code)}>
-                      Copy
-                    </button>
-                    <button className="btn" type="button" onClick={() => deleteInvite(inv.code)} disabled={inviteBusy}>
-                      Delete
-                    </button>
-
-                    <div className="helper" style={{ marginLeft: "auto" }}>
-                      role: {inv.role || "member"} · uses: {inv.uses || 0}/{inv.max_uses || 1}
-                      {inv.expires_at ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}` : ""}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ---------- Members + Roles (admin only) ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Members and Roles</h2>
-
-        {!membersAllowed ? (
-          <div className="helper">
-            Admins and owners can manage membership roles.
-            {membersMsg ? (
-              <div className="error" style={{ marginTop: 8 }}>
-                {membersMsg}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <>
-            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
-                {membersBusy ? "Refreshing…" : "Refresh"}
+      {/* Submenu */}
+      <div className="card" style={{ padding: 12 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {tabs.map(([key, label]) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={active ? "btn-red" : "btn"}
+                onClick={() => setTab(key)}
+                style={{ padding: "8px 12px" }}
+              >
+                {label}
               </button>
-              {membersMsg ? (
-                <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
-                  {membersMsg}
-                </span>
-              ) : null}
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              {members.length === 0 ? (
-                <div className="helper">No members found.</div>
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Email</th>
-                      <th>Name</th>
-                      <th>Role</th>
-                      <th>Remove</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m) => (
-                      <tr key={m.userId}>
-                        <td>
-                          <code>{m.email || m.userId}</code>
-                        </td>
-                        <td>{m.name || ""}</td>
-                        <td>
-                          <select
-                            className="input"
-                            value={m.role || "member"}
-                            onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
-                            disabled={membersBusy}
-                          >
-                            <option value="viewer">viewer</option>
-                            <option value="member">member</option>
-                            <option value="admin">admin</option>
-                            <option value="owner">owner</option>
-                          </select>
-                        </td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {m.role === "owner" ? (
-                            <span className="helper">owner</span>
-                          ) : (
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => removeMember(m.userId, m.email)}
-                              disabled={membersBusy}
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
+            );
+          })}
+        </div>
       </div>
 
-      {/* ---------- Public Page ---------- */}
-      <div className="card" style={{ padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Public Page</h2>
-        <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
-
-        <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
-          <label className="row" style={{ gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            <span>Enable public page</span>
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Share URL (slug)</span>
-            <div className="row" style={{ gap: 8 }}>
+      {/* Organization */}
+      {tab === "org" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Organization</h2>
+          <div className="grid" style={{ gap: 10 }}>
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Name</span>
               <input
                 className="input"
-                style={{ flex: 1 }}
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="e.g. bondfire-team"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                placeholder="Your org name"
               />
-              <button type="button" className="btn" onClick={genSlug} title="Generate a nice slug">
-                Generate
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Logo</span>
+              <input
+                className="input"
+                type="file"
+                accept="image/*"
+                onChange={onLogo}
+              />
+              {logoDataUrl && (
+                <img
+                  src={logoDataUrl}
+                  alt="Logo preview"
+                  style={{
+                    width: 96,
+                    height: 96,
+                    borderRadius: 12,
+                    objectFit: "cover",
+                    marginTop: 8,
+                  }}
+                />
+              )}
+            </label>
+
+            <div>
+              <button className="btn-red" onClick={saveBasics}>
+                Save
               </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            {slug && (
-              <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
-                <span className="helper">Public link:</span>
-                <a
-                  className="helper"
-                  href={`/#/p/${encodeURIComponent(slug)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {publicUrl}
-                </a>
+      {/* Invites */}
+      {tab === "invites" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Invites</h2>
+          <p className="helper">Generate invite codes so someone can join this org.</p>
+
+          <div
+            className="row"
+            style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
+          >
+            <button className="btn-red" onClick={createInvite} disabled={inviteBusy}>
+              {inviteBusy ? "Generating…" : "Generate invite"}
+            </button>
+            <button className="btn" type="button" onClick={loadInvites}>
+              Refresh
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={deleteInactiveInvites}
+              disabled={inviteBusy}
+            >
+              Delete used and expired
+            </button>
+
+            {inviteMsg && (
+              <span
+                className={
+                  inviteMsg.toLowerCase().includes("fail") ||
+                  inviteMsg.toLowerCase().includes("http")
+                    ? "error"
+                    : "helper"
+                }
+              >
+                {inviteMsg}
+              </span>
+            )}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {invites.length === 0 ? (
+              <div className="helper">No invites yet</div>
+            ) : (
+              <div className="grid" style={{ gap: 10 }}>
+                {invites.map((inv) => (
+                  <div
+                    key={inv.code}
+                    className="card"
+                    style={{ padding: 12, border: "1px solid #222" }}
+                  >
+                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                      <code style={{ fontSize: 16 }}>{inv.code}</code>
+                      <button className="btn" onClick={() => copyInvite(inv.code)}>
+                        Copy
+                      </button>
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => deleteInvite(inv.code)}
+                        disabled={inviteBusy}
+                      >
+                        Delete
+                      </button>
+
+                      <div className="helper" style={{ marginLeft: "auto" }}>
+                        role: {inv.role || "member"} · uses: {inv.uses || 0}/
+                        {inv.max_uses || 1}
+                        {inv.expires_at
+                          ? ` · expires: ${new Date(inv.expires_at).toLocaleDateString()}`
+                          : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Title</span>
-            <input
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Public page title"
-            />
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">About</span>
-            <textarea
-              className="textarea"
-              rows={3}
-              value={about}
-              onChange={(e) => setAbout(e.target.value)}
-              placeholder="Short description"
-            />
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Features (one per line)</span>
-            <textarea
-              className="textarea"
-              rows={3}
-              value={features}
-              onChange={(e) => setFeatures(e.target.value)}
-              placeholder={"Donations tracker\nVolunteers\nEvents"}
-            />
-          </label>
-
-          <label className="grid" style={{ gap: 6 }}>
-            <span className="helper">Links (Text | URL per line)</span>
-            <textarea
-              className="textarea"
-              rows={3}
-              value={links}
-              onChange={(e) => setLinks(e.target.value)}
-              placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
-            />
-          </label>
-
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <button className="btn-red" type="submit">
-              Save
-            </button>
-            {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
           </div>
-        </form>
+        </div>
+      )}
 
-        {enabled && (
-          <div style={{ marginTop: 16 }}>
-            <h3 style={{ margin: "8px 0" }}>Preview</h3>
-            <PublicPage
-              data={{
-                public: {
-                  title: (title || orgName || "Public page").trim(),
-                  about: (about || "").trim(),
-                  features: (features || "")
-                    .split("\n")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                  links: (links || "")
-                    .split("\n")
-                    .map((line) => {
-                      const [text, url] = line.split("|").map((s) => (s || "").trim());
-                      return url ? { text: text || url, url } : null;
-                    })
-                    .filter(Boolean),
-                },
-              }}
-            />
-          </div>
-        )}
-      </div>
+      {/* Members */}
+      {tab === "members" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Members and Roles</h2>
+
+          {!membersAllowed ? (
+            <div className="helper">
+              Admins and owners can manage membership roles.
+              {membersMsg ? (
+                <div className="error" style={{ marginTop: 8 }}>
+                  {membersMsg}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div
+                className="row"
+                style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
+              >
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={loadMembers}
+                  disabled={membersBusy}
+                >
+                  {membersBusy ? "Refreshing…" : "Refresh"}
+                </button>
+                {membersMsg ? (
+                  <span
+                    className={
+                      membersMsg.toLowerCase().includes("fail") ? "error" : "helper"
+                    }
+                  >
+                    {membersMsg}
+                  </span>
+                ) : null}
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                {members.length === 0 ? (
+                  <div className="helper">No members found.</div>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Remove</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.userId}>
+                          <td>
+                            <code>{m.email || m.userId}</code>
+                          </td>
+                          <td>{m.name || ""}</td>
+                          <td>
+                            <select
+                              className="input"
+                              value={m.role || "member"}
+                              onChange={(e) =>
+                                setMemberRole(m.userId, e.target.value, m.role, m.email)
+                              }
+                              disabled={membersBusy}
+                            >
+                              <option value="viewer">viewer</option>
+                              <option value="member">member</option>
+                              <option value="admin">admin</option>
+                              <option value="owner">owner</option>
+                            </select>
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            {m.role === "owner" ? (
+                              <span className="helper">owner</span>
+                            ) : (
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => removeMember(m.userId, m.email)}
+                                disabled={membersBusy}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Public Page */}
+      {tab === "public" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Public Page</h2>
+          <p className="helper">
+            Share a read-only page for your org. Only what you enable is shown.
+          </p>
+
+          <form
+            onSubmit={savePublic}
+            className="grid"
+            style={{ gap: 10, marginTop: 8 }}
+          >
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <span>Enable public page</span>
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Share URL (slug)</span>
+              <div className="row" style={{ gap: 8 }}>
+                <input
+                  className="input"
+                  style={{ flex: 1 }}
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="e.g. bondfire-team"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={genSlug}
+                  title="Generate a nice slug"
+                >
+                  Generate
+                </button>
+              </div>
+
+              {slug && (
+                <div
+                  className="row"
+                  style={{ gap: 8, alignItems: "center", marginTop: 8 }}
+                >
+                  <span className="helper">Public link:</span>
+                  <a
+                    className="helper"
+                    href={`/#/p/${encodeURIComponent(slug)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {publicUrl}
+                  </a>
+                </div>
+              )}
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Title</span>
+              <input
+                className="input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Public page title"
+              />
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">About</span>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={about}
+                onChange={(e) => setAbout(e.target.value)}
+                placeholder="Short description"
+              />
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Features (one per line)</span>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={features}
+                onChange={(e) => setFeatures(e.target.value)}
+                placeholder={"Donations tracker\nVolunteers\nEvents"}
+              />
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Links (Text | URL per line)</span>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={links}
+                onChange={(e) => setLinks(e.target.value)}
+                placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"}
+              />
+            </label>
+
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <button className="btn-red" type="submit">
+                Save
+              </button>
+              {msg && (
+                <span className={msg.includes("Saved") ? "success" : "error"}>
+                  {msg}
+                </span>
+              )}
+            </div>
+          </form>
+
+          {enabled && (
+            <div style={{ marginTop: 16 }}>
+              <h3 style={{ margin: "8px 0" }}>Preview</h3>
+              <PublicPage
+                data={{
+                  public: {
+                    title: (title || orgName || "Public page").trim(),
+                    about: (about || "").trim(),
+                    features: (features || "")
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    links: (links || "")
+                      .split("\n")
+                      .map((line) => {
+                        const [text, url] = line.split("|").map((s) => (s || "").trim());
+                        return url ? { text: text || url, url } : null;
+                      })
+                      .filter(Boolean),
+                  },
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
