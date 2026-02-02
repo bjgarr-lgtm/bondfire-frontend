@@ -14,6 +14,15 @@ function getToken() {
   );
 }
 
+function humanizeError(msg) {
+  const s = String(msg || "").trim();
+  if (!s) return "";
+  if (s === "NOT_A_MEMBER") return "You must be a member of this org to do that.";
+  if (s === "INSUFFICIENT_ROLE") return "You do not have permission for that action.";
+  return s;
+}
+
+
 async function authFetch(path, opts = {}) {
   const token = getToken();
 
@@ -366,6 +375,8 @@ export default function Settings() {
 
   /* ========== PUBLIC PAGE (backend) ========== */
   const [enabled, setEnabled] = React.useState(false);
+  const [publicNewsletterEnabled, setPublicNewsletterEnabled] = React.useState(false);
+  const [publicPledgesEnabled, setPublicPledgesEnabled] = React.useState(false);
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [about, setAbout] = React.useState("");
@@ -394,6 +405,8 @@ export default function Settings() {
     try {
       const payload = {
         enabled,
+        newsletter_enabled: !!publicNewsletterEnabled,
+        pledges_enabled: !!publicPledgesEnabled,
         slug: (slug || "").trim(),
         title: (title || "").trim(),
         about: (about || "").trim(),
@@ -427,7 +440,8 @@ export default function Settings() {
           : links
       );
       setEnabled(!!r.public?.enabled);
-
+      setPublicNewsletterEnabled(!!r.public?.newsletter_enabled);
+      setPublicPledgesEnabled(!!r.public?.pledges_enabled);
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -882,6 +896,25 @@ export default function Settings() {
               <span>Enable public page</span>
             </label>
 
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={publicNewsletterEnabled}
+                onChange={(e) => setPublicNewsletterEnabled(e.target.checked)}
+              />
+              <span>Enable newsletter signup on public page</span>
+            </label>
+
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={publicPledgesEnabled}
+                onChange={(e) => setPublicPledgesEnabled(e.target.checked)}
+              />
+              <span>Enable pledges on public page</span>
+            </label>
+
+
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Share URL (slug)</span>
               <div className="row" style={{ gap: 8 }}>
@@ -937,6 +970,8 @@ export default function Settings() {
                   public: {
                     title: (title || orgName || "Public page").trim(),
                     about: (about || "").trim(),
+                    newsletter_enabled: !!publicNewsletterEnabled,
+                    pledges_enabled: !!publicPledgesEnabled,
                     features: (features || "")
                       .split("\n")
                       .map((s) => s.trim())
@@ -961,7 +996,7 @@ export default function Settings() {
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Newsletter</h2>
           <div className="helper">
-            Bondfire collects subscribers. Riseup sends. Because of course nothing can be simple.
+            Bondfire stores subscribers. Riseup sends the newsletter.
           </div>
 
           <div className="grid" style={{ gap: 10, marginTop: 10 }}>
@@ -1051,7 +1086,7 @@ export default function Settings() {
           <h2 style={{ marginTop: 0 }}>Pledges</h2>
 
           <div className="helper" style={{ marginTop: 6 }}>
-            Pledges can be linked to a Need so you can match supply to demand instead of chaos.
+            Pledges can be linked to a Need for tracking.
           </div>
 
           <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
