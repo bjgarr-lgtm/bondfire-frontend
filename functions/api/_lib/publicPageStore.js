@@ -8,16 +8,18 @@ export function slugify(input) {
 }
 
 export async function uniqueSlug(env, base, orgId) {
-  let trySlug = base || "org";
+  const cleanBase = slugify(base || "org") || "org";
+  let trySlug = cleanBase;
   let n = 0;
 
   while (true) {
     const existingOrgId = await env.BF_PUBLIC.get(`slug:${trySlug}`);
     if (!existingOrgId || existingOrgId === orgId) return trySlug;
     n += 1;
-    trySlug = `${base}-${n}`;
+    trySlug = `${cleanBase}-${n}`;
   }
 }
+
 
 export async function getPublicCfg(env, orgId) {
   const raw = await env.BF_PUBLIC.get(`org:${orgId}`);
@@ -29,9 +31,20 @@ export async function setPublicCfg(env, orgId, cfg) {
 }
 
 export async function setSlugMapping(env, slug, orgId) {
-  await env.BF_PUBLIC.put(`slug:${slug}`, orgId);
+  const s = String(slug || "").trim().toLowerCase();
+  await env.BF_PUBLIC.put(`slug:${s}`, orgId);
 }
 
 export async function removeSlugMapping(env, slug) {
-  await env.BF_PUBLIC.delete(`slug:${slug}`);
+  const s = String(slug || "").trim().toLowerCase();
+  await env.BF_PUBLIC.delete(`slug:${s}`);
 }
+
+
+export async function getOrgIdBySlug(env, slug) {
+  const s = String(slug || "").trim().toLowerCase();
+  if (!s) return null;
+  const orgId = await env.BF_PUBLIC.get(`slug:${s}`);
+  return orgId || null;
+}
+
