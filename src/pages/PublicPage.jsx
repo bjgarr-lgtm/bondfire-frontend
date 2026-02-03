@@ -177,7 +177,7 @@ export default function PublicPage(props) {
     if (!slug) return;
     setNlMsg("");
     try {
-      await apiFetch(`\api\orgs\[orgId]\newsletter\subscribe.js`, {
+      await apiFetch(`/api/p/${encodeURIComponent(slug)}/subscribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: nlName, email: nlEmail }),
