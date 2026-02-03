@@ -1,61 +1,57 @@
-import {
-  getDB,
-  json,
-  text,
-  bad,
-  getUserIdFromRequest,
-  requireMemberRole,
-  csvEscape,
-} from "../../../_bf.js";
+import { ok, err } from "../../../_lib/http.js";
+import { requireOrgRole } from "../../../_lib/auth.js";
 
-export async function onRequest(context) {
-  const { request, env, params } = context;
-  const db = getDB(env);
-  if (!db) return bad("DB_NOT_CONFIGURED", 500);
+// D1 table expected:
+// - newsletter_subscribers(id TEXT PRIMARY KEY, org_id TEXT, email TEXT, name TEXT, created_at INTEGER)
 
+function csvEscape(v) {
+  const s = String(v ?? "");
+  if (s.includes("\n") || s.includes("\r") || s.includes(",") || s.includes('"')) {
+    return '"' + s.replaceAll('"', '""') + '"';
+  }
+  return s;
+}
+
+export async function onRequestGet(ctx) {
+  const { params, env, request } = ctx;
   const orgId = String(params.orgId || "");
+  if (!orgId) return err(400, "BAD_ORG_ID");
 
-  if (request.method !== "GET") return bad("METHOD_NOT_ALLOWED", 405);
+  if (!env.BF_DB) return err(500, "DB_NOT_CONFIGURED");
 
-  const userId = getUserIdFromRequest(request);
-  const roleCheck = await requireMemberRole(db, orgId, userId, "member");
-  if (!roleCheck.ok) return bad(roleCheck.error, roleCheck.status);
+  // Any member can view subscribers in settings (you can tighten this later).
+  const auth = await requireOrgRole(ctx, orgId, "member");
+  if (!auth.ok) return err(auth.status, auth.error);
 
   const url = new URL(request.url);
-  const format = String(url.searchParams.get("format") || "").toLowerCase();
+  const wantCsv = (url.searchParams.get("format") || "").toLowerCase() === "csv";
 
-  const rows = await db
-    .prepare(
-      `SELECT id, email, name, created_at
+  const r = await env.BF_DB.prepare(
+    `SELECT id, email, name, created_at
        FROM newsletter_subscribers
-       WHERE org_id = ?
-       ORDER BY created_at DESC`
-    )
-    .bind(orgId)
-    .all();
+      WHERE org_id = ?
+      ORDER BY created_at DESC
+      LIMIT 5000`
+  ).bind(orgId).all();
 
-  const subs = Array.isArray(rows?.results) ? rows.results : [];
+  const rows = Array.isArray(r?.results) ? r.results : [];
 
-  if (format === "csv") {
-    const header = ["email", "name", "joined"].join(",") + "\n";
-    const body =
-      header +
-      subs
-        .map((s) =>
-          [
-            csvEscape(s.email || ""),
-            csvEscape(s.name || ""),
-            csvEscape(s.created_at ? new Date(s.created_at).toISOString() : ""),
-          ].join(",")
-        )
-        .join("\n") +
-      "\n";
-
-    return text(body, 200, {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="newsletter_subscribers_${orgId}.csv"`,
-    });
+  if (!wantCsv) {
+    return ok({ subscribers: rows });
   }
 
-  return json({ ok: true, subscribers: subs });
+  const header = ["email", "name", "joined"].join(",");
+  const lines = rows.map((s) => {
+    const joined = s.created_at ? new Date(Number(s.created_at)).toISOString() : "";
+    return [csvEscape(s.email), csvEscape(s.name), csvEscape(joined)].join(",");
+  });
+  const csv = [header, ...lines].join("\n");
+
+  return new Response(csv, {
+    status: 200,
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="subscribers-${orgId}.csv"`,
+    },
+  });
 }

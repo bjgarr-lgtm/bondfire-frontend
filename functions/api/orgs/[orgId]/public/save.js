@@ -16,7 +16,16 @@ export async function onRequestPost({ env, request, params }) {
   const orgId = params.orgId;
   const body = await request.json().catch(() => ({}));
 
-  const { enabled, title, about, features, links, slug } = body || {};
+  const {
+    enabled,
+    newsletter_enabled,
+    pledges_enabled,
+    title,
+    about,
+    features,
+    links,
+    slug,
+  } = body || {};
 
   const prev = await getPublicCfg(env, orgId);
   let newSlug = prev.slug;
@@ -42,6 +51,8 @@ export async function onRequestPost({ env, request, params }) {
 
   const cleaned = {
     enabled: !!enabled,
+    newsletter_enabled: !!newsletter_enabled,
+    pledges_enabled: !!pledges_enabled,
     slug: newSlug,
     title: (title || "").trim(),
     about: (about || "").trim(),

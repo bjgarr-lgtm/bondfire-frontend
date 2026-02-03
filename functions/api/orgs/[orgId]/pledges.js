@@ -1,164 +1,146 @@
-import {
-  getDB,
-  json,
-  bad,
-  readJson,
-  getUserIdFromRequest,
-  requireMemberRole,
-  normalizeEmail,
-} from "../../_bf.js";
+import { ok, err } from "../../_lib/http.js";
+import { requireOrgRole } from "../../_lib/auth.js";
 
-function normStatus(s) {
-  const v = String(s || "").toLowerCase().trim();
-  const allowed = new Set(["offered", "accepted", "fulfilled", "cancelled"]);
-  return allowed.has(v) ? v : "offered";
+// D1 table expected (legacy but used by UI):
+// - pledges(
+//     id TEXT PRIMARY KEY,
+//     org_id TEXT,
+//     need_id TEXT NULL,
+//     title TEXT,
+//     description TEXT,
+//     qty REAL NULL,
+//     unit TEXT NULL,
+//     contact TEXT NULL,
+//     is_public INTEGER DEFAULT 0,
+//     created_at INTEGER,
+//     updated_at INTEGER
+//   )
+
+function now() {
+  return Date.now();
 }
 
-export async function onRequest(context) {
-  const { request, env, params } = context;
-  const db = getDB(env);
-  if (!db) return bad("DB_NOT_CONFIGURED", 500);
+function uuid() {
+  return crypto.randomUUID();
+}
 
-  const orgId = String(params.orgId || "");
-  const userId = getUserIdFromRequest(request);
+async function listPledges(db, orgId) {
+  const r = await db
+    .prepare(
+      "SELECT id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at, updated_at FROM pledges WHERE org_id=? ORDER BY created_at DESC"
+    )
+    .bind(orgId)
+    .all();
+  return r.results || [];
+}
 
-  if (request.method === "GET") {
-    const roleCheck = await requireMemberRole(db, orgId, userId, "member");
-    if (!roleCheck.ok) return bad(roleCheck.error, roleCheck.status);
+export async function onRequest(ctx) {
+  const { params, env, request } = ctx;
+  const orgId = params.orgId;
+  if (!env.BF_DB) return err(500, "DB_NOT_CONFIGURED");
 
-    const rows = await db
-      .prepare(
-        `SELECT id, org_id, need_id, pledger_name, pledger_email, type, amount, unit,
-                note, status, is_public, created_by, created_at, updated_at
-         FROM pledges
-         WHERE org_id = ?
-         ORDER BY created_at DESC`
-      )
-      .bind(orgId)
-      .all();
+  // Any org member can view/add; tighten later if you want.
+  const gate = await requireOrgRole(ctx, orgId, "member");
+  if (!gate.ok) return gate.res;
 
-    return json({ ok: true, pledges: Array.isArray(rows?.results) ? rows.results : [] });
-  }
-
-  if (request.method === "POST") {
-    const roleCheck = await requireMemberRole(db, orgId, userId, "member");
-    if (!roleCheck.ok) return bad(roleCheck.error, roleCheck.status);
-
-    const body = await readJson(request);
-    if (!body) return bad("BAD_JSON", 400);
-
-    const id = crypto.randomUUID();
-    const now = Date.now();
-
-    const pledger_name = String(body.pledger_name || "").trim();
-    const pledger_email = normalizeEmail(body.pledger_email);
-    const type = String(body.type || "").trim();
-    const amount = String(body.amount || "").trim();
-    const unit = String(body.unit || "").trim();
-    const note = String(body.note || "").trim();
-    const status = normStatus(body.status);
-    const need_id = body.need_id ? String(body.need_id) : null;
-    const is_public = body.is_public ? 1 : 0;
-
-    await db
-      .prepare(
-        `INSERT INTO pledges
-         (id, org_id, need_id, pledger_name, pledger_email, type, amount, unit,
-          note, status, is_public, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        id,
-        orgId,
-        need_id,
-        pledger_name,
-        pledger_email,
-        type,
-        amount,
-        unit,
-        note,
-        status,
-        is_public,
-        userId,
-        now,
-        now
-      )
-      .run();
-
-    return json({ ok: true, pledge: { id } }, 201);
-  }
-
-  if (request.method === "PUT") {
-    const roleCheck = await requireMemberRole(db, orgId, userId, "member");
-    if (!roleCheck.ok) return bad(roleCheck.error, roleCheck.status);
-
-    const body = await readJson(request);
-    if (!body) return bad("BAD_JSON", 400);
-
-    const id = String(body.id || "").trim();
-    if (!id) return bad("MISSING_ID", 400);
-
-    const now = Date.now();
-
-    const patch = {
-      need_id: body.need_id === null || body.need_id === "" ? null : body.need_id ? String(body.need_id) : undefined,
-      pledger_name: body.pledger_name !== undefined ? String(body.pledger_name || "").trim() : undefined,
-      pledger_email: body.pledger_email !== undefined ? normalizeEmail(body.pledger_email) : undefined,
-      type: body.type !== undefined ? String(body.type || "").trim() : undefined,
-      amount: body.amount !== undefined ? String(body.amount || "").trim() : undefined,
-      unit: body.unit !== undefined ? String(body.unit || "").trim() : undefined,
-      note: body.note !== undefined ? String(body.note || "").trim() : undefined,
-      status: body.status !== undefined ? normStatus(body.status) : undefined,
-      is_public: body.is_public !== undefined ? (body.is_public ? 1 : 0) : undefined,
-    };
-
-    const fields = [];
-    const binds = [];
-
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === undefined) continue;
-      fields.push(`${k} = ?`);
-      binds.push(v);
+  try {
+    if (request.method === "GET") {
+      const pledges = await listPledges(env.BF_DB, orgId);
+      return ok({ pledges });
     }
 
-    fields.push("updated_at = ?");
-    binds.push(now);
+    if (request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const id = uuid();
+      const t = now();
+      const pledge = {
+        id,
+        org_id: orgId,
+        need_id: body.need_id || null,
+        title: String(body.title || "").slice(0, 140),
+        description: String(body.description || "").slice(0, 4000),
+        qty: body.qty == null || body.qty === "" ? null : Number(body.qty),
+        unit: body.unit ? String(body.unit).slice(0, 64) : null,
+        contact: body.contact ? String(body.contact).slice(0, 256) : null,
+        is_public: body.is_public ? 1 : 0,
+        created_at: t,
+        updated_at: t,
+      };
 
-    if (fields.length === 1) return bad("NO_CHANGES", 400);
+      await env.BF_DB.prepare(
+        "INSERT INTO pledges(id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+      )
+        .bind(
+          pledge.id,
+          pledge.org_id,
+          pledge.need_id,
+          pledge.title,
+          pledge.description,
+          pledge.qty,
+          pledge.unit,
+          pledge.contact,
+          pledge.is_public,
+          pledge.created_at,
+          pledge.updated_at
+        )
+        .run();
 
-    // ensure pledge belongs to org
-    const exists = await db
-      .prepare(`SELECT id FROM pledges WHERE id = ? AND org_id = ? LIMIT 1`)
-      .bind(id, orgId)
-      .first();
+      const pledges = await listPledges(env.BF_DB, orgId);
+      return ok({ pledge, pledges });
+    }
 
-    if (!exists?.id) return bad("NOT_FOUND", 404);
+    if (request.method === "PUT") {
+      const body = await request.json().catch(() => ({}));
+      const id = body.id;
+      if (!id) return err(400, "MISSING_ID");
 
-    await db
-      .prepare(`UPDATE pledges SET ${fields.join(", ")} WHERE id = ? AND org_id = ?`)
-      .bind(...binds, id, orgId)
-      .run();
+      const t = now();
+      const fields = {
+        need_id: body.need_id || null,
+        title: String(body.title || "").slice(0, 140),
+        description: String(body.description || "").slice(0, 4000),
+        qty: body.qty == null || body.qty === "" ? null : Number(body.qty),
+        unit: body.unit ? String(body.unit).slice(0, 64) : null,
+        contact: body.contact ? String(body.contact).slice(0, 256) : null,
+        is_public: body.is_public ? 1 : 0,
+      };
 
-    return json({ ok: true });
+      await env.BF_DB.prepare(
+        "UPDATE pledges SET need_id=?, title=?, description=?, qty=?, unit=?, contact=?, is_public=?, updated_at=? WHERE id=? AND org_id=?"
+      )
+        .bind(
+          fields.need_id,
+          fields.title,
+          fields.description,
+          fields.qty,
+          fields.unit,
+          fields.contact,
+          fields.is_public,
+          t,
+          id,
+          orgId
+        )
+        .run();
+
+      const pledges = await listPledges(env.BF_DB, orgId);
+      return ok({ pledges });
+    }
+
+    if (request.method === "DELETE") {
+      const url = new URL(request.url);
+      const id = url.searchParams.get("id");
+      if (!id) return err(400, "MISSING_ID");
+
+      await env.BF_DB.prepare("DELETE FROM pledges WHERE id=? AND org_id=?")
+        .bind(id, orgId)
+        .run();
+
+      const pledges = await listPledges(env.BF_DB, orgId);
+      return ok({ pledges });
+    }
+
+    return err(405, "METHOD_NOT_ALLOWED");
+  } catch (e) {
+    return err(500, "SERVER_ERROR", { message: String(e?.message || e) });
   }
-
-  if (request.method === "DELETE") {
-    const roleCheck = await requireMemberRole(db, orgId, userId, "admin");
-    if (!roleCheck.ok) return bad(roleCheck.error, roleCheck.status);
-
-    const body = await readJson(request);
-    if (!body) return bad("BAD_JSON", 400);
-
-    const id = String(body.id || "").trim();
-    if (!id) return bad("MISSING_ID", 400);
-
-    await db
-      .prepare(`DELETE FROM pledges WHERE id = ? AND org_id = ?`)
-      .bind(id, orgId)
-      .run();
-
-    return json({ ok: true });
-  }
-
-  return bad("METHOD_NOT_ALLOWED", 405);
 }
