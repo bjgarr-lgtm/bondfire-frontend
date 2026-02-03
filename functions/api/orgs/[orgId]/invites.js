@@ -1,5 +1,5 @@
-import { ok, bad } from "../../_lib/http";
-import { requireAuth, requireOrgRole, getDb } from "../../_lib/auth";
+import { ok, bad } from "../../_lib/http.js";
+import { requireOrgRole, getDb } from "../../_lib/auth.js";
 
 export async function onRequestGet(ctx) {
   return onRequest(ctx);
@@ -42,13 +42,11 @@ async function ensureInvitesTable(db) {
 }
 
 export async function onRequest(ctx) {
+  if (!ctx.env?.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
   const { request, env, params } = ctx;
 
   const db = getDb(env);
   if (!db) return bad(500, "NO_DB_BINDING");
-
-  const auth = await requireAuth(ctx);
-  if (!auth.ok) return auth.resp;
 
   const orgId = params.orgId;
   const roleCheck = await requireOrgRole({ env, request, orgId, minRole: "owner" });

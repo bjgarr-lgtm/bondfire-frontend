@@ -1,5 +1,5 @@
-import { json, bad, now, uuid } from "../_lib/http";
-import { requireAuth } from "../_lib/auth";
+import { json, bad, now, uuid } from "../_lib/http.js";
+import { getDb, requireUser } from "../_lib/auth.js";
 
 async function ensureTables(db) {
   // orgs + org_memberships already exist in schema, but in case you deploy to a fresh DB
@@ -21,14 +21,15 @@ async function ensureTables(db) {
 }
 
 export async function onRequestPost({ request, env }) {
-  const auth = await requireAuth(request, env);
-  if (auth.resp) return auth.resp;
-  const me = auth.user;
+  if (!env.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
 
-  const meId = me?.sub || me?.id || me?.userId;
+  const u = await requireUser({ env, request });
+  if (!u.ok) return u.resp;
+
+  const meId = u.user?.sub || u.user?.id || u.user?.userId;
   if (!meId) return bad(401, "UNAUTHORIZED");
 
-  const db = env.BF_DB || env.DB || env.db;
+  const db = getDb(env);
   if (!db) return bad(500, "NO_DB_BINDING");
 
   await ensureTables(db);

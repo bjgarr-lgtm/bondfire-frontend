@@ -1,8 +1,10 @@
-import { json, bad } from "../_lib/http";
-import { getDb, requireUser } from "../_lib/auth";
+import { json, bad } from "../_lib/http.js";
+import { getDb, requireUser } from "../_lib/auth.js";
 
 
 export async function onRequestPost({ request, env }) {
+
+  if (!env.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
 
   const u = await requireUser({ env, request });
   if (!u.ok) return u.resp;
