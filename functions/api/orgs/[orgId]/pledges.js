@@ -1,5 +1,30 @@
 import { ok, err } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
+import { getDB } from "../../_bf.js";
+
+async function ensurePledgesTable(db) {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS pledges (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      need_id TEXT NULL,
+      title TEXT NOT NULL,
+      description TEXT NULL,
+      qty REAL NULL,
+      unit TEXT NULL,
+      contact TEXT NULL,
+      is_public INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`
+  ).run();
+  await db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_pledges_org_created
+     ON pledges(org_id, created_at DESC)`
+  ).run();
+}
+
+
 
 // D1 table expected (legacy but used by UI):
 // - pledges(
@@ -37,15 +62,18 @@ async function listPledges(db, orgId) {
 export async function onRequest(ctx) {
   const { params, env, request } = ctx;
   const orgId = params.orgId;
-  if (!env.BF_DB) return err(500, "DB_NOT_CONFIGURED");
+  const db = getDB(env);
+  if (!db) return err(500, "DB_NOT_CONFIGURED");
+
+  await ensurePledgesTable(db);
 
   // Any org member can view/add; tighten later if you want.
-  const gate = await requireOrgRole(ctx, orgId, "member");
-  if (!gate.ok) return gate.res;
+  const gate = await requireOrgRole({ env, request, orgId: orgId, minRole: "member" });
+  if (!gate.ok) return gate.resp;
 
   try {
     if (request.method === "GET") {
-      const pledges = await listPledges(env.BF_DB, orgId);
+      const pledges = await listPledges(db, orgId);
       return ok({ pledges });
     }
 
@@ -67,7 +95,7 @@ export async function onRequest(ctx) {
         updated_at: t,
       };
 
-      await env.BF_DB.prepare(
+      await db.prepare(
         "INSERT INTO pledges(id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
       )
         .bind(
@@ -85,7 +113,7 @@ export async function onRequest(ctx) {
         )
         .run();
 
-      const pledges = await listPledges(env.BF_DB, orgId);
+      const pledges = await listPledges(db, orgId);
       return ok({ pledge, pledges });
     }
 
@@ -105,7 +133,7 @@ export async function onRequest(ctx) {
         is_public: body.is_public ? 1 : 0,
       };
 
-      await env.BF_DB.prepare(
+      await db.prepare(
         "UPDATE pledges SET need_id=?, title=?, description=?, qty=?, unit=?, contact=?, is_public=?, updated_at=? WHERE id=? AND org_id=?"
       )
         .bind(
@@ -122,7 +150,7 @@ export async function onRequest(ctx) {
         )
         .run();
 
-      const pledges = await listPledges(env.BF_DB, orgId);
+      const pledges = await listPledges(db, orgId);
       return ok({ pledges });
     }
 
@@ -131,11 +159,11 @@ export async function onRequest(ctx) {
       const id = url.searchParams.get("id");
       if (!id) return err(400, "MISSING_ID");
 
-      await env.BF_DB.prepare("DELETE FROM pledges WHERE id=? AND org_id=?")
+      await db.prepare("DELETE FROM pledges WHERE id=? AND org_id=?")
         .bind(id, orgId)
         .run();
 
-      const pledges = await listPledges(env.BF_DB, orgId);
+      const pledges = await listPledges(db, orgId);
       return ok({ pledges });
     }
 

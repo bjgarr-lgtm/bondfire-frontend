@@ -20,8 +20,8 @@ export async function onRequest(ctx) {
 
   // Reads are for members, writes for admins/owners.
   if (method === "GET") {
-    const auth = await requireOrgRole(ctx, orgId, "member");
-    if (!auth.ok) return auth.res;
+    const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "member" });
+    if (!auth.ok) return auth.resp;
 
     const r = await db.prepare(
       "SELECT enabled, list_address, blurb FROM newsletter_settings WHERE org_id = ? LIMIT 1"
@@ -39,8 +39,8 @@ export async function onRequest(ctx) {
   }
 
   if (method === "PUT") {
-    const auth = await requireOrgRole(ctx, orgId, "admin");
-    if (!auth.ok) return auth.res;
+    const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "admin" });
+    if (!auth.ok) return auth.resp;
 
     const body = await request.json().catch(() => ({}));
     const enabled = !!body.enabled;

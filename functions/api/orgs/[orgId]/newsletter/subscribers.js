@@ -24,10 +24,9 @@ export async function onRequestGet(ctx) {
   if (!db) return err(500, "DB_NOT_CONFIGURED");
 
   // Any member can view subscribers in settings (you can tighten this later).
-  const auth = await requireOrgRole(ctx, orgId, "member");
-  if (!auth.ok) return err(auth.status, auth.error);
-
-  const url = new URL(request.url);
+  const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "member" });
+  if (!auth.ok) return auth.resp;
+const url = new URL(request.url);
   const wantCsv = (url.searchParams.get("format") || "").toLowerCase() === "csv";
 
   const r = await db.prepare(
