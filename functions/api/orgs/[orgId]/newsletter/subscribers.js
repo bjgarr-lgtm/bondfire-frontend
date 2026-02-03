@@ -2,6 +2,8 @@ import { ok, err } from "../../../_lib/http.js";
 import { requireOrgRole } from "../../../_lib/auth.js";
 import { getDB } from "../../../_bf.js";
 
+
+
 // D1 table expected:
 // - newsletter_subscribers(id TEXT PRIMARY KEY, org_id TEXT, email TEXT, name TEXT, created_at INTEGER)
 

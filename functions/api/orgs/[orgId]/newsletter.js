@@ -2,6 +2,8 @@ import { ok, err } from "../../_lib/http.js";
 import { requireOrgRole, getUserIdFromRequest } from "../../_lib/auth.js";
 import { getDB } from "../../_bf.js";
 
+
+
 // D1 tables expected:
 // - newsletter_settings(org_id TEXT PRIMARY KEY, enabled INTEGER, list_address TEXT, blurb TEXT, updated_at INTEGER)
 

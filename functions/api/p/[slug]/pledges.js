@@ -1,6 +1,30 @@
 import { bad, ok } from "../../_lib/http.js";
-import { getDb } from "../../_lib/auth.js";
+import { getDB } from "../../_bf.js";
 import { getOrgIdBySlug } from "../../_lib/publicPageStore.js";
+
+async function ensurePledgesTable(db) {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS pledges (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      need_id TEXT NULL,
+      title TEXT NOT NULL,
+      description TEXT NULL,
+      qty REAL NULL,
+      unit TEXT NULL,
+      contact TEXT NULL,
+      is_public INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`
+  ).run();
+  await db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_pledges_org_created
+     ON pledges(org_id, created_at DESC)`
+  ).run();
+}
+
+
 
 function coerceStr(v) {
   return v == null ? "" : String(v).trim();
@@ -24,7 +48,8 @@ export async function onRequestPost(context) {
   const pledgerName = coerceStr(body.pledger_name || body.name || "");
   const pledgerEmail = coerceStr(body.pledger_email || body.email || "");
   const type = coerceStr(body.type || "");
-  const amount = coerceStr(body.amount || "");
+  const amountRaw = coerceStr(body.amount || "");
+  const amount = amountRaw === "" ? null : Number(amountRaw);
   const unit = coerceStr(body.unit || "");
   const note = coerceStr(body.note || body.message || "");
 
@@ -35,7 +60,7 @@ export async function onRequestPost(context) {
 
   const titleParts = [];
   if (type) titleParts.push(type);
-  if (amount) titleParts.push(amount);
+  if (amount != null && !Number.isNaN(amount)) titleParts.push(String(amount));
   const title = titleParts.join(" ").trim() || "Pledge";
 
   const contactParts = [];
@@ -43,8 +68,10 @@ export async function onRequestPost(context) {
   if (pledgerEmail) contactParts.push(pledgerEmail);
   const contact = contactParts.join(" ").trim() || null;
 
-  const db = getDb(context.env);
+  const db = getDB(context.env);
   if (!db) return bad(500, "DB_NOT_CONFIGURED");
+
+  await ensurePledgesTable(db);
 
   const now = Date.now();
   const pledge = {
@@ -53,7 +80,7 @@ export async function onRequestPost(context) {
     need_id: needId || null,
     title,
     description: note || null,
-    qty: amount || null,
+    qty: amount == null || Number.isNaN(amount) ? null : amount,
     unit: unit || null,
     contact,
     is_public: 1,
