@@ -190,3 +190,54 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
 .dt-btn:hover {
   opacity: 1;
 }
+
+/* Compact pledges table */
+.pledges-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.pledges-table th,
+.pledges-table td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+/* Prevent long strings from blowing up layout */
+.pledges-table td,
+.pledges-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Column widths */
+.pledges-table th:nth-child(1),
+.pledges-table td:nth-child(1) { width: 120px; } /* pledger */
+
+.pledges-table th:nth-child(2),
+.pledges-table td:nth-child(2) { width: 170px; } /* email */
+
+.pledges-table th:nth-child(3),
+.pledges-table td:nth-child(3) { width: 160px; } /* need */
+
+.pledges-table th:nth-child(4),
+.pledges-table td:nth-child(4) { width: 140px; } /* type */
+
+.pledges-table th:nth-child(5),
+.pledges-table td:nth-child(5) { width: 90px; }  /* amount */
+
+.pledges-table th:nth-child(6),
+.pledges-table td:nth-child(6) { width: 90px; }  /* unit */
+
+.pledges-table th:nth-child(7),
+.pledges-table td:nth-child(7) { width: 120px; } /* status */
+
+.pledges-table th:nth-child(8),
+.pledges-table td:nth-child(8) { width: 90px; }  /* delete button */
+
+/* Make inputs not fight the column widths */
+.pledges-table .input {
+  width: 100%;
+  min-width: 0;
+}

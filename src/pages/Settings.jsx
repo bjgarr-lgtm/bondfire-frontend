@@ -1174,7 +1174,7 @@ React.useEffect(() => {
               <div className="helper">No pledges yet.</div>
             ) : (
               <div style={{ overflowX: "auto" }}>
-                <table className="table" style={{ minWidth: 980 }}>
+                <table className="table pledges-table">
                   <thead>
                     <tr>
                       <th>Pledger</th>
@@ -1184,7 +1184,6 @@ React.useEffect(() => {
                       <th>Amount</th>
                       <th>Unit</th>
                       <th>Status</th>
-                      <th>Public</th>
                       <th />
                     </tr>
                   </thead>
@@ -1255,15 +1254,7 @@ React.useEffect(() => {
                             <option value="fulfilled">fulfilled</option>
                             <option value="cancelled">cancelled</option>
                           </select>
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          <input
-                            type="checkbox"
-                            defaultChecked={!!p.is_public}
-                            onChange={(e) => upsertPledge(p.id, { is_public: e.target.checked })}
-                            disabled={pledgesBusy}
-                          />
-                        </td>
+                        </td>                
                         <td style={{ whiteSpace: "nowrap" }}>
                           <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
                             Delete
