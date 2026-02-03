@@ -1301,11 +1301,6 @@ React.useEffect(() => {
                   <option value="cancelled">cancelled</option>
                 </select>
 
-                <label className="row" style={{ gap: 8, alignItems: "center" }}>
-                  <input type="checkbox" name="is_public" />
-                  <span>Public</span>
-                </label>
-
                 <button className="btn-red" type="submit" disabled={pledgesBusy}>
                   {pledgesBusy ? "Saving…" : "Add"}
                 </button>
