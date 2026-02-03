@@ -103,6 +103,52 @@ function safeMailto(s) {
   return encodeURIComponent(String(s || ""));
 }
 
+async function exportSubscribersCsv() {
+  if (!orgId) return;
+  setNlMsg("");
+  setNlBusy(true);
+
+  try {
+    const token = getToken();
+    const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
+
+    const relative = path;
+    const remote = `${API_BASE}${path}`;
+
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    // Try same origin first, then API_BASE (mirrors your special endpoint logic)
+    let res = await fetch(relative, { method: "GET", headers });
+    if (!res.ok && API_BASE) res = await fetch(remote, { method: "GET", headers });
+
+    if (!res.ok) {
+      let j = {};
+      try { j = await res.json(); } catch {}
+      throw new Error(j.error || j.message || `HTTP ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `subscribers_${orgId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+    setNlMsg("Exported.");
+    setTimeout(() => setNlMsg(""), 1200);
+  } catch (e) {
+    setNlMsg(e.message || "Export failed");
+  } finally {
+    setNlBusy(false);
+  }
+}
+
+
 export default function Settings() {
   const { orgId } = useParams();
 
@@ -399,6 +445,39 @@ export default function Settings() {
     }
   };
 
+const loadPublic = React.useCallback(async () => {
+  if (!orgId) return;
+  setMsg("");
+  try {
+    const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/get`, {
+      method: "GET",
+    });
+
+    const pub = r.public || {};
+    setEnabled(!!pub.enabled);
+    setPublicNewsletterEnabled(!!pub.newsletter_enabled);
+    setPublicPledgesEnabled(!!pub.pledges_enabled);
+    setSlug(String(pub.slug || ""));
+    setTitle(String(pub.title || ""));
+    setAbout(String(pub.about || ""));
+    setFeatures(Array.isArray(pub.features) ? pub.features.join("\n") : "");
+    setLinks(
+      Array.isArray(pub.links)
+        ? pub.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
+        : ""
+    );
+  } catch (e) {
+    setMsg(e.message || "Failed to load public settings");
+  }
+}, [orgId]);
+
+React.useEffect(() => {
+  if (tab === "public") {
+    loadPublic();
+  }
+}, [tab, loadPublic]);
+
+
   const savePublic = async (e) => {
     e?.preventDefault();
     setMsg("");
@@ -468,7 +547,6 @@ export default function Settings() {
         method: "GET",
       });
       const cfg = r?.newsletter || r?.settings || r || {};
-      setNlEnabled(!!cfg.enabled);
       setNlListAddress(String(cfg.list_address || cfg.listAddress || ""));
       setNlBlurb(String(cfg.blurb || ""));
     } catch (e) {
@@ -503,11 +581,6 @@ export default function Settings() {
     try {
       await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter`, {
         method: "PUT",
-        body: {
-          enabled: !!nlEnabled,
-          list_address: (nlListAddress || "").trim(),
-          blurb: (nlBlurb || "").trim(),
-        },
       });
       setNlMsg("Saved.");
       setTimeout(() => setNlMsg(""), 1200);
@@ -1000,10 +1073,6 @@ export default function Settings() {
           </div>
 
           <div className="grid" style={{ gap: 10, marginTop: 10 }}>
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={nlEnabled} onChange={(e) => setNlEnabled(e.target.checked)} />
-              <span>Enable newsletter signup on public page</span>
-            </label>
 
             <label className="grid" style={{ gap: 6 }}>
               <span className="helper">Riseup list address</span>
@@ -1037,9 +1106,10 @@ export default function Settings() {
                 Refresh subscribers
               </button>
 
-              <a className="btn" href={csvDownloadUrl} target="_blank" rel="noreferrer">
+              <button className="btn" type="button" onClick={exportSubscribersCsv} disabled={nlBusy}>
                 Export CSV
-              </a>
+              </button>
+
 
               {nlMsg && <span className={nlMsg.toLowerCase().includes("fail") ? "error" : "helper"}>{nlMsg}</span>}
             </div>

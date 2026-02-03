@@ -117,7 +117,7 @@ async function handleSubmit(e) {
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button
           type="button"
-          className={mode === "login" ? "btn-red" : "btn"}
+          className={mode === "login" ? "btn-red" : "btn-red"}
           onClick={() => { setErr(""); setMode("login"); }}
           disabled={busy}
         >
@@ -125,7 +125,7 @@ async function handleSubmit(e) {
         </button>
         <button
           type="button"
-          className={mode === "register" ? "btn-red" : "btn"}
+          className={mode === "register" ? "btn-red" : "btn-red"}
           onClick={() => { setErr(""); setMode("register"); }}
           disabled={busy}
         >
@@ -184,7 +184,7 @@ async function handleSubmit(e) {
           />
         )}
 
-        <button className="btn" disabled={busy}>
+        <button className="btn-red" disabled={busy}>
           {busy ? "Working" : (mode === "login" ? "Sign in" : "Create account")}
         </button>
       </form>
