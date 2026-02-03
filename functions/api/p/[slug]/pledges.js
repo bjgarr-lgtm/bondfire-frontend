@@ -1,112 +1,111 @@
-import { bad, ok } from "../../_lib/http.js";
-import { getDB } from "../../_bf.js";
-import { getOrgIdBySlug } from "../../_lib/publicPageStore.js";
+import { ok, err } from "../_lib/http.js";
+import { getDB } from "../_bf.js";
 
-async function ensurePledgesTable(db) {
-  await db.prepare(
-    `CREATE TABLE IF NOT EXISTS pledges (
-      id TEXT PRIMARY KEY,
-      org_id TEXT NOT NULL,
-      need_id TEXT NULL,
-      title TEXT NOT NULL,
-      description TEXT NULL,
-      qty REAL NULL,
-      unit TEXT NULL,
-      contact TEXT NULL,
-      is_public INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )`
-  ).run();
-  await db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_pledges_org_created
-     ON pledges(org_id, created_at DESC)`
-  ).run();
+function now() {
+  return Date.now();
 }
 
-
-
-function coerceStr(v) {
-  return v == null ? "" : String(v).trim();
+function uuid() {
+  return crypto.randomUUID();
 }
 
-export async function onRequestPost(context) {
-  const slug = context?.params?.slug ? String(context.params.slug) : "";
-  if (!slug) return bad(400, "Missing slug");
+function toStr(v, max) {
+  const s = String(v ?? "").trim();
+  return max ? s.slice(0, max) : s;
+}
 
-  const orgId = await getOrgIdBySlug(context.env, slug);
-  if (!orgId) return bad(404, "Not found");
+function toNumOrNull(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
 
-  let body = {};
+function boolToInt(v) {
+  return v ? 1 : 0;
+}
+
+function normalizeLegacyContact(name, email) {
+  const n = toStr(name, 120);
+  const e = toStr(email, 160);
+  if (n && e) return `${n} ${e}`;
+  return n || e || null;
+}
+
+async function getOrgIdBySlug(env, slug) {
+  const s = String(slug || "").trim();
+  if (!s) return null;
+  const orgId = await env.BF_PUBLIC.get(`slug:${s}`);
+  return orgId || null;
+}
+
+export async function onRequest(ctx) {
+  const { env, request, params } = ctx;
+  const slug = params.slug;
+  const db = getDB(env);
+  if (!db) return err(500, "DB_NOT_CONFIGURED");
+
+  const orgId = await getOrgIdBySlug(env, slug);
+  if (!orgId) return err(404, "NOT_FOUND");
+
   try {
-    body = await context.request.json();
-  } catch {
-    body = {};
-  }
+    if (request.method !== "POST") return err(405, "METHOD_NOT_ALLOWED");
 
-  const needId = coerceStr(body.need_id || body.needId || "");
-  const pledgerName = coerceStr(body.pledger_name || body.name || "");
-  const pledgerEmail = coerceStr(body.pledger_email || body.email || "");
-  const type = coerceStr(body.type || "");
-  const amountRaw = coerceStr(body.amount || "");
-  const amount = amountRaw === "" ? null : Number(amountRaw);
-  const unit = coerceStr(body.unit || "");
-  const note = coerceStr(body.note || body.message || "");
+    const body = await request.json().catch(() => ({}));
 
-  // Allow lightweight pledges. Only reject truly empty submissions.
-  if (!type && !note && !amount && !unit) {
-    return bad(400, "Missing pledge details");
-  }
+    const pledger_name = toStr(body.name ?? body.pledger_name, 120) || null;
+    const pledger_email = toStr(body.email ?? body.pledger_email, 160) || null;
 
-  const titleParts = [];
-  if (type) titleParts.push(type);
-  if (amount != null && !Number.isNaN(amount)) titleParts.push(String(amount));
-  const title = titleParts.join(" ").trim() || "Pledge";
+    const type = toStr(body.type, 140) || "";
+    const amount = toNumOrNull(body.amount);
+    const unit = toStr(body.unit, 64) || null;
+    const note = toStr(body.note, 4000) || null;
 
-  const contactParts = [];
-  if (pledgerName) contactParts.push(pledgerName);
-  if (pledgerEmail) contactParts.push(pledgerEmail);
-  const contact = contactParts.join(" ").trim() || null;
+    if (!type) return err(400, "MISSING_TYPE");
 
-  const db = getDB(context.env);
-  if (!db) return bad(500, "DB_NOT_CONFIGURED");
+    const t = now();
+    const id = uuid();
 
-  await ensurePledgesTable(db);
+    // Legacy mirrors so older code stays fine
+    const title = type;
+    const description = note;
+    const qty = amount;
+    const contact = normalizeLegacyContact(pledger_name, pledger_email);
 
-  const now = Date.now();
-  const pledge = {
-    id: crypto.randomUUID(),
-    org_id: orgId,
-    need_id: needId || null,
-    title,
-    description: note || null,
-    qty: amount == null || Number.isNaN(amount) ? null : amount,
-    unit: unit || null,
-    contact,
-    is_public: 1,
-    created_at: now,
-    updated_at: now,
-  };
+    const need_id = toStr(body.needId ?? body.need_id, 128) || null;
 
-  await db
-    .prepare(
-      `INSERT INTO pledges (id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    await db.prepare(
+      `INSERT INTO pledges(
+         id, org_id, need_id,
+         title, description, qty, unit, contact,
+         is_public, created_at, updated_at,
+         pledger_name, pledger_email, type, amount, note, status
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .bind(
-      pledge.id,
-      pledge.org_id,
-      pledge.need_id,
-      pledge.title,
-      pledge.description,
-      pledge.qty,
-      pledge.unit,
-      pledge.contact,
-      pledge.is_public,
-      pledge.created_at,
-      pledge.updated_at
+      id,
+      orgId,
+      need_id,
+      title,
+      description,
+      qty,
+      unit,
+      contact,
+      1,
+      t,
+      t,
+      pledger_name,
+      pledger_email,
+      type || null,
+      amount,
+      note,
+      "offered"
     )
     .run();
 
-  return ok({ pledge });
+    return ok({ id });
+  } catch (e) {
+    return err(500, "SERVER_ERROR", { message: String(e?.message || e) });
+  }
 }
