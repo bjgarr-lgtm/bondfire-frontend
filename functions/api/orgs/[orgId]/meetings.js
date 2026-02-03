@@ -2,6 +2,16 @@ import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
 
+async function ensureMeetingsPublicColumn(db) {
+  try {
+    await db
+      .prepare("ALTER TABLE meetings ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
+      .run();
+  } catch {
+    // ignore (already exists)
+  }
+}
+
 // Meetings list endpoint
 // Columns expected:
 // id, org_id, title, starts_at, ends_at, location, agenda, notes, created_at, updated_at
@@ -11,8 +21,10 @@ export async function onRequestGet({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
+  await ensureMeetingsPublicColumn(env.BF_DB);
+
   const res = await env.BF_DB.prepare(
-    `SELECT id, title, starts_at, ends_at, location, agenda, notes, created_at, updated_at
+    `SELECT id, title, starts_at, ends_at, location, agenda, notes, is_public, created_at, updated_at
      FROM meetings
      WHERE org_id = ?
      ORDER BY starts_at DESC, created_at DESC`
@@ -37,10 +49,12 @@ export async function onRequestPost({ env, request, params }) {
   const startsAt = Number.isFinite(Number(body.starts_at)) ? Number(body.starts_at) : t;
   const endsAt = Number.isFinite(Number(body.ends_at)) ? Number(body.ends_at) : startsAt;
 
+  await ensureMeetingsPublicColumn(env.BF_DB);
+
   await env.BF_DB.prepare(
     `INSERT INTO meetings (
-        id, org_id, title, starts_at, ends_at, location, agenda, notes, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?)`
+        id, org_id, title, starts_at, ends_at, location, agenda, notes, is_public, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
   )
     .bind(
       id,
@@ -51,6 +65,7 @@ export async function onRequestPost({ env, request, params }) {
       String(body.location || ""),
       String(body.agenda || ""),
       String(body.notes || ""),
+      body.is_public ? 1 : 0,
       t,
       t
     )
@@ -79,6 +94,8 @@ export async function onRequestPut({ env, request, params }) {
   const id = String(body.id || "");
   if (!id) return bad(400, "MISSING_ID");
 
+  await ensureMeetingsPublicColumn(env.BF_DB);
+
   const startsAt =
     body.starts_at === undefined || body.starts_at === null
       ? null
@@ -101,6 +118,7 @@ export async function onRequestPut({ env, request, params }) {
          location = COALESCE(?, location),
          agenda = COALESCE(?, agenda),
          notes = COALESCE(?, notes),
+         is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
   )
@@ -111,6 +129,7 @@ export async function onRequestPut({ env, request, params }) {
       body.location ?? null,
       body.agenda ?? null,
       body.notes ?? null,
+      body.is_public === undefined ? null : (body.is_public ? 1 : 0),
       now(),
       id,
       orgId

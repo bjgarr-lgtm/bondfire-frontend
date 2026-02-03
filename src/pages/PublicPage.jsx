@@ -86,6 +86,8 @@ export default function PublicPage(props) {
   );
 
   const [publicNeeds, setPublicNeeds] = useState([]);
+  const [publicInventory, setPublicInventory] = useState([]);
+  const [publicMeetings, setPublicMeetings] = useState([]);
 
   // newsletter form state
   const [nlName, setNlName] = useState("");
@@ -116,6 +118,14 @@ export default function PublicPage(props) {
         const nData = await apiFetch(`/api/public/${encodeURIComponent(slug)}/needs`);
         if (!mounted) return;
         setPublicNeeds(Array.isArray(nData.needs) ? nData.needs : []);
+
+        const iData = await apiFetch(`/api/public/${encodeURIComponent(slug)}/inventory`);
+        if (!mounted) return;
+        setPublicInventory(Array.isArray(iData.items) ? iData.items : []);
+
+        const mData = await apiFetch(`/api/public/${encodeURIComponent(slug)}/meetings`);
+        if (!mounted) return;
+        setPublicMeetings(Array.isArray(mData.meetings) ? mData.meetings : []);
       } catch (e) {
         if (mounted) setState({ loading: false, error: e?.message || "Load failed", data: null });
       }
@@ -319,6 +329,46 @@ export default function PublicPage(props) {
             </div>
           )}
         </section>
+
+        {publicInventory.length > 0 ? (
+          <section className="card" style={{ padding: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0 }}>Public inventory</h3>
+            <div className="helper" style={{ marginTop: 4 }}>
+              Supplies this org has available.
+            </div>
+            <ul style={{ paddingLeft: 18, marginTop: 8 }}>
+              {publicInventory.map((it) => (
+                <li key={it.id || it.name}>
+                  <strong>{it.name || "Untitled"}</strong>
+                  {it.qty != null && it.qty !== "" ? ` · ${it.qty}` : ""}
+                  {it.unit ? ` ${it.unit}` : ""}
+                  {it.category ? ` · ${it.category}` : ""}
+                  {it.location ? ` · ${it.location}` : ""}
+                  {it.notes ? <div className="helper" style={{ marginTop: 4 }}>{it.notes}</div> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {publicMeetings.length > 0 ? (
+          <section className="card" style={{ padding: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0 }}>Public meetings</h3>
+            <div className="helper" style={{ marginTop: 4 }}>
+              Meetings the org chose to share publicly.
+            </div>
+            <ul style={{ paddingLeft: 18, marginTop: 8 }}>
+              {publicMeetings.map((m) => (
+                <li key={m.id || m.title}>
+                  <strong>{m.title || "Untitled"}</strong>
+                  {m.starts_at ? ` · ${new Date(m.starts_at).toLocaleString()}` : ""}
+                  {m.location ? ` · ${m.location}` : ""}
+                  {m.agenda ? <div className="helper" style={{ marginTop: 4 }}>{m.agenda}</div> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </div>
   );

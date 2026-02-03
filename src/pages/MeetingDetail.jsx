@@ -152,6 +152,15 @@ export default function MeetingDetail() {
           }}
         />
 
+        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            defaultChecked={!!m.is_public}
+            onChange={(e) => save({ is_public: e.target.checked }).catch(console.error)}
+          />
+          <span>Public (show on public page)</span>
+        </label>
+
         <textarea
           className="textarea"
           defaultValue={m.agenda || ""}
