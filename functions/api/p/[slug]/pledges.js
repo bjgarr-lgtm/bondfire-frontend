@@ -1,5 +1,5 @@
-import { ok, err } from "../_lib/http.js";
-import { getDB } from "../_bf.js";
+import { ok, err } from "../../_lib/http.js";
+import { getDB } from "../../_bf.js";
 
 function now() {
   return Date.now();
@@ -22,10 +22,6 @@ function toNumOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function boolToInt(v) {
-  return v ? 1 : 0;
-}
-
 function normalizeLegacyContact(name, email) {
   const n = toStr(name, 120);
   const e = toStr(email, 160);
@@ -43,6 +39,7 @@ async function getOrgIdBySlug(env, slug) {
 export async function onRequest(ctx) {
   const { env, request, params } = ctx;
   const slug = params.slug;
+
   const db = getDB(env);
   if (!db) return err(500, "DB_NOT_CONFIGURED");
 
@@ -57,7 +54,7 @@ export async function onRequest(ctx) {
     const pledger_name = toStr(body.name ?? body.pledger_name, 120) || null;
     const pledger_email = toStr(body.email ?? body.pledger_email, 160) || null;
 
-    const type = toStr(body.type, 140) || "";
+    const type = toStr(body.type, 140);
     const amount = toNumOrNull(body.amount);
     const unit = toStr(body.unit, 64) || null;
     const note = toStr(body.note, 4000) || null;
@@ -67,7 +64,7 @@ export async function onRequest(ctx) {
     const t = now();
     const id = uuid();
 
-    // Legacy mirrors so older code stays fine
+    // Legacy mirrors
     const title = type;
     const description = note;
     const qty = amount;
