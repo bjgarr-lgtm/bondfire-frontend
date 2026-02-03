@@ -28,7 +28,10 @@ export async function onRequestPost(context) {
   const unit = coerceStr(body.unit || "");
   const note = coerceStr(body.note || body.message || "");
 
-  if (!type && !note) return bad(400, "Missing pledge type or note");
+  // Allow lightweight pledges. Only reject truly empty submissions.
+  if (!type && !note && !amount && !unit) {
+    return bad(400, "Missing pledge details");
+  }
 
   const titleParts = [];
   if (type) titleParts.push(type);
@@ -41,7 +44,9 @@ export async function onRequestPost(context) {
   const contact = contactParts.join(" ").trim() || null;
 
   const db = getDb(context.env);
+  if (!db) return bad(500, "DB_NOT_CONFIGURED");
 
+  const now = Date.now();
   const pledge = {
     id: crypto.randomUUID(),
     org_id: orgId,
@@ -52,13 +57,14 @@ export async function onRequestPost(context) {
     unit: unit || null,
     contact,
     is_public: 1,
-    created_at: Date.now(),
+    created_at: now,
+    updated_at: now,
   };
 
   await db
     .prepare(
-      `INSERT INTO pledges (id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO pledges (id, org_id, need_id, title, description, qty, unit, contact, is_public, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       pledge.id,
@@ -70,7 +76,8 @@ export async function onRequestPost(context) {
       pledge.unit,
       pledge.contact,
       pledge.is_public,
-      pledge.created_at
+      pledge.created_at,
+      pledge.updated_at
     )
     .run();
 

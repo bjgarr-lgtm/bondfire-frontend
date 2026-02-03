@@ -1,5 +1,6 @@
 import { ok, err } from "../../_lib/http.js";
 import { requireOrgRole, getUserIdFromRequest } from "../../_lib/auth.js";
+import { getDB } from "../../_bf.js";
 
 // D1 tables expected:
 // - newsletter_settings(org_id TEXT PRIMARY KEY, enabled INTEGER, list_address TEXT, blurb TEXT, updated_at INTEGER)
@@ -7,7 +8,8 @@ import { requireOrgRole, getUserIdFromRequest } from "../../_lib/auth.js";
 export async function onRequest(ctx) {
   const { params, env, request } = ctx;
 
-  if (!env?.BF_DB) return err(500, "DB_NOT_CONFIGURED");
+  const db = getDB(env);
+  if (!db) return err(500, "DB_NOT_CONFIGURED");
 
   const orgId = String(params?.orgId || "").trim();
   if (!orgId) return err(400, "BAD_ORG_ID");
@@ -19,7 +21,7 @@ export async function onRequest(ctx) {
     const auth = await requireOrgRole(ctx, orgId, "member");
     if (!auth.ok) return auth.res;
 
-    const r = await env.BF_DB.prepare(
+    const r = await db.prepare(
       "SELECT enabled, list_address, blurb FROM newsletter_settings WHERE org_id = ? LIMIT 1"
     )
       .bind(orgId)
@@ -47,7 +49,7 @@ export async function onRequest(ctx) {
 
     // Keep schema minimal. If your table doesn’t have updated_by, this harmlessly fails.
     // We only require the core fields.
-    await env.BF_DB.prepare(
+    await db.prepare(
       "INSERT INTO newsletter_settings (org_id, enabled, list_address, blurb, updated_at) VALUES (?, ?, ?, ?, ?) " +
         "ON CONFLICT(org_id) DO UPDATE SET enabled = excluded.enabled, list_address = excluded.list_address, blurb = excluded.blurb, updated_at = excluded.updated_at"
     )
