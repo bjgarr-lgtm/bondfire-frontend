@@ -1,4 +1,7 @@
-import { onRequestGet as orgInvitesGet, onRequestPost as orgInvitesPost } from "./orgs/[orgId]/invites.js";
+import {
+  onRequestGet as orgInvitesGet,
+  onRequestPost as orgInvitesPost,
+} from "./orgs/[orgId]/invites.js";
 import { onRequestPost as redeemInvite } from "./invites/redeem.js";
 
 const CORS_HEADERS = {
@@ -28,9 +31,8 @@ function json(obj, status = 200) {
 }
 
 export async function onRequest(context) {
-  const { request, env, params } = context;
+  const { request, params } = context;
 
-  const url = new URL(request.url);
   const segments = Array.isArray(params?.path)
     ? params.path
     : typeof params?.path === "string"
@@ -44,9 +46,6 @@ export async function onRequest(context) {
   // =====================
   // Local invite routes
   // =====================
-  // These routes are implemented as Pages Functions in this repo.
-  // If this catch-all ends up handling them (common in dev/proxy setups),
-  // we delegate to the real handlers so you don’t get a mystery 500.
 
   // Route: /api/orgs/:orgId/invites  (GET, POST)
   if (segments.length === 3 && segments[0] === "orgs" && segments[2] === "invites") {
@@ -66,34 +65,13 @@ export async function onRequest(context) {
   }
 
   // =====================
-  // Proxy to upstream backend
+  // No upstream proxy
   // =====================
-  const upstreamBase = (env.BACKEND_URL || "").replace(/\/+$/, "");
-  if (!upstreamBase) {
-    return json({ ok: false, error: "BACKEND_URL is not set." }, 500);
-  }
-
-  const upstreamUrl = new URL(
-    upstreamBase + "/api/" + segments.map(encodeURIComponent).join("/")
+  // This project uses Pages Functions on the same origin.
+  // If a route isn't handled here, it should be handled by a real function file
+  // (or it simply doesn't exist).
+  return json(
+    { ok: false, error: "Not found", path: "/" + segments.join("/") },
+    404
   );
-  upstreamUrl.search = url.search;
-
-  // Forward headers (strip host)
-  const headers = new Headers(request.headers);
-  headers.delete("host");
-
-  const init = {
-    method: request.method,
-    headers,
-    redirect: "manual",
-    body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-  };
-
-  const res = await fetch(upstreamUrl.toString(), init);
-  const outHeaders = new Headers(res.headers);
-
-  // CORS for cross-origin API_BASE usage
-  for (const [k, v] of Object.entries(CORS_HEADERS)) outHeaders.set(k, v);
-
-  return new Response(res.body, { status: res.status, headers: outHeaders });
 }
