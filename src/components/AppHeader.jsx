@@ -64,7 +64,6 @@ function OrgNav() {
         ["Needs", `${base}/needs`],
         ["Meetings", `${base}/meetings`],
         ["Settings", `${base}/settings`],
-        ["Public", `${base}/public`],
         ["Chat", `${base}/chat`],
       ].map(([label, to]) => (
         <NavLink
