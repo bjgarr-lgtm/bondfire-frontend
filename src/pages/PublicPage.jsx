@@ -73,6 +73,75 @@ async function apiFetch(path, opts = {}) {
   return j;
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+// format ms -> YYYYMMDDTHHMMSSZ
+function toICSDateUTC(ms) {
+  const d = new Date(Number(ms));
+  return (
+    d.getUTCFullYear() +
+    pad2(d.getUTCMonth() + 1) +
+    pad2(d.getUTCDate()) +
+    "T" +
+    pad2(d.getUTCHours()) +
+    pad2(d.getUTCMinutes()) +
+    pad2(d.getUTCSeconds()) +
+    "Z"
+  );
+}
+
+function makeICS({ title, starts_at, ends_at, location, description }) {
+  const uid = `${crypto.randomUUID()}@bondfire`;
+  const dtstamp = toICSDateUTC(Date.now());
+  const dtstart = starts_at ? toICSDateUTC(starts_at) : null;
+  const dtend = ends_at ? toICSDateUTC(ends_at) : dtstart;
+
+  const safe = (s) =>
+    String(s || "")
+      .replaceAll("\\", "\\\\")
+      .replaceAll("\n", "\\n")
+      .replaceAll(",", "\\,")
+      .replaceAll(";", "\\;");
+
+  // If no time, bail out (no .ics)
+  if (!dtstart) return null;
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Bondfire//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${dtstamp}`,
+    `DTSTART:${dtstart}`,
+    dtend ? `DTEND:${dtend}` : "",
+    `SUMMARY:${safe(title || "Public meeting")}`,
+    location ? `LOCATION:${safe(location)}` : "",
+    description ? `DESCRIPTION:${safe(description)}` : "",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ]
+    .filter(Boolean)
+    .join("\r\n");
+}
+
+function downloadICS(icsText, filename = "bondfire-meeting.ics") {
+  const blob = new Blob([icsText], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
 export default function PublicPage(props) {
   const injected = props?.data || null;
   const { slug } = useParams();
@@ -102,6 +171,12 @@ export default function PublicPage(props) {
   const [pledgeUnit, setPledgeUnit] = useState("");
   const [pledgeNote, setPledgeNote] = useState("");
   const [pledgeMsg, setPledgeMsg] = useState("");
+  // inventory request form (feeds into pledges intake so org sees it in Settings → Pledges)
+  const [invReqItem, setInvReqItem] = useState(null);
+  const [invReqName, setInvReqName] = useState("");
+  const [invReqEmail, setInvReqEmail] = useState("");
+  const [invReqMsg, setInvReqMsg] = useState("");
+  const [invReqStatus, setInvReqStatus] = useState("");
 
   useEffect(() => {
     if (!slug || injected) return;
@@ -230,6 +305,55 @@ export default function PublicPage(props) {
       setPledgeMsg(e?.message || "Failed.");
     }
   }
+
+  async function submitInventoryRequest(item) {
+    if (!slug || !item) return;
+    setInvReqStatus("");
+
+    const name = String(invReqName || "").trim();
+    if (!name) {
+      setInvReqStatus("Please enter your name.");
+      return;
+    }
+
+    const email = String(invReqEmail || "").trim();
+    const msg = String(invReqMsg || "").trim();
+
+    const itemLine = [
+      item?.name ? `item: ${item.name}` : "",
+      item?.qty != null && item?.qty !== "" ? `qty: ${item.qty}` : "",
+      item?.unit ? `unit: ${item.unit}` : "",
+      item?.category ? `category: ${item.category}` : "",
+      item?.location ? `location: ${item.location}` : "",
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+    const note = `inventory request\n${itemLine}\n${msg ? `message: ${msg}` : ""}`.trim();
+
+    try {
+      await apiFetch(`/api/p/${encodeURIComponent(slug)}/pledges`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          need_id: null,
+          pledger_name: name,
+          pledger_email: email,
+          type: "inventory request",
+          amount: null,
+          unit: null,
+          note,
+        }),
+      });
+
+      setInvReqStatus("Request sent. The org will see it in their pledges list.");
+      setInvReqItem(null);
+      setInvReqMsg("");
+    } catch (e) {
+      setInvReqStatus(e?.message || "Failed.");
+    }
+  }
+
 
   if (state.loading) return <div style={{ padding: 16 }}>Loading…</div>;
   if (state.error) return <div style={{ padding: 16, color: "crimson" }}>Error: {state.error}</div>;
@@ -373,38 +497,66 @@ export default function PublicPage(props) {
           ) : null}
         </section>
 
-        {/* Newsletter */}
-        <section className="bf-card">
-          <div className="bf-card-header">
-            <h3 className="bf-card-title">Stay in touch</h3>
-            <p className="bf-card-hint">Newsletter signup</p>
-          </div>
-
-          {pubCfg?.newsletter_enabled ? (
-            <div className="bf-form-grid">
-              <input
-                className="bf-input"
-                value={nlName}
-                onChange={(e) => setNlName(e.target.value)}
-                placeholder="Name (optional)"
-              />
-              <input
-                className="bf-input"
-                value={nlEmail}
-                onChange={(e) => setNlEmail(e.target.value)}
-                placeholder="Email"
-              />
-
-              <button className="bf-btn bf-btn-red" type="button" onClick={subscribe}>
-                Subscribe
-              </button>
-
-              {nlMsg ? <div className="bf-note">{nlMsg}</div> : null}
+        {publicMeetings.length > 0 ? (
+          <section className="bf-card">
+            <div className="bf-card-header">
+              <h3 className="bf-card-title">Public meetings</h3>
+              <p className="bf-card-hint">Events shared publicly</p>
             </div>
-          ) : (
-            <div className="bf-empty">Newsletter signup is not enabled.</div>
-          )}
-        </section>
+
+            <ul className="bf-list">
+              {publicMeetings.map((m) => {
+                const when = m.starts_at ? new Date(m.starts_at).toLocaleString() : null;
+                return (
+                  <li key={m.id || m.title} className="bf-li">
+                    <div className="bf-li-top">
+                      <div className="bf-li-name">{m.title || "Untitled"}</div>
+                      <div className="bf-badges">
+                        {when ? <span className="bf-badge">{when}</span> : null}
+                        {m.location ? <span className="bf-badge">{m.location}</span> : null}
+                      </div>
+                    </div>
+
+                    {m.agenda ? <div className="bf-note">{m.agenda}</div> : null}
+
+                    <div className="bf-public-actions">
+                      <button
+                        className="bf-btn"
+                        type="button"
+                        onClick={() => {
+                          const ics = makeICS({
+                            title: m.title,
+                            starts_at: m.starts_at,
+                            ends_at: m.ends_at,
+                            location: m.location,
+                            description: m.agenda || "",
+                          });
+                          if (!ics) return;
+                          const safeTitle = (m.title || "meeting")
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")
+                            .replace(/(^-|-$)/g, "");
+                          downloadICS(ics, `bondfire-${safeTitle || "meeting"}.ics`);
+                        }}
+                      >
+                        Add to calendar
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : (
+          <section className="bf-card">
+            <div className="bf-card-header">
+              <h3 className="bf-card-title">Public meetings</h3>
+              <p className="bf-card-hint">None shared right now</p>
+            </div>
+            <div className="bf-empty">No public meetings.</div>
+          </section>
+        )}
+
 
         {/* Inventory */}
         {publicInventory.length > 0 ? (
@@ -431,39 +583,116 @@ export default function PublicPage(props) {
                   </div>
 
                   {it.notes ? <div className="bf-note">{it.notes}</div> : null}
+                  <div className="bf-public-actions">
+                    <button
+                      className="bf-btn bf-btn-red"
+                      type="button"
+                      onClick={() => {
+                        setInvReqItem(it);
+                        setInvReqStatus("");
+                      }}
+                    >
+                      I need this
+                    </button>
+                  </div>
+
                 </li>
+                
               ))}
             </ul>
-          </section>
-        ) : null}
+            {invReqItem ? (
+              <>
+                <div className="bf-divider" />
+                <div className="bf-card" style={{ padding: 12 }}>
+                  <div className="bf-card-header">
+                    <h3 className="bf-card-title">Request an item</h3>
+                    <p className="bf-card-hint">{invReqItem?.name || "Item"}</p>
+                  </div>
 
-        {/* Meetings */}
-        {publicMeetings.length > 0 ? (
-          <section className="bf-card" style={{ gridColumn: "1 / -1" }}>
-            <div className="bf-card-header">
-              <h3 className="bf-card-title">Public meetings</h3>
-              <p className="bf-card-hint">Events shared publicly</p>
-            </div>
+                  <div className="bf-form-grid">
+                    <input
+                      className="bf-input"
+                      value={invReqName}
+                      onChange={(e) => setInvReqName(e.target.value)}
+                      placeholder="Your name"
+                    />
+                    <input
+                      className="bf-input"
+                      value={invReqEmail}
+                      onChange={(e) => setInvReqEmail(e.target.value)}
+                      placeholder="Your email (optional)"
+                    />
+                    <textarea
+                      className="bf-textarea"
+                      rows={2}
+                      value={invReqMsg}
+                      onChange={(e) => setInvReqMsg(e.target.value)}
+                      placeholder="Message (optional). Include urgency, pickup needs, etc."
+                    />
 
-            <ul className="bf-list" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-              {publicMeetings.map((m) => {
-                const when = m.starts_at ? new Date(m.starts_at).toLocaleString() : null;
-                return (
-                  <li key={m.id || m.title} className="bf-li">
-                    <div className="bf-li-top">
-                      <div className="bf-li-name">{m.title || "Untitled"}</div>
-                      <div className="bf-badges">
-                        {when ? <span className="bf-badge">{when}</span> : null}
-                        {m.location ? <span className="bf-badge">{m.location}</span> : null}
-                      </div>
+                    <div className="bf-public-actions">
+                      <button
+                        className="bf-btn bf-btn-red"
+                        type="button"
+                        onClick={() => submitInventoryRequest(invReqItem)}
+                      >
+                        Send request
+                      </button>
+                      <button
+                        className="bf-btn"
+                        type="button"
+                        onClick={() => {
+                          setInvReqItem(null);
+                          setInvReqStatus("");
+                          setInvReqMsg("");
+                        }}
+                      >
+                        Cancel
+                      </button>
                     </div>
-                    {m.agenda ? <div className="bf-note">{m.agenda}</div> : null}
-                  </li>
-                );
-              })}
-            </ul>
+
+                    {invReqStatus ? <div className="bf-note">{invReqStatus}</div> : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
+
           </section>
         ) : null}
+
+        <section className="bf-card" style={{ gridColumn: "1 / -1" }}>
+          <div className="bf-card-header">
+            <h3 className="bf-card-title">Stay in touch</h3>
+            <p className="bf-card-hint">Newsletter signup</p>
+          </div>
+
+          {pubCfg?.newsletter_enabled ? (
+            <div className="bf-form-grid" style={{ maxWidth: 520 }}>
+              <input
+                className="bf-input"
+                value={nlName}
+                onChange={(e) => setNlName(e.target.value)}
+                placeholder="Name (optional)"
+              />
+              <input
+                className="bf-input"
+                value={nlEmail}
+                onChange={(e) => setNlEmail(e.target.value)}
+                placeholder="Email"
+              />
+
+              <button className="bf-btn bf-btn-red" type="button" onClick={subscribe}>
+                Subscribe
+              </button>
+
+              {nlMsg ? <div className="bf-note">{nlMsg}</div> : null}
+            </div>
+          ) : (
+            <div className="bf-empty">Newsletter signup is not enabled.</div>
+          )}
+        </section>
+
+
       </div>
     </div>
   );
