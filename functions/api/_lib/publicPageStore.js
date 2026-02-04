@@ -48,3 +48,13 @@ export async function getOrgIdBySlug(env, slug) {
   return orgId || null;
 }
 
+// Resolve a public slug to an orgId (or null)
+export async function resolveSlug(env, slug) {
+  const s = String(slug || "").trim().toLowerCase();
+  if (!s) return null;
+
+  // matches your slug mapping keys used elsewhere: slug:<slug> => orgId
+  const orgId = await env.BF_PUBLIC.get(`slug:${s}`);
+  return orgId || null;
+}
+
