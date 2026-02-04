@@ -387,7 +387,14 @@ export default function PublicPage(props) {
   return (
     <div className="bf-public">
       <div className="bf-public-hero">
-        <div className="bf-public-title">
+        <div
+          className="bf-public-title"
+          style={{
+            alignItems: "flex-start",
+            gap: 16,
+          }}
+        >
+
           {orgInfo.logo ? (
             <img src={orgInfo.logo} alt="Org logo" className="bf-public-logo" />
           ) : null}
@@ -411,17 +418,18 @@ export default function PublicPage(props) {
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 6,
-                alignItems: "stretch",
-                width: 320,
-                maxWidth: "40vw",
+                gap: 4,
+                alignItems: "flex-end",
+                width: 300,
+                maxWidth: "38vw",
               }}
             >
+
               <div className="helper" style={{ textAlign: "right", opacity: 0.85 }}>
                 newsletter signup
               </div>
 
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
                 <input
                   className="bf-input"
                   value={nlName}
@@ -475,7 +483,7 @@ export default function PublicPage(props) {
                   style={{
                     textDecoration: "none",
                     borderRadius: 999,
-                    padding: "8px 12px",
+                    padding: "9px 14px",
                     whiteSpace: "nowrap",
                     display: "inline-flex",
                     alignItems: "center",
@@ -533,6 +541,18 @@ export default function PublicPage(props) {
         ) : null}
 
       </div>
+
+
+      {/* subtle divider between hero and content */}
+      <div
+        style={{
+          height: 1,
+          background:
+            "linear-gradient(to right, transparent, rgba(255,255,255,0.12), transparent)",
+          margin: "20px 0 8px",
+        }}
+      />
+
 
       <div className="bf-public-grid">
         {/* Needs */}
