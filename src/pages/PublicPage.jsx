@@ -82,6 +82,19 @@ function normalizeUrl(u) {
   return `https://${s}`;
 }
 
+function cleanLinks(arr) {
+  return (Array.isArray(arr) ? arr : [])
+    .map((l) => {
+      const text = String(l?.text || l?.url || "").trim();
+      const url = normalizeUrl(l?.url || "");
+      if (!text || !url) return null;
+      return { text, url };
+    })
+    .filter(Boolean)
+    .slice(0, 5); // keep header tight
+}
+
+
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -266,9 +279,12 @@ export default function PublicPage(props) {
     [orgId]
   );
 
+  const headerLinks = useMemo(() => cleanLinks(pubCfg?.links), [pubCfg?.links]);
+
   const openNeeds = useMemo(() => {
     return publicNeeds.filter((n) => (n?.status ?? "open") === "open");
   }, [publicNeeds]);
+
 
   async function subscribe() {
     if (!slug) return;
@@ -376,7 +392,7 @@ export default function PublicPage(props) {
             <img src={orgInfo.logo} alt="Org logo" className="bf-public-logo" />
           ) : null}
 
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <h1 className="bf-public-h1">
               {pubCfg?.title || orgInfo.name || slug || "Public Page"}
             </h1>
@@ -389,83 +405,73 @@ export default function PublicPage(props) {
               </p>
             )}
           </div>
+
+          {headerLinks.length > 0 ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                justifyContent: "flex-end",
+                alignItems: "center",
+                maxWidth: 420,
+              }}
+            >
+              {headerLinks.map((l) => (
+                <a
+                  key={l.url}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bf-btn"
+                  style={{
+                    textDecoration: "none",
+                    borderRadius: 999,
+                    padding: "8px 12px",
+                    whiteSpace: "nowrap",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                  title={l.url}
+                >
+                  <span style={{ fontWeight: 700 }}>{l.text}</span>
+                  <span className="helper" style={{ opacity: 0.85 }}>↗</span>
+                </a>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
+
           <div className="card" style={{ marginTop: 16, padding: 14 }}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
               <h3 className="section-title" style={{ margin: 0, letterSpacing: 0.8 }}>What we do</h3>
             </div>
 
-            {Array.isArray(pubCfg?.links) && pubCfg.links.length > 0 ? (
-              <div className="card" style={{ marginTop: 12, padding: 14 }}>
-                <h3 className="section-title" style={{ margin: 0 }}>Links</h3>
+            {/* links moved to header */}
 
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 10,
-                    marginTop: 12,
-                  }}
-                >
-                  {pubCfg.links
-                    .filter((l) => l && (l.text || l.url))
-                    .map((l, i) => {
-                      const text = String(l.text || l.url || "").trim();
-                      const url = normalizeUrl(l.url || "");
-                      if (!url) return null;
-
-                      return (
-                        <a
-                          key={i}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn"
-                          style={{
-                            textDecoration: "none",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "10px 12px",
-                            borderRadius: 999,
-                          }}
-                          title={url}
-                        >
-                          <span style={{ fontWeight: 700, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {text}
-                          </span>
-                          <span className="helper" style={{ opacity: 0.85 }}>↗</span>
-                        </a>
-                      );
-                    })}
-                </div>
-              </div>
-            ) : null}
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 10,
                 marginTop: 12,
               }}
             >
-
               {pubCfg.features.map((f, i) => (
                 <div
                   key={i}
                   style={{
-                    padding: "12px 14px",
+                    padding: "10px 12px",
                     borderRadius: 14,
                     border: "1px solid #222",
                     background: "rgba(255,255,255,0.02)",
                     fontWeight: 700,
                     lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+                    whiteSpace: "normal",
                   }}
                   title={f}
                 >
@@ -473,6 +479,7 @@ export default function PublicPage(props) {
                 </div>
               ))}
             </div>
+
           </div>
         ) : null}
 
