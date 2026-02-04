@@ -406,6 +406,54 @@ export default function PublicPage(props) {
             )}
           </div>
 
+          {pubCfg?.newsletter_enabled ? (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                alignItems: "stretch",
+                width: 320,
+                maxWidth: "40vw",
+              }}
+            >
+              <div className="helper" style={{ textAlign: "right", opacity: 0.85 }}>
+                newsletter signup
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  className="bf-input"
+                  value={nlName}
+                  onChange={(e) => setNlName(e.target.value)}
+                  placeholder="name"
+                  style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
+                />
+                <input
+                  className="bf-input"
+                  value={nlEmail}
+                  onChange={(e) => setNlEmail(e.target.value)}
+                  placeholder="email"
+                  style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
+                />
+                <button
+                  className="bf-btn bf-btn-red"
+                  type="button"
+                  onClick={subscribe}
+                  style={{ padding: "8px 12px", borderRadius: 999, whiteSpace: "nowrap" }}
+                >
+                  subscribe
+                </button>
+              </div>
+
+              {nlMsg ? (
+                <div className="bf-note" style={{ textAlign: "right" }}>
+                  {nlMsg}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {headerLinks.length > 0 ? (
             <div
               style={{
@@ -442,6 +490,7 @@ export default function PublicPage(props) {
             </div>
           ) : null}
         </div>
+
 
         {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
 
@@ -745,37 +794,7 @@ export default function PublicPage(props) {
           </section>
         ) : null}
 
-        <section className="bf-card" style={{ gridColumn: "1 / -1" }}>
-          <div className="bf-card-header">
-            <h3 className="bf-card-title">Stay in touch</h3>
-            <p className="bf-card-hint">Newsletter signup</p>
-          </div>
-
-          {pubCfg?.newsletter_enabled ? (
-            <div className="bf-form-grid" style={{ maxWidth: 520 }}>
-              <input
-                className="bf-input"
-                value={nlName}
-                onChange={(e) => setNlName(e.target.value)}
-                placeholder="Name (optional)"
-              />
-              <input
-                className="bf-input"
-                value={nlEmail}
-                onChange={(e) => setNlEmail(e.target.value)}
-                placeholder="Email"
-              />
-
-              <button className="bf-btn bf-btn-red" type="button" onClick={subscribe}>
-                Subscribe
-              </button>
-
-              {nlMsg ? <div className="bf-note">{nlMsg}</div> : null}
-            </div>
-          ) : (
-            <div className="bf-empty">Newsletter signup is not enabled.</div>
-          )}
-        </section>
+        {/* newsletter moved to header */}
 
 
       </div>

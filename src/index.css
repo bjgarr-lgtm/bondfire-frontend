@@ -474,3 +474,5 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   border-color: rgba(255,255,255,0.10);
   background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
 }
+
+.bf-public-title { flex-wrap: wrap; }
