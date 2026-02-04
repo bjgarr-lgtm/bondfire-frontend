@@ -1,4 +1,4 @@
-import { getPublicCfg, resolveSlug } from "../../../_lib/publicPageStore.js";
+import { getPublicCfg, resolveSlug } from "../../_lib/publicPageStore.js";
 
 async function ensureMeetingsPublicColumn(db) {
   try {

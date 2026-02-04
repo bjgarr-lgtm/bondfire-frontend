@@ -1,4 +1,4 @@
-import { getPublicCfg, resolveSlug } from "../../../_lib/publicPageStore.js";
+import { getPublicCfg, resolveSlug } from "../../_lib/publicPageStore.js";
 
 // GET /api/public/:slug/inventory
 // Returns inventory items that have been marked public (is_public = 1).
