@@ -116,7 +116,7 @@ function toICSDateUTC(ms) {
 }
 
 function makeICS({ title, starts_at, ends_at, location, description }) {
-  const uid = `${crypto.randomUUID()}@bondfire`;
+  const uid = `${(crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`)}@bondfire`;
   const dtstamp = toICSDateUTC(Date.now());
   const dtstart = starts_at ? toICSDateUTC(starts_at) : null;
   const dtend = ends_at ? toICSDateUTC(ends_at) : dtstart;
@@ -375,6 +375,8 @@ export default function PublicPage(props) {
       setInvReqStatus("Request sent. The org will see it in their pledges list.");
       setInvReqItem(null);
       setInvReqMsg("");
+      setInvReqName("");
+      setInvReqEmail("");
     } catch (e) {
       setInvReqStatus(e?.message || "Failed.");
     }
@@ -387,117 +389,75 @@ export default function PublicPage(props) {
   return (
     <div className="bf-public">
       <div className="bf-public-hero">
-        <div
-          className="bf-public-title"
-          style={{
-            alignItems: "flex-start",
-            gap: 16,
-          }}
-        >
+        <div className="bf-public-heroTop">
+          <div className="bf-public-title">
+            {orgInfo.logo ? (
+              <img src={orgInfo.logo} alt="Org logo" className="bf-public-logo" />
+            ) : null}
 
-          {orgInfo.logo ? (
-            <img src={orgInfo.logo} alt="Org logo" className="bf-public-logo" />
-          ) : null}
+            <div className="bf-public-titleText">
+              <h1 className="bf-public-h1">
+                {pubCfg?.title || orgInfo.name || slug || "Public Page"}
+              </h1>
 
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <h1 className="bf-public-h1">
-              {pubCfg?.title || orgInfo.name || slug || "Public Page"}
-            </h1>
-
-            {pubCfg?.about ? (
-              <p className="bf-public-sub">{pubCfg.about}</p>
-            ) : (
-              <p className="bf-public-sub" style={{ opacity: 0.75 }}>
-                A public page for this org.
-              </p>
-            )}
+              {pubCfg?.about ? (
+                <p className="bf-public-sub">{pubCfg.about}</p>
+              ) : (
+                <p className="bf-public-sub" style={{ opacity: 0.75 }}>
+                  A public page for this org.
+                </p>
+              )}
+            </div>
           </div>
 
-          {pubCfg?.newsletter_enabled ? (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                alignItems: "flex-end",
-                width: 300,
-                maxWidth: "38vw",
-              }}
-            >
+          <div className="bf-public-heroRight">
+            {pubCfg?.newsletter_enabled ? (
+              <div className="bf-public-newsletterInline">
+                <div className="bf-public-newsletterLabel">newsletter signup</div>
 
-              <div className="helper" style={{ textAlign: "right", opacity: 0.85 }}>
-                newsletter signup
-              </div>
-
-              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
                 <input
-                  className="bf-input"
+                  className="bf-input bf-public-newsletterInput"
                   value={nlName}
                   onChange={(e) => setNlName(e.target.value)}
                   placeholder="name"
-                  style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
                 />
+
                 <input
-                  className="bf-input"
+                  className="bf-input bf-public-newsletterInput"
                   value={nlEmail}
                   onChange={(e) => setNlEmail(e.target.value)}
                   placeholder="email"
-                  style={{ flex: 1, minWidth: 0, padding: "8px 10px" }}
                 />
-                <button
-                  className="bf-btn bf-btn-red"
-                  type="button"
-                  onClick={subscribe}
-                  style={{ padding: "8px 12px", borderRadius: 999, whiteSpace: "nowrap" }}
-                >
+
+                <button className="bf-btn bf-btn-red bf-public-newsletterBtn" type="button" onClick={subscribe}>
                   subscribe
                 </button>
+
+                {nlMsg ? <div className="bf-public-newsletterMsg">{nlMsg}</div> : null}
               </div>
+            ) : null}
 
-              {nlMsg ? (
-                <div className="bf-note" style={{ textAlign: "right" }}>
-                  {nlMsg}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+            {headerLinks.length > 0 ? (
+              <div className="bf-public-linksInline">
+                {headerLinks.map((l, i) => (
+                  <a
+                    key={`${l.url}-${i}`}
+                    className="bf-btn bf-public-linkPill"
+                    href={l.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={l.url}
+                    style={{ textDecoration: "none" }}
+                  >
+                    {l.text} <span style={{ opacity: 0.8 }}>↗</span>
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
-          {headerLinks.length > 0 ? (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                justifyContent: "flex-end",
-                alignItems: "center",
-                maxWidth: 420,
-              }}
-            >
-              {headerLinks.map((l) => (
-                <a
-                  key={l.url}
-                  href={l.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="bf-btn"
-                  style={{
-                    textDecoration: "none",
-                    borderRadius: 999,
-                    padding: "9px 14px",
-                    whiteSpace: "nowrap",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                  title={l.url}
-                >
-                  <span style={{ fontWeight: 700 }}>{l.text}</span>
-                  <span className="helper" style={{ opacity: 0.85 }}>↗</span>
-                </a>
-              ))}
-            </div>
-          ) : null}
-        </div>
+                  </div>
+
 
 
         {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
@@ -519,21 +479,10 @@ export default function PublicPage(props) {
               }}
             >
               {pubCfg.features.map((f, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 14,
-                    border: "1px solid #222",
-                    background: "rgba(255,255,255,0.02)",
-                    fontWeight: 700,
-                    lineHeight: 1.2,
-                    whiteSpace: "normal",
-                  }}
-                  title={f}
-                >
+                <div key={i} className="bf-public-featurePill">
                   {f}
                 </div>
+
               ))}
             </div>
 

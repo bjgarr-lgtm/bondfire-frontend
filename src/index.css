@@ -476,3 +476,223 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
 }
 
 .bf-public-title { flex-wrap: wrap; }
+
+.bf-public-newsletterLabel {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+.bf-public-newsletterMsg {
+  width: 100%;
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 6px;
+}
+
+.bf-public-linkPill {
+  border-radius: 999px;
+  padding: 10px 12px;
+}
+
+
+/* =========================
+   Public Page mobile polish
+   ========================= */
+
+.bf-public {
+  padding: 14px;
+}
+
+.bf-public-heroTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.bf-public-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bf-public-titleText {
+  min-width: 0;
+}
+
+.bf-public-h1 {
+  line-height: 1.05;
+  margin: 0;
+}
+
+.bf-public-sub {
+  margin: 6px 0 0 0;
+  line-height: 1.35;
+}
+
+.bf-public-heroRight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 520px;
+}
+
+.bf-public-newsletterInline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bf-public-linksInline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Make “What we do” pills actually behave */
+.bf-public .bf-featureGrid,
+.bf-public-featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bf-public .bf-featurePill,
+.bf-public-featurePill {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Main cards grid: desktop keeps your 3 columns */
+.bf-public-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+/* Make lists and buttons breathe a bit */
+.bf-card,
+.bf-public .bf-card {
+  padding: 12px;
+}
+
+.bf-btn,
+.bf-public .bf-btn {
+  min-height: 40px;
+}
+
+/* Inputs should not be tiny torture devices */
+.bf-input,
+.bf-textarea {
+  width: 100%;
+  min-height: 40px;
+}
+
+/* ====== Mobile breakpoint ====== */
+@media (max-width: 820px) {
+  .bf-public {
+    padding: 12px;
+  }
+
+  .bf-public-heroTop {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .bf-public-title {
+    align-items: flex-start;
+  }
+
+  .bf-public-logo {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bf-public-h1 {
+    font-size: 22px;
+  }
+
+  .bf-public-sub {
+    font-size: 14px;
+  }
+
+  /* Put newsletter and website into a clean second row */
+  .bf-public-heroRight {
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .bf-public-newsletterInline {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  /* Make the inline newsletter form usable on phones */
+  .bf-public-newsletterInline .bf-input {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .bf-public-newsletterInline .bf-btn {
+    width: 100%;
+  }
+
+  /* “What we do” pills: 2 columns on mobile */
+  .bf-public .bf-featureGrid,
+  .bf-public-featuresGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Cards: single column stack */
+  .bf-public-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Reduce badge clutter wrapping weirdly */
+  .bf-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Give action buttons full width so thumbs don’t hate you */
+  .bf-public-actions .bf-btn,
+  .bf-public-actions .bf-btn-red {
+    width: 100%;
+  }
+}
+
+/* ====== Small phones ====== */
+@media (max-width: 420px) {
+  .bf-public-h1 {
+    font-size: 20px;
+  }
+
+  .bf-public .bf-featureGrid,
+  .bf-public-featuresGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bf-public-featurePill {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #222;
+  background: rgba(255,255,255,0.02);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
