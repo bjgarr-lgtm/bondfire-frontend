@@ -235,143 +235,237 @@ export default function PublicPage(props) {
   if (state.error) return <div style={{ padding: 16, color: "crimson" }}>Error: {state.error}</div>;
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginTop: 0,
-          borderBottom: "1px solid #eee",
-          paddingBottom: 12,
-        }}
-      >
-        {orgInfo.logo && (
-          <img
-            src={orgInfo.logo}
-            alt="Org logo"
-            style={{ height: 48, width: 48, borderRadius: 8, objectFit: "cover" }}
-          />
-        )}
-        <h1 style={{ margin: 0, fontSize: 24 }}>
-          {pubCfg?.title || orgInfo.name || slug || "Public Page"}
-        </h1>
-      </header>
+    <div className="bf-public">
+      <div className="bf-public-hero">
+        <div className="bf-public-title">
+          {orgInfo.logo ? (
+            <img src={orgInfo.logo} alt="Org logo" className="bf-public-logo" />
+          ) : null}
 
-      {pubCfg?.about ? <p style={{ lineHeight: 1.6, marginTop: 12 }}>{pubCfg.about}</p> : null}
+          <div style={{ minWidth: 0 }}>
+            <h1 className="bf-public-h1">
+              {pubCfg?.title || orgInfo.name || slug || "Public Page"}
+            </h1>
 
-      {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
-        <div className="card" style={{ marginTop: 16, padding: 12 }}>
-          <h3 className="section-title" style={{ margin: 0 }}>What we do</h3>
-          <ul style={{ paddingLeft: 18, marginTop: 8 }}>
-            {pubCfg.features.map((f, i) => <li key={i}>{f}</li>)}
-          </ul>
+            {pubCfg?.about ? (
+              <p className="bf-public-sub">{pubCfg.about}</p>
+            ) : (
+              <p className="bf-public-sub" style={{ opacity: 0.75 }}>
+                A public page for this org.
+              </p>
+            )}
+          </div>
         </div>
-      ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: 12,
-          marginTop: 12,
-        }}
-      >
-        <section className="card" style={{ padding: 12 }}>
-          <h3 className="section-title" style={{ marginTop: 0 }}>Open needs</h3>
-          <ul style={{ paddingLeft: 18, marginTop: 8 }}>
+        {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
+          <div style={{ marginTop: 12 }}>
+            <div className="bf-card" style={{ padding: 12 }}>
+              <div className="bf-card-header">
+                <h3 className="bf-card-title">What we do</h3>
+                <p className="bf-card-hint">Short version</p>
+              </div>
+              <ul className="bf-list">
+                {pubCfg.features.map((f, i) => (
+                  <li key={i} className="bf-li">
+                    <div className="bf-li-name">{f}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="bf-public-grid">
+        {/* Needs */}
+        <section className="bf-card">
+          <div className="bf-card-header">
+            <h3 className="bf-card-title">Open needs</h3>
+            <p className="bf-card-hint">What we need right now</p>
+          </div>
+
+          <ul className="bf-list">
             {openNeeds.map((n) => (
-              <li key={n.id || n.title}>
-                <strong>{n.title || "Untitled"}</strong>
-                {n.urgency ? ` · ${n.urgency}` : ""}
+              <li key={n.id || n.title} className="bf-li">
+                <div className="bf-li-top">
+                  <div className="bf-li-name">{n.title || "Untitled"}</div>
+                  <div className="bf-badges">
+                    {n.urgency ? <span className="bf-badge">{n.urgency}</span> : null}
+                    {n.category ? <span className="bf-badge">{n.category}</span> : null}
+                  </div>
+                </div>
+
                 {pubCfg?.pledges_enabled ? (
-                  <div style={{ marginTop: 8 }}>
-                    <button className="btn-red" type="button" onClick={() => submitPledge(n.id)}>
+                  <div className="bf-public-actions">
+                    <button
+                      className="bf-btn bf-btn-red"
+                      type="button"
+                      onClick={() => submitPledge(n.id)}
+                    >
                       Pledge to this
                     </button>
                   </div>
                 ) : null}
               </li>
             ))}
-            {openNeeds.length === 0 ? <li className="helper">No open needs right now.</li> : null}
+
+            {openNeeds.length === 0 ? (
+              <li className="bf-empty">No open needs right now.</li>
+            ) : null}
           </ul>
 
           {pubCfg?.pledges_enabled ? (
-            <div className="card" style={{ padding: 12, border: "1px solid #222", marginTop: 12 }}>
-              <div className="helper" style={{ marginBottom: 8 }}>Pledge form</div>
-              <div className="grid" style={{ gap: 10 }}>
-                <input className="input" value={pledgeName} onChange={(e) => setPledgeName(e.target.value)} placeholder="Your name" />
-                <input className="input" value={pledgeEmail} onChange={(e) => setPledgeEmail(e.target.value)} placeholder="Your email (optional)" />
-                <div className="grid cols-3" style={{ gap: 10 }}>
-                  <input className="input" value={pledgeType} onChange={(e) => setPledgeType(e.target.value)} placeholder="Type (money, food, labor)" />
-                  <input className="input" value={pledgeAmount} onChange={(e) => setPledgeAmount(e.target.value)} placeholder="Amount" />
-                  <input className="input" value={pledgeUnit} onChange={(e) => setPledgeUnit(e.target.value)} placeholder="Unit (USD, hours, boxes)" />
+            <>
+              <div className="bf-divider" />
+              <div className="bf-card" style={{ padding: 12 }}>
+                <div className="bf-card-header">
+                  <h3 className="bf-card-title">Pledge form</h3>
+                  <p className="bf-card-hint">Quick and optional</p>
                 </div>
-                <textarea className="textarea" rows={2} value={pledgeNote} onChange={(e) => setPledgeNote(e.target.value)} placeholder="Note (optional)" />
-                {pledgeMsg ? <div className="helper">{pledgeMsg}</div> : null}
+
+                <div className="bf-form-grid">
+                  <input
+                    className="bf-input"
+                    value={pledgeName}
+                    onChange={(e) => setPledgeName(e.target.value)}
+                    placeholder="Your name"
+                  />
+                  <input
+                    className="bf-input"
+                    value={pledgeEmail}
+                    onChange={(e) => setPledgeEmail(e.target.value)}
+                    placeholder="Your email (optional)"
+                  />
+
+                  <div className="bf-form-row3">
+                    <input
+                      className="bf-input"
+                      value={pledgeType}
+                      onChange={(e) => setPledgeType(e.target.value)}
+                      placeholder="Type (money, food, labor)"
+                    />
+                    <input
+                      className="bf-input"
+                      value={pledgeAmount}
+                      onChange={(e) => setPledgeAmount(e.target.value)}
+                      placeholder="Amount"
+                    />
+                    <input
+                      className="bf-input"
+                      value={pledgeUnit}
+                      onChange={(e) => setPledgeUnit(e.target.value)}
+                      placeholder="Unit (USD, hours, boxes)"
+                    />
+                  </div>
+
+                  <textarea
+                    className="bf-textarea"
+                    rows={2}
+                    value={pledgeNote}
+                    onChange={(e) => setPledgeNote(e.target.value)}
+                    placeholder="Note (optional)"
+                  />
+
+                  {pledgeMsg ? <div className="bf-note">{pledgeMsg}</div> : null}
+                </div>
               </div>
-            </div>
+            </>
           ) : null}
         </section>
 
-        <section className="card" style={{ padding: 12 }}>
-          <h3 className="section-title" style={{ marginTop: 0 }}>Stay in touch</h3>
+        {/* Newsletter */}
+        <section className="bf-card">
+          <div className="bf-card-header">
+            <h3 className="bf-card-title">Stay in touch</h3>
+            <p className="bf-card-hint">Newsletter signup</p>
+          </div>
 
           {pubCfg?.newsletter_enabled ? (
-            <div style={{ marginTop: 12 }} className="grid">
-              <div className="helper">Newsletter signup</div>
-              <input className="input" value={nlName} onChange={(e) => setNlName(e.target.value)} placeholder="Name (optional)" />
-              <input className="input" value={nlEmail} onChange={(e) => setNlEmail(e.target.value)} placeholder="Email" />
-              <button className="btn-red" type="button" onClick={subscribe}>Subscribe</button>
-              {nlMsg ? <div className="helper">{nlMsg}</div> : null}
+            <div className="bf-form-grid">
+              <input
+                className="bf-input"
+                value={nlName}
+                onChange={(e) => setNlName(e.target.value)}
+                placeholder="Name (optional)"
+              />
+              <input
+                className="bf-input"
+                value={nlEmail}
+                onChange={(e) => setNlEmail(e.target.value)}
+                placeholder="Email"
+              />
+
+              <button className="bf-btn bf-btn-red" type="button" onClick={subscribe}>
+                Subscribe
+              </button>
+
+              {nlMsg ? <div className="bf-note">{nlMsg}</div> : null}
             </div>
           ) : (
-            <div className="helper" style={{ marginTop: 8 }}>
-              Newsletter signup is not enabled.
-            </div>
+            <div className="bf-empty">Newsletter signup is not enabled.</div>
           )}
         </section>
 
+        {/* Inventory */}
         {publicInventory.length > 0 ? (
-          <section className="card" style={{ padding: 12 }}>
-            <h3 className="section-title" style={{ marginTop: 0 }}>Public inventory</h3>
-            <div className="helper" style={{ marginTop: 4 }}>
-              Supplies this org has available.
+          <section className="bf-card">
+            <div className="bf-card-header">
+              <h3 className="bf-card-title">Public inventory</h3>
+              <p className="bf-card-hint">Supplies available</p>
             </div>
-            <ul style={{ paddingLeft: 18, marginTop: 8 }}>
+
+            <ul className="bf-list">
               {publicInventory.map((it) => (
-                <li key={it.id || it.name}>
-                  <strong>{it.name || "Untitled"}</strong>
-                  {it.qty != null && it.qty !== "" ? ` · ${it.qty}` : ""}
-                  {it.unit ? ` ${it.unit}` : ""}
-                  {it.category ? ` · ${it.category}` : ""}
-                  {it.location ? ` · ${it.location}` : ""}
-                  {it.notes ? <div className="helper" style={{ marginTop: 4 }}>{it.notes}</div> : null}
+                <li key={it.id || it.name} className="bf-li">
+                  <div className="bf-li-top">
+                    <div className="bf-li-name">{it.name || "Untitled"}</div>
+                    <div className="bf-badges">
+                      {it.qty != null && it.qty !== "" ? (
+                        <span className="bf-badge">
+                          {it.qty}{it.unit ? ` ${it.unit}` : ""}
+                        </span>
+                      ) : null}
+                      {it.category ? <span className="bf-badge">{it.category}</span> : null}
+                      {it.location ? <span className="bf-badge">{it.location}</span> : null}
+                    </div>
+                  </div>
+
+                  {it.notes ? <div className="bf-note">{it.notes}</div> : null}
                 </li>
               ))}
             </ul>
           </section>
         ) : null}
 
+        {/* Meetings */}
         {publicMeetings.length > 0 ? (
-          <section className="card" style={{ padding: 12 }}>
-            <h3 className="section-title" style={{ marginTop: 0 }}>Public meetings</h3>
-            <div className="helper" style={{ marginTop: 4 }}>
-              Meetings the org chose to share publicly.
+          <section className="bf-card" style={{ gridColumn: "1 / -1" }}>
+            <div className="bf-card-header">
+              <h3 className="bf-card-title">Public meetings</h3>
+              <p className="bf-card-hint">Events shared publicly</p>
             </div>
-            <ul style={{ paddingLeft: 18, marginTop: 8 }}>
-              {publicMeetings.map((m) => (
-                <li key={m.id || m.title}>
-                  <strong>{m.title || "Untitled"}</strong>
-                  {m.starts_at ? ` · ${new Date(m.starts_at).toLocaleString()}` : ""}
-                  {m.location ? ` · ${m.location}` : ""}
-                  {m.agenda ? <div className="helper" style={{ marginTop: 4 }}>{m.agenda}</div> : null}
-                </li>
-              ))}
+
+            <ul className="bf-list" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              {publicMeetings.map((m) => {
+                const when = m.starts_at ? new Date(m.starts_at).toLocaleString() : null;
+                return (
+                  <li key={m.id || m.title} className="bf-li">
+                    <div className="bf-li-top">
+                      <div className="bf-li-name">{m.title || "Untitled"}</div>
+                      <div className="bf-badges">
+                        {when ? <span className="bf-badge">{when}</span> : null}
+                        {m.location ? <span className="bf-badge">{m.location}</span> : null}
+                      </div>
+                    </div>
+                    {m.agenda ? <div className="bf-note">{m.agenda}</div> : null}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}
       </div>
     </div>
   );
+
 }

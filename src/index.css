@@ -241,3 +241,236 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   width: 100%;
   min-width: 0;
 }
+
+/* ---------- Bondfire Public Page polish ---------- */
+
+.bf-public {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.bf-public-hero {
+  position: relative;
+  border-radius: 18px;
+  padding: 18px 16px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background:
+    radial-gradient(800px 220px at 10% 0%, rgba(255, 0, 80, 0.14), transparent 60%),
+    radial-gradient(700px 220px at 90% 0%, rgba(255, 80, 0, 0.10), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+}
+
+.bf-public-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bf-public-logo {
+  height: 52px;
+  width: 52px;
+  border-radius: 14px;
+  object-fit: cover;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.bf-public-h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 0.2px;
+}
+
+.bf-public-sub {
+  margin: 6px 0 0 0;
+  color: rgba(255,255,255,0.72);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+
+.bf-public-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .bf-public-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bf-card {
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+  box-shadow: 0 10px 22px rgba(0,0,0,0.25);
+  padding: 14px;
+}
+
+.bf-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.bf-card-title {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.80);
+}
+
+.bf-card-hint {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255,255,255,0.58);
+}
+
+.bf-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.bf-li {
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(0,0,0,0.20);
+}
+
+.bf-li-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bf-li-name {
+  font-weight: 700;
+}
+
+.bf-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.bf-badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.72);
+  background: rgba(255,255,255,0.04);
+}
+
+.bf-note {
+  margin-top: 6px;
+  color: rgba(255,255,255,0.62);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bf-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 12px 0;
+}
+
+.bf-public-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.bf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.88);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.bf-btn:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.16);
+}
+
+.bf-btn:active {
+  transform: translateY(1px);
+}
+
+.bf-btn-red {
+  border-color: rgba(255, 60, 80, 0.35);
+  background: linear-gradient(180deg, rgba(255, 50, 80, 0.20), rgba(255, 50, 80, 0.10));
+}
+
+.bf-btn-red:hover {
+  background: linear-gradient(180deg, rgba(255, 50, 80, 0.24), rgba(255, 50, 80, 0.12));
+  border-color: rgba(255, 60, 80, 0.45);
+}
+
+.bf-input, .bf-textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.22);
+  color: rgba(255,255,255,0.92);
+  padding: 10px 10px;
+  outline: none;
+}
+
+.bf-input::placeholder, .bf-textarea::placeholder {
+  color: rgba(255,255,255,0.45);
+}
+
+.bf-form-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.bf-form-row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .bf-form-row3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bf-empty {
+  color: rgba(255,255,255,0.62);
+  font-size: 12px;
+}
+
+
+.bf-card {
+  transition: transform 0.10s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.bf-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,0.10);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
+}
