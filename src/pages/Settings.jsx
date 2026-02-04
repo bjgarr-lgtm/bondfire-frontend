@@ -103,51 +103,6 @@ function safeMailto(s) {
   return encodeURIComponent(String(s || ""));
 }
 
-async function exportSubscribersCsv() {
-  if (!orgId) return;
-  setNlMsg("");
-  setNlBusy(true);
-
-  try {
-    const token = getToken();
-    const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
-
-    const relative = path;
-    const remote = `${API_BASE}${path}`;
-
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-
-    // Try same origin first, then API_BASE (mirrors your special endpoint logic)
-    let res = await fetch(relative, { method: "GET", headers });
-    if (!res.ok && API_BASE) res = await fetch(remote, { method: "GET", headers });
-
-    if (!res.ok) {
-      let j = {};
-      try { j = await res.json(); } catch {}
-      throw new Error(j.error || j.message || `HTTP ${res.status}`);
-    }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `subscribers_${orgId}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    URL.revokeObjectURL(url);
-    setNlMsg("Exported.");
-    setTimeout(() => setNlMsg(""), 1200);
-  } catch (e) {
-    setNlMsg(e.message || "Export failed");
-  } finally {
-    setNlBusy(false);
-  }
-}
-
 
 export default function Settings() {
   const { orgId } = useParams();
@@ -471,61 +426,6 @@ const loadPublic = React.useCallback(async () => {
   }
 }, [orgId]);
 
-function getAuthToken() {
-  // Try common keys. One of these will match what your app already uses.
-  return (
-    localStorage.getItem("bf_token") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("auth_token") ||
-    localStorage.getItem("bf_auth") ||
-    ""
-  );
-}
-
-async function exportCsv(orgId) {
-  if (!orgId) return;
-
-  // IMPORTANT: use the same API base you use elsewhere
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-  const url = `${API_BASE}/api/orgs/${encodeURIComponent(orgId)}/newsletter/export`;
-
-  const token = getAuthToken();
-  const headers = {};
-
-  // If your backend is locked, it expects Bearer auth
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(url, { method: "GET", headers });
-
-  // If the server returns JSON error, show it instead of "nothing happened"
-  const ct = res.headers.get("content-type") || "";
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    if (ct.includes("application/json")) {
-      const j = await res.json().catch(() => ({}));
-      msg = j.error || j.message || msg;
-    } else {
-      msg = (await res.text().catch(() => "")) || msg;
-    }
-    throw new Error(msg);
-  }
-
-  const csvText = await res.text();
-
-  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
-  const blobUrl = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = blobUrl;
-  a.download = `bondfire-newsletter-subscribers-${encodeURIComponent(orgId)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(blobUrl);
-}
-
-
 React.useEffect(() => {
   if (tab === "public") {
     loadPublic();
@@ -592,6 +492,60 @@ React.useEffect(() => {
   const [nlMsg, setNlMsg] = React.useState("");
   const [nlBusy, setNlBusy] = React.useState(false);
   const [subscribers, setSubscribers] = React.useState([]);
+  const exportSubscribersCsv = async () => {
+    if (!orgId) return;
+
+    setNlMsg("");
+    setNlBusy(true);
+
+    try {
+      const token = getToken();
+      const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
+
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      // Same origin first (Pages Functions), then API_BASE
+      let res = await fetch(path, { method: "GET", headers });
+      if (!res.ok && API_BASE) {
+        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
+      }
+
+      if (!res.ok) {
+        // backend might return JSON errors sometimes
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error || j.message || `HTTP ${res.status}`);
+        }
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+
+      // Try to use server filename if present
+      const dispo = res.headers.get("content-disposition") || "";
+      const m = dispo.match(/filename="([^"]+)"/i);
+      const filename = m?.[1] || `subscribers-${orgId}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setNlMsg("Exported.");
+      setTimeout(() => setNlMsg(""), 1200);
+    } catch (e) {
+      setNlMsg(e?.message || "Export failed");
+    } finally {
+      setNlBusy(false);
+    }
+  };
 
   const loadNewsletter = React.useCallback(async () => {
     if (!orgId) return;
@@ -1161,13 +1115,11 @@ React.useEffect(() => {
                 Refresh subscribers
               </button>
 
-              <button
-                className="btn"
-                type="button"
-                onClick={() => exportCsv(orgId).catch((e) => alert(e?.message || "Export failed"))}
-              >
+              <button className="btn" type="button" onClick={() => exportSubscribersCsv().catch(console.error)} disabled={nlBusy}>
                 Export CSV
               </button>
+
+
 
 
 
