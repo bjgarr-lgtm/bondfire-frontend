@@ -13,3 +13,13 @@ createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 );
+
+// PWA: register service worker (optional but recommended)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // swallow; PWA should not break the app
+    });
+  });
+}
+
