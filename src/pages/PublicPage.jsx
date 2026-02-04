@@ -4,6 +4,8 @@ import { useParams } from "react-router-dom";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
+
+
 function readJSON(key, fallback = null) {
   try {
     const v = localStorage.getItem(key);
@@ -72,6 +74,14 @@ async function apiFetch(path, opts = {}) {
   if (!res.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${res.status}`);
   return j;
 }
+
+function normalizeUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return `https://${s}`;
+}
+
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -387,14 +397,62 @@ export default function PublicPage(props) {
               <h3 className="section-title" style={{ margin: 0, letterSpacing: 0.8 }}>What we do</h3>
             </div>
 
+            {Array.isArray(pubCfg?.links) && pubCfg.links.length > 0 ? (
+              <div className="card" style={{ marginTop: 12, padding: 14 }}>
+                <h3 className="section-title" style={{ margin: 0 }}>Links</h3>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 10,
+                    marginTop: 12,
+                  }}
+                >
+                  {pubCfg.links
+                    .filter((l) => l && (l.text || l.url))
+                    .map((l, i) => {
+                      const text = String(l.text || l.url || "").trim();
+                      const url = normalizeUrl(l.url || "");
+                      if (!url) return null;
+
+                      return (
+                        <a
+                          key={i}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn"
+                          style={{
+                            textDecoration: "none",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "10px 12px",
+                            borderRadius: 999,
+                          }}
+                          title={url}
+                        >
+                          <span style={{ fontWeight: 700, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {text}
+                          </span>
+                          <span className="helper" style={{ opacity: 0.85 }}>↗</span>
+                        </a>
+                      );
+                    })}
+                </div>
+              </div>
+            ) : null}
+
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 10,
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 12,
                 marginTop: 12,
               }}
             >
+
               {pubCfg.features.map((f, i) => (
                 <div
                   key={i}
