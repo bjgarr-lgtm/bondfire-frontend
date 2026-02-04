@@ -471,6 +471,61 @@ const loadPublic = React.useCallback(async () => {
   }
 }, [orgId]);
 
+function getAuthToken() {
+  // Try common keys. One of these will match what your app already uses.
+  return (
+    localStorage.getItem("bf_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("auth_token") ||
+    localStorage.getItem("bf_auth") ||
+    ""
+  );
+}
+
+async function exportCsv(orgId) {
+  if (!orgId) return;
+
+  // IMPORTANT: use the same API base you use elsewhere
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+  const url = `${API_BASE}/api/orgs/${encodeURIComponent(orgId)}/newsletter/export`;
+
+  const token = getAuthToken();
+  const headers = {};
+
+  // If your backend is locked, it expects Bearer auth
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: "GET", headers });
+
+  // If the server returns JSON error, show it instead of "nothing happened"
+  const ct = res.headers.get("content-type") || "";
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    if (ct.includes("application/json")) {
+      const j = await res.json().catch(() => ({}));
+      msg = j.error || j.message || msg;
+    } else {
+      msg = (await res.text().catch(() => "")) || msg;
+    }
+    throw new Error(msg);
+  }
+
+  const csvText = await res.text();
+
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = `bondfire-newsletter-subscribers-${encodeURIComponent(orgId)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(blobUrl);
+}
+
+
 React.useEffect(() => {
   if (tab === "public") {
     loadPublic();
@@ -1106,9 +1161,14 @@ React.useEffect(() => {
                 Refresh subscribers
               </button>
 
-              <button className="btn" type="button" onClick={exportSubscribersCsv} disabled={nlBusy}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => exportCsv(orgId).catch((e) => alert(e?.message || "Export failed"))}
+              >
                 Export CSV
               </button>
+
 
 
               {nlMsg && <span className={nlMsg.toLowerCase().includes("fail") ? "error" : "helper"}>{nlMsg}</span>}
