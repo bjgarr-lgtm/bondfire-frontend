@@ -382,22 +382,42 @@ export default function PublicPage(props) {
         </div>
 
         {Array.isArray(pubCfg?.features) && pubCfg.features.length > 0 ? (
-          <div style={{ marginTop: 12 }}>
-            <div className="bf-card" style={{ padding: 12 }}>
-              <div className="bf-card-header">
-                <h3 className="bf-card-title">What we do</h3>
-                <p className="bf-card-hint">Short version</p>
-              </div>
-              <ul className="bf-list">
-                {pubCfg.features.map((f, i) => (
-                  <li key={i} className="bf-li">
-                    <div className="bf-li-name">{f}</div>
-                  </li>
-                ))}
-              </ul>
+          <div className="card" style={{ marginTop: 16, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+              <h3 className="section-title" style={{ margin: 0, letterSpacing: 0.8 }}>What we do</h3>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 10,
+                marginTop: 12,
+              }}
+            >
+              {pubCfg.features.map((f, i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    border: "1px solid #222",
+                    background: "rgba(255,255,255,0.02)",
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                  title={f}
+                >
+                  {f}
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
+
       </div>
 
       <div className="bf-public-grid">
