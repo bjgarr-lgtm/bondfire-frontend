@@ -50,6 +50,21 @@ async function ensurePledgesTable(db) {
   }
 }
 
+async function bumpNeedToInProgress(db, orgId, needId) {
+  if (!needId) return;
+
+  // Only bump open -> in_progress, do not touch other statuses.
+  await db
+    .prepare(
+      `UPDATE needs
+       SET status='in_progress', updated_at=?
+       WHERE id=? AND org_id=? AND (status IS NULL OR status='open')`
+    )
+    .bind(Date.now(), needId, orgId)
+    .run();
+}
+
+
 function now() {
   return Date.now();
 }
@@ -272,6 +287,23 @@ export async function onRequest(ctx) {
 
       const pledges = await listPledges(db, orgId);
       return ok({ pledges });
+      // If pledge got accepted and it’s linked to a need, auto-bump the need to in_progress.
+      if (String(fields.status || body.status || "").toLowerCase() === "accepted") {
+        const needId = fields.need_id || body.need_id || null;
+
+        // If need_id might not be included in the PUT payload, fetch it from DB.
+        let resolvedNeedId = needId;
+        if (!resolvedNeedId) {
+          const r = await db
+            .prepare("SELECT need_id FROM pledges WHERE id=? AND org_id=?")
+            .bind(id, orgId)
+            .first();
+          resolvedNeedId = r?.need_id || null;
+        }
+
+        await bumpNeedToInProgress(db, orgId, resolvedNeedId);
+      }
+
     }
 
     if (request.method === "DELETE") {

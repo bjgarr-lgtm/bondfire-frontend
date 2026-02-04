@@ -458,7 +458,7 @@ export default function PublicPage(props) {
                     className="bf-input"
                     value={pledgeEmail}
                     onChange={(e) => setPledgeEmail(e.target.value)}
-                    placeholder="Your email (optional)"
+                    placeholder="Your email or phone number (optional)"
                   />
 
                   <div className="bf-form-row3">
@@ -620,7 +620,7 @@ export default function PublicPage(props) {
                       className="bf-input"
                       value={invReqEmail}
                       onChange={(e) => setInvReqEmail(e.target.value)}
-                      placeholder="Your email (optional)"
+                      placeholder="Your email or phone number (optional)"
                     />
                     <textarea
                       className="bf-textarea"
