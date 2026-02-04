@@ -104,6 +104,7 @@ export default function Meetings() {
     ends_at: "",
     location: "",
     agenda: "",
+    is_public: false,
   });
 
   async function refresh() {
@@ -142,6 +143,26 @@ export default function Meetings() {
     refresh().catch(console.error);
   }
 
+  async function togglePublic(meetingId, checked) {
+    if (!orgId || !meetingId) return;
+
+    // Optimistic UI update
+    setItems((prev) =>
+      prev.map((m) => (m.id === meetingId ? { ...m, is_public: checked ? 1 : 0 } : m))
+    );
+
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: meetingId, is_public: checked }),
+      });
+    } catch (e) {
+      console.error(e);
+      refresh().catch(console.error);
+    }
+  }
+
   async function onAdd(e) {
     e.preventDefault();
     if (!orgId) return;
@@ -155,19 +176,23 @@ export default function Meetings() {
     const ends_at = fromInputDT(form.ends_at);
     const location = String(form.location || "").trim();
     const agenda = String(form.agenda || "").trim();
+    const is_public = !!form.is_public;
 
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, starts_at, ends_at, location, agenda }),
+      body: JSON.stringify({ title, starts_at, ends_at, location, agenda, is_public }),
     });
 
     if (res?.id) {
-      setItems((prev) => [{ id: res.id, title, starts_at, ends_at, location, agenda }, ...prev]);
+      setItems((prev) => [
+        { id: res.id, title, starts_at, ends_at, location, agenda, is_public: is_public ? 1 : 0 },
+        ...prev,
+      ]);
     }
 
     // Clear add form immediately
-    setForm({ title: "", starts_at: "", ends_at: "", location: "", agenda: "" });
+    setForm({ title: "", starts_at: "", ends_at: "", location: "", agenda: "", is_public: false });
 
     setTimeout(() => {
       refresh().catch(console.error);
@@ -202,14 +227,15 @@ export default function Meetings() {
 
         {/* Read only list */}
         <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
             <thead>
               <tr>
-                <th style={{ width: "34%" }}>Title</th>
-                <th style={{ width: "18%" }}>Starts</th>
-                <th style={{ width: "18%" }}>Ends</th>
-                <th style={{ width: "18%" }}>Location</th>
-                <th style={{ width: "12%" }} />
+                <th style={{ width: "32%" }}>Title</th>
+                <th style={{ width: "16%" }}>Starts</th>
+                <th style={{ width: "16%" }}>Ends</th>
+                <th style={{ width: "20%" }}>Location</th>
+                <th style={{ width: "8%", textAlign: "center" }}>Public</th>
+                <th style={{ width: "8%" }} />
               </tr>
             </thead>
             <tbody>
@@ -226,6 +252,14 @@ export default function Meetings() {
                   <td className="helper">{formatDT(m.starts_at) || "not scheduled"}</td>
                   <td className="helper">{formatDT(m.ends_at) || ""}</td>
                   <td>{m.location || ""}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      style={{ margin: 0 }}
+                      checked={!!m.is_public}
+                      onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
+                    />
+                  </td>
                   <td>
                     <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
                       Delete
@@ -235,7 +269,7 @@ export default function Meetings() {
               ))}
               {list.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="helper">
+                  <td colSpan={6} className="helper">
                     No meetings.
                   </td>
                 </tr>
@@ -282,6 +316,15 @@ export default function Meetings() {
             value={form.agenda}
             onChange={(e) => setForm((p) => ({ ...p, agenda: e.target.value }))}
           />
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!form.is_public}
+              onChange={(e) => setForm((p) => ({ ...p, is_public: e.target.checked }))}
+            />
+            Public
+          </label>
 
           <button className="btn">Add Meeting</button>
         </form>

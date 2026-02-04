@@ -121,7 +121,9 @@ export default function PublicPage(props) {
 
         const iData = await apiFetch(`/api/public/${encodeURIComponent(slug)}/inventory`);
         if (!mounted) return;
-        setPublicInventory(Array.isArray(iData.items) ? iData.items : []);
+        // tolerate older responses if they return "inventory" instead of "items"
+        const inv = Array.isArray(iData.items) ? iData.items : Array.isArray(iData.inventory) ? iData.inventory : [];
+        setPublicInventory(inv);
 
         const mData = await apiFetch(`/api/public/${encodeURIComponent(slug)}/meetings`);
         if (!mounted) return;
