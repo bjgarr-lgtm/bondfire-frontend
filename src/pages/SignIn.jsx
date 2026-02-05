@@ -92,7 +92,7 @@ async function handleSubmit(e) {
   }
 }
   return (
-    <div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
+    <div className="bf-auth" style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
       <h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
 
       <p className="helper" style={{ marginTop: 0 }}>
@@ -101,7 +101,7 @@ async function handleSubmit(e) {
           : "Create your account and your first org."}
       </p>
 
-      <div className="signin-actions" style={{ display: "flex", gap: 8, marginTop: 12 }}>
+      <div className="bf-auth-switch" style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button
           type="button"
           className={mode === "login" ? "btn-red" : "btn"}

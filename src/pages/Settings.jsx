@@ -3,6 +3,25 @@ import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import PublicPage from "./PublicPage.jsx";
 
+function useMediaQuery(query) {
+  const get = () => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(query).matches;
+  };
+  const [matches, setMatches] = React.useState(get);
+  React.useEffect(() => {
+    const m = window.matchMedia(query);
+    const onChange = () => setMatches(m.matches);
+    if (m.addEventListener) m.addEventListener("change", onChange);
+    else m.addListener(onChange);
+    return () => {
+      if (m.removeEventListener) m.removeEventListener("change", onChange);
+      else m.removeListener(onChange);
+    };
+  }, [query]);
+  return matches;
+}
+
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
@@ -106,6 +125,7 @@ function safeMailto(s) {
 
 export default function Settings() {
   const { orgId } = useParams();
+  const isMobile = useMediaQuery("(max-width: 860px)");
 
   /* ---------- Submenu tabs ---------- */
   const [searchParams, setSearchParams] = useSearchParams();
@@ -917,93 +937,92 @@ React.useEffect(() => {
                 {members.length === 0 ? (
                   <div className="helper">No members found.</div>
                 ) : (
-                  <div className="members-tableWrap">
-                    <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Role</th>
-                        <th>Remove</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  isMobile ? (
+                    <div className="bf-mobileCards">
                       {members.map((m) => (
-                        <tr key={m.userId}>
-                          <td>
-                            <code>{m.email || m.userId}</code>
-                          </td>
-                          <td>{m.name || ""}</td>
-                          <td>
-                            <select
-                              className="input"
-                              value={m.role || "member"}
-                              onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
-                              disabled={membersBusy}
-                            >
-                              <option value="viewer">viewer</option>
-                              <option value="member">member</option>
-                              <option value="admin">admin</option>
-                              <option value="owner">owner</option>
-                            </select>
-                          </td>
-                          <td style={{ whiteSpace: "nowrap" }}>
+                        <div key={m.userId} className="card bf-mobileCard">
+                          <div className="bf-mobileCardTop">
+                            <div>
+                              <div style={{ fontWeight: 800 }}>{m.name || ""}</div>
+                              <div className="helper" style={{ marginTop: 2 }}>
+                                <code>{m.email || m.userId}</code>
+                              </div>
+                            </div>
+                            <div>
+                              <select
+                                className="input"
+                                value={m.role || "member"}
+                                onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
+                                disabled={membersBusy}
+                              >
+                                <option value="viewer">viewer</option>
+                                <option value="member">member</option>
+                                <option value="admin">admin</option>
+                                <option value="owner">owner</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="bf-mobileCardActions">
                             {m.role === "owner" ? (
                               <span className="helper">owner</span>
                             ) : (
-                              <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => removeMember(m.userId, m.email)}
+                                disabled={membersBusy}
+                              >
                                 Remove
                               </button>
                             )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    </table>
-                  </div>
-
-                  <div className="members-cards">
-                    {members.map((m) => (
-                      <div key={m.userId} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 700 }}>{m.name || ""}</div>
-                            <div className="helper" style={{ wordBreak: "break-word" }}>
-                              {m.email || m.userId}
-                            </div>
                           </div>
-
-                          <div style={{ marginLeft: "auto" }} />
-
-                          <select
-                            className="input"
-                            value={m.role || "member"}
-                            onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
-                            disabled={membersBusy}
-                            style={{ minWidth: 140 }}
-                          >
-                            <option value="viewer">viewer</option>
-                            <option value="member">member</option>
-                            <option value="admin">admin</option>
-                            <option value="owner">owner</option>
-                          </select>
-
-                          {m.role === "owner" ? (
-                            <span className="helper">owner</span>
-                          ) : (
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => removeMember(m.userId, m.email)}
-                              disabled={membersBusy}
-                            >
-                              Remove
-                            </button>
-                          )}
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Email</th>
+                          <th>Name</th>
+                          <th>Role</th>
+                          <th>Remove</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.map((m) => (
+                          <tr key={m.userId}>
+                            <td>
+                              <code>{m.email || m.userId}</code>
+                            </td>
+                            <td>{m.name || ""}</td>
+                            <td>
+                              <select
+                                className="input"
+                                value={m.role || "member"}
+                                onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
+                                disabled={membersBusy}
+                              >
+                                <option value="viewer">viewer</option>
+                                <option value="member">member</option>
+                                <option value="admin">admin</option>
+                                <option value="owner">owner</option>
+                              </select>
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              {m.role === "owner" ? (
+                                <span className="helper">owner</span>
+                              ) : (
+                                <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
+                                  Remove
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
                 )}
               </div>
             </>
@@ -1176,26 +1195,42 @@ React.useEffect(() => {
               {subscribers.length === 0 ? (
                 <div className="helper">No subscribers yet.</div>
               ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Email</th>
-                      <th>Name</th>
-                      <th>Joined</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                isMobile ? (
+                  <div className="grid" style={{ gap: 10 }}>
                     {subscribers.slice(0, 200).map((s) => (
-                      <tr key={s.id || s.email}>
-                        <td>
-                          <code>{s.email}</code>
-                        </td>
-                        <td>{s.name || ""}</td>
-                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
-                      </tr>
+                      <div key={s.id || s.email} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                        <div className="row" style={{ justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <code style={{ fontSize: 14, wordBreak: "break-all" }}>{s.email || ""}</code>
+                          {s.created_at ? (
+                            <span className="helper">{new Date(s.created_at).toLocaleString()}</span>
+                          ) : null}
+                        </div>
+                        {s.name ? <div style={{ marginTop: 6 }}>{s.name}</div> : null}
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Joined</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subscribers.slice(0, 200).map((s) => (
+                        <tr key={s.id || s.email}>
+                          <td>
+                            <code>{s.email}</code>
+                          </td>
+                          <td>{s.name || ""}</td>
+                          <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
               )}
               {subscribers.length > 200 ? (
                 <div className="helper" style={{ marginTop: 8 }}>
@@ -1230,28 +1265,18 @@ React.useEffect(() => {
             {pledges.length === 0 ? (
               <div className="helper">No pledges yet.</div>
             ) : (
-              <div className="pledges-tableWrap" style={{ overflowX: "auto" }}>
-                <table className="table pledges-table">
-                  <thead>
-                    <tr>
-                      <th>Pledger</th>
-                      <th>Email</th>
-                      <th>Need</th>
-                      <th>Type</th>
-                      <th>Amount</th>
-                      <th>Unit</th>
-                      <th>Status</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pledges.map((p) => (
-                      <tr key={p.id}>
-                        <td>{p.pledger_name || ""}</td>
-                        <td>
-                          <code>{p.pledger_email || ""}</code>
-                        </td>
-                        <td>
+              isMobile ? (
+                <div className="grid" style={{ gap: 10 }}>
+                  {pledges.map((p) => (
+                    <div key={p.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                      <div className="row" style={{ justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 800 }}>{p.pledger_name || "(unknown)"}</div>
+                        {p.pledger_email ? <code>{p.pledger_email}</code> : null}
+                      </div>
+
+                      <div className="grid" style={{ gap: 8, marginTop: 10 }}>
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Need</span>
                           <select
                             className="input"
                             value={p.need_id || ""}
@@ -1265,91 +1290,8 @@ React.useEffect(() => {
                               </option>
                             ))}
                           </select>
-                        </td>
-                        <td>
-                          <input
-                            className="input"
-                            defaultValue={p.type || ""}
-                            onBlur={(e) => {
-                              const v = String(e.target.value || "");
-                              if (v !== String(p.type || "")) upsertPledge(p.id, { type: v });
-                            }}
-                            disabled={pledgesBusy}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="input"
-                            defaultValue={p.amount || ""}
-                            onBlur={(e) => {
-                              const v = String(e.target.value || "");
-                              if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
-                            }}
-                            disabled={pledgesBusy}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="input"
-                            defaultValue={p.unit || ""}
-                            onBlur={(e) => {
-                              const v = String(e.target.value || "");
-                              if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
-                            }}
-                            disabled={pledgesBusy}
-                          />
-                        </td>
-                        <td>
-                          <select
-                            className="input"
-                            value={p.status || "offered"}
-                            onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
-                            disabled={pledgesBusy}
-                          >
-                            <option value="offered">offered</option>
-                            <option value="accepted">accepted</option>
-                            <option value="fulfilled">fulfilled</option>
-                            <option value="cancelled">cancelled</option>
-                          </select>
-                        </td>                
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </label>
 
-              <div className="pledges-cards">
-                {pledges.map((p) => (
-                  <div key={p.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                    <div className="grid" style={{ gap: 8 }}>
-                      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <strong>{p.pledger_name || "(no name)"}</strong>
-                        {p.pledger_email ? <code>{p.pledger_email}</code> : null}
-                      </div>
-
-                      <label className="grid" style={{ gap: 6 }}>
-                        <span className="helper">Need</span>
-                        <select
-                          className="input"
-                          value={p.need_id || ""}
-                          onChange={(e) => upsertPledge(p.id, { need_id: e.target.value || null })}
-                          disabled={pledgesBusy}
-                        >
-                          <option value="">unassigned</option>
-                          {needs.map((n) => (
-                            <option key={n.id} value={n.id}>
-                              {n.title || n.id}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="grid cols-3" style={{ gap: 10 }}>
                         <label className="grid" style={{ gap: 6 }}>
                           <span className="helper">Type</span>
                           <input
@@ -1363,54 +1305,151 @@ React.useEffect(() => {
                           />
                         </label>
 
-                        <label className="grid" style={{ gap: 6 }}>
-                          <span className="helper">Amount</span>
-                          <input
-                            className="input"
-                            defaultValue={p.amount || ""}
-                            onBlur={(e) => {
-                              const v = String(e.target.value || "");
-                              if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
-                            }}
-                            disabled={pledgesBusy}
-                          />
-                        </label>
+                        <div className="grid cols-2" style={{ gap: 10 }}>
+                          <label className="grid" style={{ gap: 6 }}>
+                            <span className="helper">Amount</span>
+                            <input
+                              className="input"
+                              defaultValue={p.amount || ""}
+                              onBlur={(e) => {
+                                const v = String(e.target.value || "");
+                                if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
+                              }}
+                              disabled={pledgesBusy}
+                            />
+                          </label>
+                          <label className="grid" style={{ gap: 6 }}>
+                            <span className="helper">Unit</span>
+                            <input
+                              className="input"
+                              defaultValue={p.unit || ""}
+                              onBlur={(e) => {
+                                const v = String(e.target.value || "");
+                                if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
+                              }}
+                              disabled={pledgesBusy}
+                            />
+                          </label>
+                        </div>
 
                         <label className="grid" style={{ gap: 6 }}>
-                          <span className="helper">Unit</span>
-                          <input
+                          <span className="helper">Status</span>
+                          <select
                             className="input"
-                            defaultValue={p.unit || ""}
-                            onBlur={(e) => {
-                              const v = String(e.target.value || "");
-                              if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
-                            }}
+                            value={p.status || "offered"}
+                            onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
                             disabled={pledgesBusy}
-                          />
+                          >
+                            <option value="offered">offered</option>
+                            <option value="accepted">accepted</option>
+                            <option value="fulfilled">fulfilled</option>
+                            <option value="cancelled">cancelled</option>
+                          </select>
                         </label>
-                      </div>
 
-                      <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                        <select
-                          className="input"
-                          value={p.status || "offered"}
-                          onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
-                          disabled={pledgesBusy}
-                        >
-                          <option value="offered">offered</option>
-                          <option value="accepted">accepted</option>
-                          <option value="fulfilled">fulfilled</option>
-                          <option value="cancelled">cancelled</option>
-                        </select>
-
-                        <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
-                          Delete
-                        </button>
+                        <div>
+                          <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="table pledges-table">
+                    <thead>
+                      <tr>
+                        <th>Pledger</th>
+                        <th>Email</th>
+                        <th>Need</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Unit</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pledges.map((p) => (
+                        <tr key={p.id}>
+                          <td>{p.pledger_name || ""}</td>
+                          <td>
+                            <code>{p.pledger_email || ""}</code>
+                          </td>
+                          <td>
+                            <select
+                              className="input"
+                              value={p.need_id || ""}
+                              onChange={(e) => upsertPledge(p.id, { need_id: e.target.value || null })}
+                              disabled={pledgesBusy}
+                            >
+                              <option value="">unassigned</option>
+                              {needs.map((n) => (
+                                <option key={n.id} value={n.id}>
+                                  {n.title || n.id}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              className="input"
+                              defaultValue={p.type || ""}
+                              onBlur={(e) => {
+                                const v = String(e.target.value || "");
+                                if (v !== String(p.type || "")) upsertPledge(p.id, { type: v });
+                              }}
+                              disabled={pledgesBusy}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="input"
+                              defaultValue={p.amount || ""}
+                              onBlur={(e) => {
+                                const v = String(e.target.value || "");
+                                if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
+                              }}
+                              disabled={pledgesBusy}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="input"
+                              defaultValue={p.unit || ""}
+                              onBlur={(e) => {
+                                const v = String(e.target.value || "");
+                                if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
+                              }}
+                              disabled={pledgesBusy}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className="input"
+                              value={p.status || "offered"}
+                              onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
+                              disabled={pledgesBusy}
+                            >
+                              <option value="offered">offered</option>
+                              <option value="accepted">accepted</option>
+                              <option value="fulfilled">fulfilled</option>
+                              <option value="cancelled">cancelled</option>
+                            </select>
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
             )}
           </div>
 

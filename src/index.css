@@ -572,6 +572,19 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
+/* Auth page small-screen wrapping */
+.bf-auth { width: 100%; }
+
+@media (max-width: 520px) {
+  .bf-auth {
+    max-width: 100% !important;
+    margin: 3vh auto !important;
+    padding: 12px !important;
+  }
+  .bf-auth-switch { flex-wrap: wrap !important; }
+  .bf-auth-switch > button { flex: 1 1 160px; }
+}
+
 /* Main cards grid: desktop keeps your 3 columns */
 .bf-public-grid {
   display: grid;
@@ -697,98 +710,149 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
-/* ============================
-   Mobile app chrome polish
-   ============================ */
-
-.bf-mobile-backdrop,
-.bf-mobile-drawer {
-  display: none;
+/* ====== App header / hamburger drawer ====== */
+.bf-appHeader {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Desktop default: hide mobile-only card variants */
-.pledges-cards {
-  display: none;
+.bf-appHeader-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
 }
 
-@media (max-width: 720px) {
-  /* Header + drawer */
-  .bf-topnav-desktop {
+.bf-appHeader-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bf-appHeader-brandName {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 54vw;
+}
+
+.bf-appHeader-spacer {
+  flex: 1;
+}
+
+.bf-appHeader-desktopNav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bf-appHeader-burger {
+  display: none;
+  border: 1px solid #222;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.bf-appDrawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 60;
+}
+
+.bf-appDrawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(86vw, 360px);
+  background: #0b0b0b;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+}
+
+.bf-appDrawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bf-appDrawer-body {
+  padding: 12px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.bf-appDrawer-close {
+  border: 1px solid #222;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.bf-navRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bf-navRow.bf-navRow-drawer {
+  flex-direction: column;
+}
+
+.bf-navLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #222;
+  background: rgba(255, 255, 255, 0.03);
+  color: #fff;
+}
+
+.bf-navLink.active {
+  background: #a40b12;
+  border-color: #7a0c12;
+}
+
+@media (max-width: 860px) {
+  .bf-appHeader-desktopNav {
     display: none;
   }
-
-  .bf-hamburger {
-    display: inline-flex !important;
-  }
-
-  .bf-mobile-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    z-index: 99;
-  }
-
-  .bf-mobile-drawer {
-    display: block;
-    position: fixed;
-    top: 0;
-    right: 0;
-    height: 100vh;
-    width: min(86vw, 340px);
-    background: rgba(10, 10, 10, 0.98);
-    border-left: 1px solid rgba(255,255,255,0.10);
-    box-shadow: -24px 0 60px rgba(0,0,0,0.45);
-    transform: translateX(100%);
-    transition: transform 160ms ease;
-    z-index: 100;
-    padding: 12px;
-    overflow: auto;
-  }
-
-  .bf-mobile-drawer.open {
-    transform: translateX(0);
-  }
-
-  .bf-mobile-drawer .nav {
-    display: grid;
-    gap: 8px;
-  }
-
-  .bf-mobile-drawer .nav a {
-    justify-content: flex-start;
-    padding: 12px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.12);
-    background: rgba(255,255,255,0.04);
-  }
-
-  /* Avoid sideways scrolling from long text in general */
-  .card, .table, .grid, .row {
-    max-width: 100%;
-  }
-
-  /* Sign-in page actions wrap */
-  .signin-actions {
-    flex-wrap: wrap;
-  }
-
-  .signin-actions .btn,
-  .signin-actions .btn-red {
-    flex: 1 1 180px;
-  }
-
-  /* Meetings page: hide the wide summary table (cards below are mobile-friendly) */
-  .meetings-tableWrap {
-    display: none !important;
-  }
-
-  /* Settings → Pledges: hide the wide table and show the mobile card UI */
-  .pledges-tableWrap {
-    display: none !important;
-  }
-  .pledges-cards {
-    display: grid;
-    gap: 10px;
+  .bf-appHeader-burger {
+    display: inline-flex;
   }
 }
+
+/* ====== Tables: stop sideways scrolling on mobile ====== */
+@media (max-width: 860px) {
+  /* Default: allow wrap inside cells */
+  table.table td,
+  table.table th {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Meetings page forces a huge min-width; override */
+  .meetings-table {
+    min-width: 0 !important;
+  }
+}
+
