@@ -572,6 +572,132 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
+/* ---------------- Mobile UX polish (global) ---------------- */
+
+/* Hide desktop tables on small screens and show card layouts instead */
+.bf-meetings-cards,
+.bf-members-cards,
+.bf-subs-cards,
+.bf-pledges-cards {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .bf-meetings-tableWrap,
+  .bf-members-tableWrap,
+  .bf-subs-tableWrap,
+  .bf-pledges-tableWrap {
+    display: none !important;
+  }
+
+  .bf-meetings-cards,
+  .bf-members-cards,
+  .bf-subs-cards,
+  .bf-pledges-cards {
+    display: grid !important;
+    gap: 10px;
+  }
+
+  /* Make any remaining tables scroll in a less gross way */
+  .table {
+    font-size: 14px;
+  }
+}
+
+/* App header: hamburger + drawer */
+.bf-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(10px);
+}
+
+.bf-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.bf-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bf-header-brand {
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.bf-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bf-header-burger {
+  display: none;
+}
+
+.bf-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 80;
+}
+
+.bf-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(86vw, 360px);
+  background: rgba(16,16,16,0.98);
+  border-left: 1px solid #222;
+  padding: 14px;
+  z-index: 81;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bf-drawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bf-drawer-links {
+  display: grid;
+  gap: 8px;
+}
+
+.bf-drawer-links a {
+  text-decoration: none;
+}
+
+@media (max-width: 760px) {
+  .bf-header-nav {
+    display: none;
+  }
+  .bf-header-burger {
+    display: inline-flex;
+  }
+
+  /* Settings subtabs: 2-column pill grid on mobile */
+  .bf-settings-tabs button {
+    flex: 1 1 46%;
+    min-width: 0;
+  }
+}
+
 /* Main cards grid: desktop keeps your 3 columns */
 .bf-public-grid {
   display: grid;
@@ -695,4 +821,109 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------------- Mobile UX polish (global) ---------------- */
+
+/* Default: desktop shows tables, not card layouts */
+.bf-meetings-cards,
+.bf-members-cards,
+.bf-subs-cards,
+.bf-pledges-cards {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  /* Hide wide tables that cause sideways scrolling */
+  .bf-meetings-tableWrap,
+  .bf-members-tableWrap,
+  .bf-subs-tableWrap,
+  .bf-pledges-tableWrap {
+    display: none !important;
+  }
+
+  /* Show stacked card layouts */
+  .bf-meetings-cards,
+  .bf-members-cards,
+  .bf-subs-cards,
+  .bf-pledges-cards {
+    display: block;
+  }
+
+  /* Header: make nav a hamburger drawer */
+  .bf-header-nav {
+    display: none;
+  }
+
+  .bf-header-burger {
+    display: inline-flex;
+  }
+}
+
+/* Burger is hidden on desktop */
+.bf-header-burger {
+  display: none;
+}
+
+/* Mobile drawer */
+.bf-drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(2px);
+  z-index: 50;
+}
+
+.bf-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(86vw, 360px);
+  background: rgba(14,14,14,0.98);
+  border-left: 1px solid #222;
+  padding: 14px;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bf-drawerTitle {
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.bf-drawerNav {
+  display: grid;
+  gap: 8px;
+}
+
+.bf-drawerNav a {
+  text-decoration: none;
+}
+
+.bf-drawerFooter {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
+}
+
+/* --- Mobile visibility helpers --- */
+.bf-mobile-only { display: none; }
+.bf-desktop-only { display: block; }
+
+@media (max-width: 760px) {
+  .bf-mobile-only { display: block; }
+  .bf-desktop-only { display: none; }
+
+  /* keep hamburger on the right, hide inline logout on tiny screens (it's in the menu drawer anyway) */
+  .bf-logout-btn { display: none; }
+
+  /* tighten global card padding a bit */
+  .card { padding: 12px !important; }
+
+  /* sign-in page: stop the "floating island" look */
+  .bf-auth-shell { padding: 12px !important; }
+  .bf-auth-card { width: 100% !important; max-width: 520px; margin: 0 auto; }
 }

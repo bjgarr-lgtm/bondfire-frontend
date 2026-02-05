@@ -92,7 +92,8 @@ async function handleSubmit(e) {
   }
 }
   return (
-    <div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
+    <div className="bf-auth-shell" style={{ padding: 16, minHeight: "100vh" }}>
+      <div className="card bf-auth-card" style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
       <h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
 
       <p className="helper" style={{ marginTop: 0 }}>
@@ -101,12 +102,13 @@ async function handleSubmit(e) {
           : "Create your account and your first org."}
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         <button
           type="button"
           className={mode === "login" ? "btn-red" : "btn"}
           onClick={() => { setErr(""); setMode("login"); }}
           disabled={busy}
+          style={{ flex: 1, minWidth: 160 }}
         >
           Sign in
         </button>
@@ -115,6 +117,7 @@ async function handleSubmit(e) {
           className={mode === "register" ? "btn-red" : "btn"}
           onClick={() => { setErr(""); setMode("register"); }}
           disabled={busy}
+          style={{ flex: 1, minWidth: 160 }}
         >
           Create account
         </button>
@@ -181,6 +184,7 @@ async function handleSubmit(e) {
           {err}
         </div>
       )}
+      </div>
     </div>
   );
 }
