@@ -226,7 +226,7 @@ export default function Meetings() {
         )}
 
         {/* Read only list */}
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+        <div className="meetings-tableWrap" style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
           <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
             <thead>
               <tr>
@@ -276,6 +276,47 @@ export default function Meetings() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile-friendly list (avoids horizontal scrolling) */}
+        <div className="meetings-cards" style={{ marginTop: 12 }}>
+          {list.map((m) => (
+            <div key={m.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {m.title || "(untitled)"}
+                  </div>
+                  <div className="helper" style={{ marginTop: 6, lineHeight: 1.35 }}>
+                    {formatDT(m.starts_at) ? `Starts: ${formatDT(m.starts_at)}` : "Starts: not scheduled"}
+                    {formatDT(m.ends_at) ? `\nEnds: ${formatDT(m.ends_at)}` : ""}
+                    {m.location ? `\nLocation: ${m.location}` : ""}
+                  </div>
+                </div>
+
+                <label className="helper" style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+                  <input
+                    type="checkbox"
+                    style={{ margin: 0 }}
+                    checked={!!m.is_public}
+                    onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
+                  />
+                  Public
+                </label>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                <Link className="btn" to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
+                  Open
+                </Link>
+                <button className="btn" type="button" onClick={() => delMeeting(m.id).catch(console.error)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {list.length === 0 ? <div className="helper">No meetings.</div> : null}
         </div>
 
         {/* Add form */}

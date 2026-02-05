@@ -572,132 +572,6 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
-/* ---------------- Mobile UX polish (global) ---------------- */
-
-/* Hide desktop tables on small screens and show card layouts instead */
-.bf-meetings-cards,
-.bf-members-cards,
-.bf-subs-cards,
-.bf-pledges-cards {
-  display: none;
-}
-
-@media (max-width: 720px) {
-  .bf-meetings-tableWrap,
-  .bf-members-tableWrap,
-  .bf-subs-tableWrap,
-  .bf-pledges-tableWrap {
-    display: none !important;
-  }
-
-  .bf-meetings-cards,
-  .bf-members-cards,
-  .bf-subs-cards,
-  .bf-pledges-cards {
-    display: grid !important;
-    gap: 10px;
-  }
-
-  /* Make any remaining tables scroll in a less gross way */
-  .table {
-    font-size: 14px;
-  }
-}
-
-/* App header: hamburger + drawer */
-.bf-header {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  backdrop-filter: blur(10px);
-}
-
-.bf-header-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-}
-
-.bf-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.bf-header-brand {
-  font-weight: 900;
-  letter-spacing: 0.6px;
-  text-decoration: none;
-  color: var(--text);
-}
-
-.bf-header-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.bf-header-burger {
-  display: none;
-}
-
-.bf-drawer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
-  z-index: 80;
-}
-
-.bf-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: min(86vw, 360px);
-  background: rgba(16,16,16,0.98);
-  border-left: 1px solid #222;
-  padding: 14px;
-  z-index: 81;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.bf-drawer-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.bf-drawer-links {
-  display: grid;
-  gap: 8px;
-}
-
-.bf-drawer-links a {
-  text-decoration: none;
-}
-
-@media (max-width: 760px) {
-  .bf-header-nav {
-    display: none;
-  }
-  .bf-header-burger {
-    display: inline-flex;
-  }
-
-  /* Settings subtabs: 2-column pill grid on mobile */
-  .bf-settings-tabs button {
-    flex: 1 1 46%;
-    min-width: 0;
-  }
-}
-
 /* Main cards grid: desktop keeps your 3 columns */
 .bf-public-grid {
   display: grid;
@@ -823,107 +697,98 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
-/* ---------------- Mobile UX polish (global) ---------------- */
+/* ============================
+   Mobile app chrome polish
+   ============================ */
 
-/* Default: desktop shows tables, not card layouts */
-.bf-meetings-cards,
-.bf-members-cards,
-.bf-subs-cards,
-.bf-pledges-cards {
+.bf-mobile-backdrop,
+.bf-mobile-drawer {
+  display: none;
+}
+
+/* Desktop default: hide mobile-only card variants */
+.pledges-cards {
   display: none;
 }
 
 @media (max-width: 720px) {
-  /* Hide wide tables that cause sideways scrolling */
-  .bf-meetings-tableWrap,
-  .bf-members-tableWrap,
-  .bf-subs-tableWrap,
-  .bf-pledges-tableWrap {
-    display: none !important;
-  }
-
-  /* Show stacked card layouts */
-  .bf-meetings-cards,
-  .bf-members-cards,
-  .bf-subs-cards,
-  .bf-pledges-cards {
-    display: block;
-  }
-
-  /* Header: make nav a hamburger drawer */
-  .bf-header-nav {
+  /* Header + drawer */
+  .bf-topnav-desktop {
     display: none;
   }
 
-  .bf-header-burger {
-    display: inline-flex;
+  .bf-hamburger {
+    display: inline-flex !important;
   }
-}
 
-/* Burger is hidden on desktop */
-.bf-header-burger {
-  display: none;
-}
+  .bf-mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 99;
+  }
 
-/* Mobile drawer */
-.bf-drawerOverlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(2px);
-  z-index: 50;
-}
+  .bf-mobile-drawer {
+    display: block;
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    width: min(86vw, 340px);
+    background: rgba(10, 10, 10, 0.98);
+    border-left: 1px solid rgba(255,255,255,0.10);
+    box-shadow: -24px 0 60px rgba(0,0,0,0.45);
+    transform: translateX(100%);
+    transition: transform 160ms ease;
+    z-index: 100;
+    padding: 12px;
+    overflow: auto;
+  }
 
-.bf-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: min(86vw, 360px);
-  background: rgba(14,14,14,0.98);
-  border-left: 1px solid #222;
-  padding: 14px;
-  z-index: 51;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+  .bf-mobile-drawer.open {
+    transform: translateX(0);
+  }
 
-.bf-drawerTitle {
-  font-weight: 800;
-  letter-spacing: 0.3px;
-}
+  .bf-mobile-drawer .nav {
+    display: grid;
+    gap: 8px;
+  }
 
-.bf-drawerNav {
-  display: grid;
-  gap: 8px;
-}
+  .bf-mobile-drawer .nav a {
+    justify-content: flex-start;
+    padding: 12px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+  }
 
-.bf-drawerNav a {
-  text-decoration: none;
-}
+  /* Avoid sideways scrolling from long text in general */
+  .card, .table, .grid, .row {
+    max-width: 100%;
+  }
 
-.bf-drawerFooter {
-  margin-top: auto;
-  display: grid;
-  gap: 8px;
-}
+  /* Sign-in page actions wrap */
+  .signin-actions {
+    flex-wrap: wrap;
+  }
 
-/* --- Mobile visibility helpers --- */
-.bf-mobile-only { display: none; }
-.bf-desktop-only { display: block; }
+  .signin-actions .btn,
+  .signin-actions .btn-red {
+    flex: 1 1 180px;
+  }
 
-@media (max-width: 760px) {
-  .bf-mobile-only { display: block; }
-  .bf-desktop-only { display: none; }
+  /* Meetings page: hide the wide summary table (cards below are mobile-friendly) */
+  .meetings-tableWrap {
+    display: none !important;
+  }
 
-  /* keep hamburger on the right, hide inline logout on tiny screens (it's in the menu drawer anyway) */
-  .bf-logout-btn { display: none; }
-
-  /* tighten global card padding a bit */
-  .card { padding: 12px !important; }
-
-  /* sign-in page: stop the "floating island" look */
-  .bf-auth-shell { padding: 12px !important; }
-  .bf-auth-card { width: 100% !important; max-width: 520px; margin: 0 auto; }
+  /* Settings → Pledges: hide the wide table and show the mobile card UI */
+  .pledges-tableWrap {
+    display: none !important;
+  }
+  .pledges-cards {
+    display: grid;
+    gap: 10px;
+  }
 }
