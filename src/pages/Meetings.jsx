@@ -30,31 +30,6 @@ function formatDT(ms) {
   });
 }
 
-function useMediaQuery(query) {
-  const get = () => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia(query).matches;
-  };
-  const [matches, setMatches] = useState(get);
-  useEffect(() => {
-    const m = window.matchMedia(query);
-    const onChange = () => setMatches(m.matches);
-    try {
-      m.addEventListener("change", onChange);
-    } catch {
-      m.addListener(onChange);
-    }
-    return () => {
-      try {
-        m.removeEventListener("change", onChange);
-      } catch {
-        m.removeListener(onChange);
-      }
-    };
-  }, [query]);
-  return matches;
-}
-
 function CalendarIcon({ size = 16 }) {
   return (
     <svg
@@ -131,8 +106,6 @@ export default function Meetings() {
     agenda: "",
     is_public: false,
   });
-
-  const isMobile = useMediaQuery("(max-width: 860px)");
 
   async function refresh() {
     if (!orgId) return;
@@ -253,100 +226,57 @@ export default function Meetings() {
         )}
 
         {/* Read only list */}
-        {isMobile ? (
-          <div style={{ marginTop: 12 }}>
-            {list.length === 0 ? (
-              <div className="helper">No meetings.</div>
-            ) : (
-              <div className="grid" style={{ gap: 10 }}>
-                {list.map((m) => (
-                  <div key={m.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {m.title || "Untitled"}
-                        </div>
-                        <div className="helper" style={{ marginTop: 6 }}>
-                          {formatDT(m.starts_at) ? `Starts: ${formatDT(m.starts_at)}` : "not scheduled"}
-                          {m.location ? ` · ${m.location}` : ""}
-                        </div>
-                      </div>
-                      <label className="helper" style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                        <input
-                          type="checkbox"
-                          checked={!!m.is_public}
-                          onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
-                        />
-                        public
-                      </label>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                      <Link className="btn" to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
+            <thead>
+              <tr>
+                <th style={{ width: "32%" }}>Title</th>
+                <th style={{ width: "16%" }}>Starts</th>
+                <th style={{ width: "16%" }}>Ends</th>
+                <th style={{ width: "20%" }}>Location</th>
+                <th style={{ width: "8%", textAlign: "center" }}>Public</th>
+                <th style={{ width: "8%" }} />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{m.title || ""}</div>
+                    <div className="helper" style={{ marginTop: 6 }}>
+                      <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
                         Open
                       </Link>
-                      <button className="btn" type="button" onClick={() => delMeeting(m.id).catch(console.error)}>
-                        Delete
-                      </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-            <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: "32%" }}>Title</th>
-                  <th style={{ width: "16%" }}>Starts</th>
-                  <th style={{ width: "16%" }}>Ends</th>
-                  <th style={{ width: "20%" }}>Location</th>
-                  <th style={{ width: "8%", textAlign: "center" }}>Public</th>
-                  <th style={{ width: "8%" }} />
+                  </td>
+                  <td className="helper">{formatDT(m.starts_at) || "not scheduled"}</td>
+                  <td className="helper">{formatDT(m.ends_at) || ""}</td>
+                  <td>{m.location || ""}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      style={{ margin: 0 }}
+                      checked={!!m.is_public}
+                      onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
+                      Delete
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {list.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{m.title || ""}</div>
-                      <div className="helper" style={{ marginTop: 6 }}>
-                        <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
-                          Open
-                        </Link>
-                      </div>
-                    </td>
-                    <td className="helper">{formatDT(m.starts_at) || "not scheduled"}</td>
-                    <td className="helper">{formatDT(m.ends_at) || ""}</td>
-                    <td>{m.location || ""}</td>
-                    <td style={{ textAlign: "center" }}>
-                      <input
-                        type="checkbox"
-                        style={{ margin: 0 }}
-                        checked={!!m.is_public}
-                        onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
-                      />
-                    </td>
-                    <td>
-                      <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {list.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="helper">
-                      No meetings.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))}
+              {list.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="helper">
+                    No meetings.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* Add form */}
         <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
