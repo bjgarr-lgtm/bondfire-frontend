@@ -12,9 +12,9 @@ function OrgNav({ onNavigate, variant = "desktop" }) {
   const orgId = useOrgIdFromPath();
   if (!orgId) return null;
 
-  const base = variant === "mobile" ? "bf-orgNav bf-orgNav-mobile" : "bf-orgNav";
+  const base = variant === "mobile" ? "bf-navRow bf-navRow-mobile" : "bf-navRow";
   const linkCls = ({ isActive }) =>
-    "bf-orgLink" + (isActive ? " bf-orgLink-active" : "");
+    "bf-navLink" + (isActive ? " active" : "");
 
   const handle = () => {
     if (typeof onNavigate === "function") onNavigate();
@@ -54,6 +54,16 @@ export default function AppHeader({ orgName, logoSrc, onLogout, showLogout = tru
     setMobileOpen(false);
   }, [loc.pathname, loc.search, loc.hash]);
 
+  // Safety: if the viewport grows past the mobile breakpoint, force-close
+  // the drawer so it can never "stick" open on desktop.
+  React.useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth > 860) setMobileOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const doLogout = () => {
     if (typeof onLogout === "function") onLogout();
     setMobileOpen(false);
@@ -62,17 +72,17 @@ export default function AppHeader({ orgName, logoSrc, onLogout, showLogout = tru
   return (
     <header className="bf-appHeader">
       <div className="bf-appHeader-inner">
-        <Link to={orgId ? `/org/${encodeURIComponent(orgId)}` : "/orgs"} className="bf-brand" aria-label="Bondfire home">
+        <Link to={orgId ? `/org/${encodeURIComponent(orgId)}` : "/orgs"} className="bf-appHeader-brand" aria-label="Bondfire home">
           {logoSrc ? (
-            <img src={logoSrc} alt="Org logo" className="bf-brandLogo" />
+            <img src={logoSrc} alt="Org logo" className="bf-appHeader-logo" />
           ) : (
-            <div className="bf-brandMark" aria-hidden="true">
+            <div className="bf-appHeader-mark" aria-hidden="true">
               bf
             </div>
           )}
-          <div className="bf-brandText">
-            <div className="bf-brandTitle">Bondfire</div>
-            {orgName ? <div className="bf-brandSub">{orgName}</div> : null}
+          <div className="bf-appHeader-brandName">
+            <div>Bondfire</div>
+            {orgName ? <div className="bf-appHeader-sub">{orgName}</div> : null}
           </div>
         </Link>
 
@@ -88,24 +98,24 @@ export default function AppHeader({ orgName, logoSrc, onLogout, showLogout = tru
 
         {/* Mobile burger (right side) */}
         <button
-          className="bf-burger"
+          className="bf-appHeader-burger"
           type="button"
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen ? "true" : "false"}
           onClick={() => setMobileOpen((v) => !v)}
         >
-          <span className="bf-burgerBars" aria-hidden="true" />
+          <span className="bf-appHeader-burgerBars" aria-hidden="true" />
         </button>
       </div>
 
       {/* Mobile drawer */}
       {mobileOpen ? (
-        <div className="bf-drawer" role="dialog" aria-modal="true" aria-label="Menu">
-          <button className="bf-drawerBackdrop" type="button" aria-label="Close" onClick={() => setMobileOpen(false)} />
-          <aside className="bf-drawerPanel">
-            <div className="bf-drawerTop">
-              <div className="bf-drawerTitle">Menu</div>
-              <button className="bf-drawerClose" type="button" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+        <div className="bf-appDrawer-overlay" role="dialog" aria-modal="true" aria-label="Menu">
+          <button className="bf-appDrawer-backdrop" type="button" aria-label="Close" onClick={() => setMobileOpen(false)} />
+          <aside className="bf-appDrawer">
+            <div className="bf-appDrawer-header">
+              <div className="bf-appDrawer-title">Menu</div>
+              <button className="bf-appDrawer-close" type="button" onClick={() => setMobileOpen(false)} aria-label="Close menu">
                 ✕
               </button>
             </div>
@@ -113,7 +123,7 @@ export default function AppHeader({ orgName, logoSrc, onLogout, showLogout = tru
             <OrgNav variant="mobile" onNavigate={() => setMobileOpen(false)} />
 
             {showLogout ? (
-              <button className="bf-logout bf-logout-mobile" type="button" onClick={doLogout}>
+              <button className="btn-red bf-drawerLogout" type="button" onClick={doLogout}>
                 Sign out
               </button>
             ) : null}

@@ -797,6 +797,10 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   gap: 10px;
 }
 
+.bf-drawerLogout {
+  width: 100%;
+}
+
 .bf-appDrawer-close {
   border: 1px solid #222;
   background: rgba(255, 255, 255, 0.04);
