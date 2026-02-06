@@ -3,150 +3,126 @@ import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
 function useOrgIdFromPath() {
-  const loc = useLocation();
-  const m = String(loc?.pathname || "").match(/\/org\/([^/]+)/i);
+  const { pathname = "" } = useLocation();
+  const m = pathname.match(/\/org\/([^/]+)/i);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-function clearAuth() {
-  localStorage.removeItem("bf_auth_token");
-  sessionStorage.removeItem("bf_auth_token");
-  // legacy keys tolerated
-  localStorage.removeItem("bf_token");
-  sessionStorage.removeItem("bf_token");
-}
-
-function NavButton({ to, children, onClick }) {
+const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
+  const orgId = useOrgIdFromPath();
+  const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
   return (
-    <NavLink
-      to={to}
-      onClick={onClick}
-      className={({ isActive }) =>
-        `bf-navlink ${isActive ? "bf-navlink-active" : ""}`
-      }
+    <Link
+      to={homeHref}
+      className="brand"
+      style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}
     >
-      {children}
-    </NavLink>
+      <img
+        src={logoSrc}
+        alt="Bondfire"
+        width={28}
+        height={28}
+        onError={(e) => { e.currentTarget.style.display = "none"; }}
+        style={{ display: "block" }}
+      />
+      <span style={{ color: "var(--bfBrand, #fff)", fontWeight: 700 }}>Bondfire</span>
+    </Link>
   );
-}
+};
 
-function OrgNavLinks({ onNavigate }) {
+function OrgNav() {
   const orgId = useOrgIdFromPath();
   if (!orgId) return null;
 
-  const base = `/org/${encodeURIComponent(orgId)}`;
+  const base = `/org/${orgId}`;
+  const navStyle = {
+    padding: "8px 12px",
+    borderRadius: 8,
+    background: "#a40b12",
+    color: "#fff",
+    border: "1px solid #7a0c12",
+    textDecoration: "none",
+    fontWeight: 500,
+    transition: "background 0.2s ease, transform 0.1s ease",
+  };
 
-  return (
-    <>
-      <NavButton to={`${base}/dashboard`} onClick={onNavigate}>
-        Dashboard
-      </NavButton>
-      <NavButton to={`${base}/people`} onClick={onNavigate}>
-        People
-      </NavButton>
-      <NavButton to={`${base}/inventory`} onClick={onNavigate}>
-        Inventory
-      </NavButton>
-      <NavButton to={`${base}/needs`} onClick={onNavigate}>
-        Needs
-      </NavButton>
-      <NavButton to={`${base}/meetings`} onClick={onNavigate}>
-        Meetings
-      </NavButton>
-      <NavButton to={`${base}/settings`} onClick={onNavigate}>
-        Settings
-      </NavButton>
-    </>
-  );
-}
+  const hoverStyle = {
+    background: "#8e0a10",
+  };
 
-export default function AppHeader() {
-  const loc = useLocation();
-  const [mobileOpen, setMobileOpen] = React.useState(false);
-
-  // close drawer on route change
-  React.useEffect(() => {
-    setMobileOpen(false);
-  }, [loc?.pathname]);
-
-  const orgId = useOrgIdFromPath();
-  const inOrg = !!orgId;
-
-  const logout = () => {
-    clearAuth();
-    // keep it brutally simple
-    window.location.href = "/#/";
+  const activeStyle = {
+    background: "#cc0f1a",
+    fontWeight: 700,
   };
 
   return (
-    <header className="bf-header">
-      <div className="bf-header-inner">
-        <div className="bf-header-left">
-          <Link to="/orgs" className="bf-brand" title="Bondfire">
-            Bondfire
-          </Link>
-        </div>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginRight: 12 }}>
+      {[
+        ["Dashboard", `${base}/overview`],
+        ["People", `${base}/people`],
+        ["Inventory", `${base}/inventory`],
+        ["Needs", `${base}/needs`],
+        ["Meetings", `${base}/meetings`],
+        ["Settings", `${base}/settings`],
+        ["Chat", `${base}/chat`],
+      ].map(([label, to]) => (
+        <NavLink
+          key={to}
+          to={to}
+          className="btn"
+          style={({ isActive }) => ({
+            ...navStyle,
+            ...(isActive ? activeStyle : {}),
+          })}
+          onMouseEnter={(e) => Object.assign(e.currentTarget.style, hoverStyle)}
+          onMouseLeave={(e) => Object.assign(e.currentTarget.style, navStyle)}
+        >
+          {label}
+        </NavLink>
+      ))}
+    </div>
+  );
+}
 
-        {/* desktop nav */}
-        {inOrg ? (
-          <nav className="bf-header-nav" aria-label="Org navigation">
-            <OrgNavLinks />
-          </nav>
-        ) : null}
-
-        <div className="bf-header-right">
-          {inOrg ? (
-            <button
-              type="button"
-              className="bf-burger"
-              aria-label={mobileOpen ? "Close menu" : "Open menu"}
-              aria-expanded={mobileOpen ? "true" : "false"}
-              onClick={() => setMobileOpen((v) => !v)}
-            >
-              <span className="bf-burger-lines" />
-            </button>
-          ) : null}
-
-          <button type="button" className="bf-logout bf-desktop-only" onClick={logout}>
+export default function AppHeader({ onLogout, showLogout }) {
+  return (
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 30,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "10px 14px",
+        borderBottom: "1px solid #1f2937",
+        background: "#0f0f10"
+      }}
+    >
+      <Brand />
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <OrgNav />
+        {showLogout && (
+          <button
+            onClick={onLogout}
+            className="btn"
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: "#a40b12",
+              color: "#fff",
+              border: "1px solid #7a0c12",
+              cursor: "pointer",
+              transition: "background 0.2s ease, transform 0.1s ease",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "#8e0a10"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "#a40b12"}
+            title="Logout"
+          >
             Logout
           </button>
-        </div>
+        )}
       </div>
-
-      {/* mobile drawer */}
-      {inOrg ? (
-        <>
-          <div
-            className={`bf-drawer-backdrop ${mobileOpen ? "is-open" : ""}`}
-            onClick={() => setMobileOpen(false)}
-          />
-          <aside
-            className={`bf-drawer ${mobileOpen ? "is-open" : ""}`}
-            aria-label="Menu"
-          >
-            <div className="bf-drawer-top">
-              <div className="bf-drawer-title">Menu</div>
-              <button
-                type="button"
-                className="bf-drawer-close"
-                onClick={() => setMobileOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <nav className="bf-drawer-nav">
-              <OrgNavLinks onNavigate={() => setMobileOpen(false)} />
-            </nav>
-
-            <div className="bf-drawer-bottom">
-              <button type="button" className="bf-btn bf-btn-red" onClick={logout}>
-                Logout
-              </button>
-            </div>
-          </aside>
-        </>
-      ) : null}
     </header>
   );
 }
