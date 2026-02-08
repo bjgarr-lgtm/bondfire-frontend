@@ -226,16 +226,18 @@ export default function Meetings() {
         )}
 
         {/* Read only list */}
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
+        <div style={{ marginTop: 12 }}>
+          {/* Desktop/table view */}
+          <div className="bf-hide-mobile" style={{ overflowX: "auto", paddingRight: 16 }}>
+            <table className="table" style={{ width: "100%", tableLayout: "auto" }}>
             <thead>
               <tr>
-                <th style={{ width: "32%" }}>Title</th>
-                <th style={{ width: "16%" }}>Starts</th>
-                <th style={{ width: "16%" }}>Ends</th>
-                <th style={{ width: "20%" }}>Location</th>
-                <th style={{ width: "8%", textAlign: "center" }}>Public</th>
-                <th style={{ width: "8%" }} />
+                <th>Title</th>
+                <th>Starts</th>
+                <th>Ends</th>
+                <th>Location</th>
+                <th style={{ textAlign: "center" }}>Public</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -275,7 +277,60 @@ export default function Meetings() {
                 </tr>
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
+
+          {/* Mobile/cards view */}
+          <div className="bf-show-mobile">
+            {list.length === 0 ? (
+              <div className="helper" style={{ padding: 10 }}>
+                No meetings.
+              </div>
+            ) : (
+              <div className="grid" style={{ gap: 10 }}>
+                {list.map((m) => (
+                  <div key={m.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div style={{ fontWeight: 700, fontSize: 16 }}>{m.title || ""}</div>
+                    <div className="helper" style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                      <div>
+                        <span style={{ opacity: 0.8 }}>Starts:</span> {formatDT(m.starts_at) || "not scheduled"}
+                      </div>
+                      {m.ends_at ? (
+                        <div>
+                          <span style={{ opacity: 0.8 }}>Ends:</span> {formatDT(m.ends_at)}
+                        </div>
+                      ) : null}
+                      {m.location ? (
+                        <div>
+                          <span style={{ opacity: 0.8 }}>Location:</span> {m.location}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="row" style={{ gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                      <Link className="btn" to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
+                        Open
+                      </Link>
+
+                      <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          style={{ margin: 0 }}
+                          checked={!!m.is_public}
+                          onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
+                        />
+                        <span className="helper">Public</span>
+                      </label>
+
+                      <button className="btn" type="button" onClick={() => delMeeting(m.id).catch(console.error)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Add form */}

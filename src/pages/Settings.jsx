@@ -917,7 +917,7 @@ React.useEffect(() => {
                 {members.length === 0 ? (
                   <div className="helper">No members found.</div>
                 ) : (
-                  <table className="table">
+                <table className="table bf-mtable">
                     <thead>
                       <tr>
                         <th>Email</th>
@@ -929,11 +929,11 @@ React.useEffect(() => {
                     <tbody>
                       {members.map((m) => (
                         <tr key={m.userId}>
-                          <td>
+                        <td data-label="Email">
                             <code>{m.email || m.userId}</code>
                           </td>
-                          <td>{m.name || ""}</td>
-                          <td>
+                        <td data-label="Name">{m.name || ""}</td>
+                        <td data-label="Role">
                             <select
                               className="input"
                               value={m.role || "member"}
@@ -946,7 +946,7 @@ React.useEffect(() => {
                               <option value="owner">owner</option>
                             </select>
                           </td>
-                          <td style={{ whiteSpace: "nowrap" }}>
+                        <td data-label="Remove" style={{ whiteSpace: "nowrap" }}>
                             {m.role === "owner" ? (
                               <span className="helper">owner</span>
                             ) : (
@@ -1131,7 +1131,7 @@ React.useEffect(() => {
               {subscribers.length === 0 ? (
                 <div className="helper">No subscribers yet.</div>
               ) : (
-                <table className="table">
+                <table className="table bf-mtable">
                   <thead>
                     <tr>
                       <th>Email</th>
@@ -1142,11 +1142,11 @@ React.useEffect(() => {
                   <tbody>
                     {subscribers.slice(0, 200).map((s) => (
                       <tr key={s.id || s.email}>
-                        <td>
+                        <td data-label="Email">
                           <code>{s.email}</code>
                         </td>
-                        <td>{s.name || ""}</td>
-                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
+                        <td data-label="Name">{s.name || ""}</td>
+                        <td data-label="Joined">{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1186,7 +1186,7 @@ React.useEffect(() => {
               <div className="helper">No pledges yet.</div>
             ) : (
               <div style={{ overflowX: "auto" }}>
-                <table className="table pledges-table">
+                <table className="table pledges-table bf-mtable">
                   <thead>
                     <tr>
                       <th>Pledger</th>
@@ -1202,11 +1202,11 @@ React.useEffect(() => {
                   <tbody>
                     {pledges.map((p) => (
                       <tr key={p.id}>
-                        <td>{p.pledger_name || ""}</td>
-                        <td>
+                        <td data-label="Pledger">{p.pledger_name || ""}</td>
+                        <td data-label="Email">
                           <code>{p.pledger_email || ""}</code>
                         </td>
-                        <td>
+                        <td data-label="Need">
                           <select
                             className="input"
                             value={p.need_id || ""}
@@ -1221,7 +1221,7 @@ React.useEffect(() => {
                             ))}
                           </select>
                         </td>
-                        <td>
+                        <td data-label="Type">
                           <input
                             className="input"
                             defaultValue={p.type || ""}
@@ -1232,7 +1232,7 @@ React.useEffect(() => {
                             disabled={pledgesBusy}
                           />
                         </td>
-                        <td>
+                        <td data-label="Amount">
                           <input
                             className="input"
                             defaultValue={p.amount || ""}
@@ -1243,7 +1243,7 @@ React.useEffect(() => {
                             disabled={pledgesBusy}
                           />
                         </td>
-                        <td>
+                        <td data-label="Unit">
                           <input
                             className="input"
                             defaultValue={p.unit || ""}
@@ -1254,7 +1254,7 @@ React.useEffect(() => {
                             disabled={pledgesBusy}
                           />
                         </td>
-                        <td>
+                        <td data-label="Status">
                           <select
                             className="input"
                             value={p.status || "offered"}
@@ -1267,7 +1267,7 @@ React.useEffect(() => {
                             <option value="cancelled">cancelled</option>
                           </select>
                         </td>                
-                        <td style={{ whiteSpace: "nowrap" }}>
+                        <td data-label="Actions" style={{ whiteSpace: "nowrap" }}>
                           <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy}>
                             Delete
                           </button>

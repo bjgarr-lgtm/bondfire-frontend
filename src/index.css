@@ -696,3 +696,228 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* =========================================
+   Mobile-first app polish (authenticated app)
+   ========================================= */
+
+/* helpers */
+.bf-hide-mobile { display: block; }
+.bf-show-mobile { display: none; }
+
+/* App header layout */
+.bf-app-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.bf-app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bf-app-header-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 0;
+}
+
+.bf-app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bf-appnav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bf-appnav-link {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #a40b12;
+  color: #fff;
+  border: 1px solid #7a0c12;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.bf-appnav-link.active {
+  background: #c51a22;
+  border-color: #a40b12;
+}
+
+/* Hamburger button (hidden on desktop) */
+.bf-hamburger {
+  width: 40px;
+  height: 40px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid #262626;
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+}
+
+.bf-hamburger svg { display: block; }
+
+/* Drawer */
+.bf-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 999;
+}
+
+.bf-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(84vw, 360px);
+  background: rgba(15,15,15,0.96);
+  border-left: 1px solid #222;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03), -24px 0 60px rgba(0,0,0,0.55);
+  z-index: 1000;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bf-drawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bf-drawer-title {
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.bf-drawer-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #262626;
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+}
+
+.bf-drawer-nav {
+  display: grid;
+  gap: 10px;
+}
+
+.bf-drawer-link {
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid #262626;
+  background: rgba(255,255,255,0.03);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.bf-drawer-link.active {
+  border-color: #7a0c12;
+  background: rgba(164,11,18,0.25);
+}
+
+.bf-drawer-bottom {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.bf-drawer-logout {
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid #7a0c12;
+  background: #a40b12;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Mobile table -> cards */
+@media (max-width: 820px) {
+  .bf-hide-mobile { display: none; }
+  .bf-show-mobile { display: block; }
+
+  /* Header: hide inline nav and show hamburger */
+  .bf-appnav {
+    display: none;
+  }
+  .bf-logout {
+    display: none;
+  }
+  .bf-hamburger {
+    display: inline-flex;
+  }
+  .bf-app-header-inner {
+    align-items: flex-start;
+  }
+
+  /* Tables become card lists */
+  .bf-mtable thead { display: none; }
+  .bf-mtable,
+  .bf-mtable tbody,
+  .bf-mtable tr,
+  .bf-mtable td {
+    display: block;
+    width: 100%;
+  }
+  .bf-mtable tr {
+    border: 1px solid #222;
+    border-radius: 14px;
+    padding: 10px 12px;
+    margin: 10px 0;
+    background: rgba(255,255,255,0.02);
+  }
+  .bf-mtable td {
+    border: 0;
+    padding: 8px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .bf-mtable td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    opacity: 0.75;
+    flex: 0 0 auto;
+  }
+  .bf-mtable td > * {
+    min-width: 0;
+  }
+  .bf-mtable code {
+    word-break: break-all;
+  }
+
+  /* Inputs/selects inside tables should not blow out the row */
+  .bf-mtable .input,
+  .bf-mtable select {
+    width: 60%;
+    max-width: 320px;
+  }
+}
+
+@media (max-width: 420px) {
+  .bf-mtable .input,
+  .bf-mtable select {
+    width: 100%;
+    max-width: none;
+  }
+}
