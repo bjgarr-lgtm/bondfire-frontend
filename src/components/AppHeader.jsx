@@ -109,7 +109,7 @@ export default function AppHeader({ onLogout, showLogout }) {
       </div>
 
       <div
-        className={`bf-drawer${mobileOpen ? " is-open" : ""}`
+        className={`bf-drawer${mobileOpen ? " is-open" : ""}`}
         role="dialog"
         aria-modal="true"
       >
