@@ -1,26 +1,36 @@
 // src/components/AppHeader.jsx
 import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
-function readOrgIdFromHash() {
+function readOrgId() {
   try {
-    const h = window.location.hash || "";
-    const m = h.match(/#\/org\/([^/]+)/i);
-    return m && m[1] ? decodeURIComponent(m[1]) : null;
+    const path = window.location.pathname || "";
+    const hash = window.location.hash || "";
+
+    // If you are using HashRouter, orgId may be in pathname like /org/<id>/inventory
+    let m = path.match(/\/org\/([^/]+)/i);
+    if (m && m[1]) return decodeURIComponent(m[1]);
+
+    // If you are using /app/#/org/<id>/inventory, orgId is in hash
+    m = hash.match(/#\/org\/([^/]+)/i);
+    if (m && m[1]) return decodeURIComponent(m[1]);
+
+    return null;
   } catch {
     return null;
   }
 }
 
 function useOrgId() {
-  // close drawer on route changes, etc.
-  useLocation();
-
-  const [orgId, setOrgId] = React.useState(() => readOrgIdFromHash());
+  const loc = useLocation(); // triggers re-render on route changes
+  const [orgId, setOrgId] = React.useState(() => readOrgId());
 
   React.useEffect(() => {
-    const sync = () => setOrgId(readOrgIdFromHash());
-    sync();
+    setOrgId(readOrgId());
+  }, [loc.pathname, loc.search, loc.hash]);
+
+  React.useEffect(() => {
+    const sync = () => setOrgId(readOrgId());
     window.addEventListener("hashchange", sync);
     window.addEventListener("popstate", sync);
     return () => {
@@ -34,11 +44,9 @@ function useOrgId() {
 
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgId();
-  const base = (window.location.pathname || "/").endsWith("/")
-    ? (window.location.pathname || "/")
-    : `${window.location.pathname}/`;
 
-  const homeHref = orgId ? `${base}#/org/${encodeURIComponent(orgId)}/overview` : `${base}#/orgs`;
+  // Keep your existing branding className if you want. This is just the link.
+  const homeHref = orgId ? `#/org/${encodeURIComponent(orgId)}/overview` : "#/orgs";
 
   return (
     <a href={homeHref} className="brand">
@@ -60,20 +68,15 @@ function OrgNav({ variant = "desktop" }) {
   const orgId = useOrgId();
   if (!orgId) return null;
 
-  const basePath = (window.location.pathname || "/").endsWith("/")
-    ? (window.location.pathname || "/")
-    : `${window.location.pathname}/`;
-
-  const orgBase = `${basePath}#/org/${encodeURIComponent(orgId)}`;
-
+  const base = `#/org/${encodeURIComponent(orgId)}`;
   const items = [
-    ["Dashboard", `${orgBase}/overview`],
-    ["People", `${orgBase}/people`],
-    ["Inventory", `${orgBase}/inventory`],
-    ["Needs", `${orgBase}/needs`],
-    ["Meetings", `${orgBase}/meetings`],
-    ["Settings", `${orgBase}/settings`],
-    ["Chat", `${orgBase}/chat`],
+    ["Dashboard", `${base}/overview`],
+    ["People", `${base}/people`],
+    ["Inventory", `${base}/inventory`],
+    ["Needs", `${base}/needs`],
+    ["Meetings", `${base}/meetings`],
+    ["Settings", `${base}/settings`],
+    ["Chat", `${base}/chat`],
   ];
 
   const navClass = `bf-appnav${variant === "drawer" ? " is-drawer" : ""}`;
@@ -82,10 +85,7 @@ function OrgNav({ variant = "desktop" }) {
   return (
     <nav className={navClass} aria-label="Org navigation">
       {items.map(([label, href]) => {
-        // href ends with "#/org/<id>/route", so compare to currentHash
-        const hashPart = href.split("#")[1] ? `#${href.split("#")[1]}` : "";
-        const isActive = hashPart && currentHash.startsWith(hashPart);
-
+        const isActive = currentHash.startsWith(href);
         return (
           <a
             key={href}
@@ -103,7 +103,8 @@ function OrgNav({ variant = "desktop" }) {
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
-  React.useEffect(() => setMobileOpen(false), [loc.pathname]);
+
+  React.useEffect(() => setMobileOpen(false), [loc.pathname, loc.hash]);
 
   return (
     <header className="bf-appHeader">
