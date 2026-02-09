@@ -11,6 +11,29 @@ function getOrgId() {
   }
 }
 
+function useIsMobile(maxWidthPx = 720) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia(`(max-width: ${maxWidthPx}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${maxWidthPx}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, [maxWidthPx]);
+
+  return isMobile;
+}
+
 const URGENCY_OPTIONS = [
   { value: "", label: "unspecified" },
   { value: "low", label: "low" },
@@ -27,6 +50,7 @@ const STATUS_OPTIONS = [
 
 export default function Needs() {
   const orgId = getOrgId();
+  const isMobile = useIsMobile(720);
 
   const [needs, setNeeds] = useState([]);
   const [q, setQ] = useState("");
@@ -135,14 +159,26 @@ export default function Needs() {
 
   const cellStyle = { width: "100%", minWidth: 0, boxSizing: "border-box" };
 
+  const Field = ({ label, children }) => (
+    <label style={{ display: "grid", gap: 6 }}>
+      <span className="helper">{label}</span>
+      {children}
+    </label>
+  );
+
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1, minWidth: 140 }}>
             Needs
           </h2>
-          <button className="btn" onClick={() => refreshNeeds().catch(console.error)} disabled={loading}>
+          <button
+            className="btn"
+            style={{ whiteSpace: "nowrap" }}
+            onClick={() => refreshNeeds().catch(console.error)}
+            disabled={loading}
+          >
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
@@ -161,23 +197,27 @@ export default function Needs() {
           </div>
         )}
 
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 900 }}>
-            <thead>
-              <tr>
-                <th style={{ width: "22%" }}>Title</th>
-                <th style={{ width: "36%" }}>Description</th>
-                <th style={{ width: "14%" }}>Urgency</th>
-                <th style={{ width: "14%" }}>Status</th>
-                <th style={{ width: "8%" }}>Public</th>
-                <th style={{ width: "6%" }} />
-              </tr>
-            </thead>
+        {/* MOBILE: cards, no sideways scroll */}
+        {isMobile ? (
+          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+            {list.map((n) => (
+              <div key={n.id} className="card" style={{ padding: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>
+                    {String(n.title || "Untitled")}
+                  </div>
+                  <button
+                    className="btn"
+                    style={{ whiteSpace: "nowrap" }}
+                    type="button"
+                    onClick={() => delNeed(n.id).catch(console.error)}
+                  >
+                    Delete
+                  </button>
+                </div>
 
-            <tbody>
-              {list.map((n) => (
-                <tr key={n.id}>
-                  <td>
+                <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                  <Field label="Title">
                     <input
                       className="input"
                       defaultValue={n.title || ""}
@@ -187,78 +227,176 @@ export default function Needs() {
                         if (v !== String(n.title || "")) putNeed(n.id, { title: v }).catch(console.error);
                       }}
                     />
-                  </td>
+                  </Field>
 
-                  <td>
-                    <input
+                  <Field label="Description">
+                    <textarea
                       className="input"
                       defaultValue={n.description || ""}
-                      style={cellStyle}
+                      rows={3}
+                      style={{ ...cellStyle, resize: "vertical" }}
                       onBlur={(e) => {
                         const v = String(e.target.value || "").trim();
                         if (v !== String(n.description || "")) putNeed(n.id, { description: v }).catch(console.error);
                       }}
                     />
-                  </td>
+                  </Field>
 
-                  <td>
-                    <select
-                      className="input"
-                      style={cellStyle}
-                      value={String(n.urgency || "")}
-                      onChange={(e) => putNeed(n.id, { urgency: e.target.value }).catch(console.error)}
-                    >
-                      {URGENCY_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
+                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                    <Field label="Urgency">
+                      <select
+                        className="input"
+                        style={cellStyle}
+                        value={String(n.urgency || "")}
+                        onChange={(e) => putNeed(n.id, { urgency: e.target.value }).catch(console.error)}
+                      >
+                        {URGENCY_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
 
-                  <td>
-                    <select
-                      className="input"
-                      style={cellStyle}
-                      value={String(n.status || "open")}
-                      onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
-                    >
-                      {STATUS_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
+                    <Field label="Status">
+                      <select
+                        className="input"
+                        style={cellStyle}
+                        value={String(n.status || "open")}
+                        onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
+                      >
+                        {STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
 
-                  <td style={{ textAlign: "center" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <input
                       type="checkbox"
-                      defaultChecked={!!n.is_public}
+                      checked={!!n.is_public}
                       onChange={(e) => putNeed(n.id, { is_public: e.target.checked }).catch(console.error)}
                     />
-                  </td>
+                    <span className="helper">Public</span>
+                  </label>
+                </div>
+              </div>
+            ))}
 
-                  <td>
-                    <button className="btn" onClick={() => delNeed(n.id).catch(console.error)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
-              {list.length === 0 && (
+            {list.length === 0 ? <div className="helper">No needs match.</div> : null}
+          </div>
+        ) : (
+          /* DESKTOP: keep table */
+          <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+            <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 900 }}>
+              <thead>
                 <tr>
-                  <td colSpan={6} className="helper">
-                    No needs match.
-                  </td>
+                  <th style={{ width: "22%", whiteSpace: "nowrap", wordBreak: "normal" }}>Title</th>
+                  <th style={{ width: "36%", whiteSpace: "nowrap", wordBreak: "normal" }}>Description</th>
+                  <th style={{ width: "14%", whiteSpace: "nowrap", wordBreak: "normal" }}>Urgency</th>
+                  <th style={{ width: "14%", whiteSpace: "nowrap", wordBreak: "normal" }}>Status</th>
+                  <th style={{ width: "8%", whiteSpace: "nowrap", wordBreak: "normal" }}>Public</th>
+                  <th style={{ width: "6%" }} />
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
 
-        <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
+              <tbody>
+                {list.map((n) => (
+                  <tr key={n.id}>
+                    <td>
+                      <input
+                        className="input"
+                        defaultValue={n.title || ""}
+                        style={cellStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(n.title || "")) putNeed(n.id, { title: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        className="input"
+                        defaultValue={n.description || ""}
+                        style={cellStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(n.description || "")) putNeed(n.id, { description: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
+
+                    <td>
+                      <select
+                        className="input"
+                        style={cellStyle}
+                        value={String(n.urgency || "")}
+                        onChange={(e) => putNeed(n.id, { urgency: e.target.value }).catch(console.error)}
+                      >
+                        {URGENCY_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td>
+                      <select
+                        className="input"
+                        style={cellStyle}
+                        value={String(n.status || "open")}
+                        onChange={(e) => putNeed(n.id, { status: e.target.value }).catch(console.error)}
+                      >
+                        {STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        defaultChecked={!!n.is_public}
+                        onChange={(e) => putNeed(n.id, { is_public: e.target.checked }).catch(console.error)}
+                      />
+                    </td>
+
+                    <td>
+                      <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={() => delNeed(n.id).catch(console.error)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {list.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="helper">
+                      No needs match.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <form
+          onSubmit={onAdd}
+          className="grid cols-3"
+          style={{
+            marginTop: 12,
+            gap: 10,
+            ...(isMobile ? { gridTemplateColumns: "1fr" } : null),
+          }}
+        >
           <input
             className="input"
             name="title"

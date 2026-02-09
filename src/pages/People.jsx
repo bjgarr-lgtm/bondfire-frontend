@@ -11,6 +11,29 @@ function getOrgId() {
   }
 }
 
+function useIsMobile(maxWidthPx = 720) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia(`(max-width: ${maxWidthPx}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${maxWidthPx}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, [maxWidthPx]);
+
+  return isMobile;
+}
+
 function uniqSorted(arr) {
   return Array.from(
     new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean))
@@ -19,6 +42,7 @@ function uniqSorted(arr) {
 
 export default function People() {
   const orgId = getOrgId();
+  const isMobile = useIsMobile(720);
 
   const [people, setPeople] = useState([]);
   const [q, setQ] = useState("");
@@ -126,14 +150,26 @@ export default function People() {
 
   const cellInputStyle = { width: "100%", minWidth: 0, boxSizing: "border-box" };
 
+  const Field = ({ label, children }) => (
+    <label style={{ display: "grid", gap: 6 }}>
+      <span className="helper">{label}</span>
+      {children}
+    </label>
+  );
+
   return (
     <div>
       <div className="card" style={{ margin: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h2 className="section-title" style={{ margin: 0, flex: 1, minWidth: 140 }}>
             People
           </h2>
-          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+          <button
+            className="btn"
+            style={{ whiteSpace: "nowrap" }}
+            onClick={() => refresh().catch(console.error)}
+            disabled={loading}
+          >
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
@@ -152,21 +188,27 @@ export default function People() {
           </div>
         ) : null}
 
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
-            <thead>
-              <tr>
-                <th style={{ width: "22%" }}>Name</th>
-                <th style={{ width: "18%" }}>Role</th>
-                <th style={{ width: "18%" }}>Phone</th>
-                <th style={{ width: "32%" }}>Skills</th>
-                <th style={{ width: "10%" }} />
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((p) => (
-                <tr key={p.id}>
-                  <td>
+        {/* MOBILE: cards */}
+        {isMobile ? (
+          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+            {list.map((p) => (
+              <div key={p.id} className="card" style={{ padding: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>
+                    {String(p.name || "Unnamed")}
+                  </div>
+                  <button
+                    className="btn"
+                    style={{ whiteSpace: "nowrap" }}
+                    type="button"
+                    onClick={() => delPerson(p.id).catch(console.error)}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                  <Field label="Name">
                     <input
                       className="input"
                       defaultValue={p.name || ""}
@@ -176,37 +218,39 @@ export default function People() {
                         if (v !== String(p.name || "")) putPerson(p.id, { name: v }).catch(console.error);
                       }}
                     />
-                  </td>
+                  </Field>
 
-                  <td>
-                    <input
-                      className="input"
-                      list="bf_people_roles"
-                      defaultValue={p.role || ""}
-                      style={cellInputStyle}
-                      onBlur={(e) => {
-                        const v = String(e.target.value || "").trim();
-                        if (v !== String(p.role || "")) putPerson(p.id, { role: v }).catch(console.error);
-                      }}
-                    />
-                  </td>
+                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                    <Field label="Role">
+                      <input
+                        className="input"
+                        list="bf_people_roles"
+                        defaultValue={p.role || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.role || "")) putPerson(p.id, { role: v }).catch(console.error);
+                        }}
+                      />
+                    </Field>
 
-                  <td>
-                    <input
-                      className="input"
-                      type="tel"
-                      inputMode="tel"
-                      placeholder="555-555-5555"
-                      defaultValue={p.phone || ""}
-                      style={cellInputStyle}
-                      onBlur={(e) => {
-                        const v = String(e.target.value || "").trim();
-                        if (v !== String(p.phone || "")) putPerson(p.id, { phone: v }).catch(console.error);
-                      }}
-                    />
-                  </td>
+                    <Field label="Phone">
+                      <input
+                        className="input"
+                        type="tel"
+                        inputMode="tel"
+                        placeholder="555-555-5555"
+                        defaultValue={p.phone || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.phone || "")) putPerson(p.id, { phone: v }).catch(console.error);
+                        }}
+                      />
+                    </Field>
+                  </div>
 
-                  <td>
+                  <Field label="Skills">
                     <input
                       className="input"
                       list="bf_people_skills"
@@ -217,40 +261,135 @@ export default function People() {
                         if (v !== String(p.skills || "")) putPerson(p.id, { skills: v }).catch(console.error);
                       }}
                     />
-                  </td>
+                  </Field>
+                </div>
+              </div>
+            ))}
 
-                  <td>
-                    <button className="btn" onClick={() => delPerson(p.id).catch(console.error)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+            {list.length === 0 ? <div className="helper">No people match.</div> : null}
+
+            <datalist id="bf_people_roles">
+              {roleOptions.map((v) => (
+                <option key={v} value={v} />
               ))}
+            </datalist>
 
-              {list.length === 0 && (
+            <datalist id="bf_people_skills">
+              {skillsOptions.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+          </div>
+        ) : (
+          /* DESKTOP: keep table */
+          <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+            <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 860 }}>
+              <thead>
                 <tr>
-                  <td colSpan={5} className="helper">
-                    No people match.
-                  </td>
+                  <th style={{ width: "22%", whiteSpace: "nowrap", wordBreak: "normal" }}>Name</th>
+                  <th style={{ width: "18%", whiteSpace: "nowrap", wordBreak: "normal" }}>Role</th>
+                  <th style={{ width: "18%", whiteSpace: "nowrap", wordBreak: "normal" }}>Phone</th>
+                  <th style={{ width: "32%", whiteSpace: "nowrap", wordBreak: "normal" }}>Skills</th>
+                  <th style={{ width: "10%" }} />
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      <input
+                        className="input"
+                        defaultValue={p.name || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.name || "")) putPerson(p.id, { name: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
 
-          <datalist id="bf_people_roles">
-            {roleOptions.map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
+                    <td>
+                      <input
+                        className="input"
+                        list="bf_people_roles"
+                        defaultValue={p.role || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.role || "")) putPerson(p.id, { role: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
 
-          <datalist id="bf_people_skills">
-            {skillsOptions.map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
-        </div>
+                    <td>
+                      <input
+                        className="input"
+                        type="tel"
+                        inputMode="tel"
+                        placeholder="555-555-5555"
+                        defaultValue={p.phone || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.phone || "")) putPerson(p.id, { phone: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
 
-        <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
+                    <td>
+                      <input
+                        className="input"
+                        list="bf_people_skills"
+                        defaultValue={p.skills || ""}
+                        style={cellInputStyle}
+                        onBlur={(e) => {
+                          const v = String(e.target.value || "").trim();
+                          if (v !== String(p.skills || "")) putPerson(p.id, { skills: v }).catch(console.error);
+                        }}
+                      />
+                    </td>
+
+                    <td>
+                      <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={() => delPerson(p.id).catch(console.error)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {list.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="helper">
+                      No people match.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            <datalist id="bf_people_roles">
+              {roleOptions.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+
+            <datalist id="bf_people_skills">
+              {skillsOptions.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        <form
+          onSubmit={onAdd}
+          className="grid cols-3"
+          style={{
+            marginTop: 12,
+            gap: 10,
+            ...(isMobile ? { gridTemplateColumns: "1fr" } : null),
+          }}
+        >
           <input
             className="input"
             name="name"

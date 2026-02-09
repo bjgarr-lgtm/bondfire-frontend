@@ -1,8 +1,32 @@
+// src/pages/OrgDash.jsx
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+function useIsMobile(maxWidthPx = 720) {
+  const [isMobile, setIsMobile] = React.useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia(`(max-width: ${maxWidthPx}px)`).matches;
+  });
+
+  React.useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${maxWidthPx}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, [maxWidthPx]);
+
+  return isMobile;
+}
 
 function getToken() {
   return (
@@ -66,6 +90,7 @@ async function authFetch(path, opts = {}) {
 
 export default function OrgDash() {
   const nav = useNavigate();
+  const isMobile = useIsMobile(720);
 
   const [orgs, setOrgs] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
@@ -139,7 +164,13 @@ export default function OrgDash() {
         Choose an organization to enter its workspace, or create or join one.
       </p>
 
-      <div className="grid" style={{ gap: 16, gridTemplateColumns: "1fr 1fr" }}>
+      <div
+        className="grid"
+        style={{
+          gap: 16,
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+        }}
+      >
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Create a new org</h2>
           <form onSubmit={createOrg} className="grid" style={{ gap: 10 }}>
@@ -180,9 +211,9 @@ export default function OrgDash() {
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h2 style={{ margin: 0, flex: 1 }}>Your orgs</h2>
-          <button className="btn" onClick={load} disabled={busy}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, flex: 1, minWidth: 140 }}>Your orgs</h2>
+          <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={load} disabled={busy}>
             Refresh
           </button>
         </div>
@@ -208,14 +239,19 @@ export default function OrgDash() {
                   justifyContent: "space-between",
                   padding: "10px 0",
                   borderTop: "1px solid #222",
+                  gap: 12,
+                  flexWrap: "wrap",
                 }}
               >
-                <div>
-                  <div style={{ fontWeight: 700 }}>{o.name || o.id}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {o.name || o.id}
+                  </div>
                   <div className="helper">Role: {o.role || "member"}</div>
                 </div>
                 <button
                   className="btn-red"
+                  style={{ whiteSpace: "nowrap" }}
                   onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}
                 >
                   Open
