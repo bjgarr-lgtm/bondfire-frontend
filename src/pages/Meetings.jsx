@@ -225,19 +225,18 @@ export default function Meetings() {
           </div>
         )}
 
-        {/* Read only list */}
-        <div style={{ marginTop: 12 }}>
-          {/* Desktop/table view */}
-          <div className="bf-hide-mobile" style={{ overflowX: "auto", paddingRight: 16 }}>
-            <table className="table" style={{ width: "100%", tableLayout: "auto" }}>
+        {/* Read only list (desktop table + mobile cards) */}
+        <div className="bf-table-desktop" style={{ marginTop: 12 }}>
+          <div style={{ overflowX: "auto", paddingRight: 16 }}>
+            <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Starts</th>
-                <th>Ends</th>
-                <th>Location</th>
-                <th style={{ textAlign: "center" }}>Public</th>
-                <th />
+                <th style={{ width: "32%" }}>Title</th>
+                <th style={{ width: "16%" }}>Starts</th>
+                <th style={{ width: "16%" }}>Ends</th>
+                <th style={{ width: "20%" }}>Location</th>
+                <th style={{ width: "8%", textAlign: "center" }}>Public</th>
+                <th style={{ width: "8%" }} />
               </tr>
             </thead>
             <tbody>
@@ -279,58 +278,56 @@ export default function Meetings() {
             </tbody>
             </table>
           </div>
+        </div>
 
-          {/* Mobile/cards view */}
-          <div className="bf-show-mobile">
-            {list.length === 0 ? (
-              <div className="helper" style={{ padding: 10 }}>
-                No meetings.
-              </div>
-            ) : (
-              <div className="grid" style={{ gap: 10 }}>
-                {list.map((m) => (
-                  <div key={m.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                    <div style={{ fontWeight: 700, fontSize: 16 }}>{m.title || ""}</div>
-                    <div className="helper" style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                      <div>
-                        <span style={{ opacity: 0.8 }}>Starts:</span> {formatDT(m.starts_at) || "not scheduled"}
-                      </div>
-                      {m.ends_at ? (
-                        <div>
-                          <span style={{ opacity: 0.8 }}>Ends:</span> {formatDT(m.ends_at)}
-                        </div>
-                      ) : null}
-                      {m.location ? (
-                        <div>
-                          <span style={{ opacity: 0.8 }}>Location:</span> {m.location}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="row" style={{ gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                      <Link className="btn" to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
-                        Open
-                      </Link>
-
-                      <label className="row" style={{ gap: 8, alignItems: "center" }}>
-                        <input
-                          type="checkbox"
-                          style={{ margin: 0 }}
-                          checked={!!m.is_public}
-                          onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
-                        />
-                        <span className="helper">Public</span>
-                      </label>
-
-                      <button className="btn" type="button" onClick={() => delMeeting(m.id).catch(console.error)}>
-                        Delete
-                      </button>
-                    </div>
+        <div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+          {list.map((m) => (
+            <div key={m.id} className="card" style={{ padding: 12, marginBottom: 10 }}>
+              <div className="row" style={{ justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, wordBreak: "break-word" }}>{m.title || ""}</div>
+                  <div className="helper" style={{ marginTop: 6 }}>
+                    <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>Open</Link>
                   </div>
-                ))}
+                </div>
+
+                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <span className="helper">Public</span>
+                  <input
+                    type="checkbox"
+                    style={{ margin: 0 }}
+                    checked={!!m.is_public}
+                    onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
+                  />
+                </label>
               </div>
-            )}
-          </div>
+
+              <div className="grid" style={{ gap: 6, marginTop: 10 }}>
+                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                  <div className="helper">Starts</div>
+                  <div className="helper" style={{ textAlign: "right" }}>{formatDT(m.starts_at) || "not scheduled"}</div>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                  <div className="helper">Ends</div>
+                  <div className="helper" style={{ textAlign: "right" }}>{formatDT(m.ends_at) || ""}</div>
+                </div>
+                {m.location ? (
+                  <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                    <div className="helper">Location</div>
+                    <div style={{ textAlign: "right", wordBreak: "break-word" }}>{m.location}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {list.length === 0 ? <div className="helper">No meetings.</div> : null}
         </div>
 
         {/* Add form */}
