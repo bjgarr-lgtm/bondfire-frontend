@@ -793,6 +793,23 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     justify-content: center;
   }
 
+  /* Kill sideways scrolling on phones.
+     If a view needs more columns than a phone has pixels, we wrap instead of forcing horizontal scroll. */
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .table th,
+  .table td {
+    white-space: normal;
+    word-break: break-word;
+  }
+
   /* Drawer scaffold */
   .bf-drawer {
     display: block;
@@ -822,8 +839,8 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     right: 0;
     height: 100%;
     width: min(320px, 88vw);
-    background: rgba(8, 8, 8, 0.94);
-    backdrop-filter: blur(10px);
+    /* Opaque panel: readability over aesthetic suffering. */
+    background: #0b0b0b;
     border-left: 1px solid rgba(255, 255, 255, 0.10);
     transform: translateX(100%);
     transition: transform 180ms ease;
@@ -867,6 +884,10 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     width: 100%;
     justify-content: flex-start;
     padding: 12px 14px;
+    border-radius: 12px;
+    /* Less glass, more readable. */
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.14);
   }
   .bf-drawer-logout {
     margin-top: auto;
