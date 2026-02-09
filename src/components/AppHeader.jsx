@@ -12,22 +12,22 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgIdFromPath();
   const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
   return (
-    <Link to={homeHref} className="bf-brand" aria-label="Bondfire home">
+    <Link to={homeHref} className="brand">
       <img
         src={logoSrc}
-        alt=""
+        alt="Bondfire"
         width={28}
         height={28}
         onError={(e) => {
           e.currentTarget.style.display = "none";
         }}
       />
-      <span className="bf-brandText">Bondfire</span>
+      <span>Bondfire</span>
     </Link>
   );
 };
 
-function OrgNav({ variant = "desktop", onNavigate }) {
+function OrgNav({ variant = "desktop" }) {
   const orgId = useOrgIdFromPath();
   if (!orgId) return null;
 
@@ -42,16 +42,14 @@ function OrgNav({ variant = "desktop", onNavigate }) {
     ["Chat", `${base}/chat`],
   ];
 
+  const navClass = `bf-appnav${variant === "drawer" ? " is-drawer" : ""}`;
+
   return (
-    <nav
-      className={`bf-appnav${variant === "drawer" ? " is-drawer" : ""}`}
-      aria-label="Org navigation"
-    >
+    <nav className={navClass} aria-label="Org navigation">
       {items.map(([label, to]) => (
         <NavLink
           key={to}
           to={to}
-          onClick={onNavigate}
           className={({ isActive }) =>
             `bf-appnav-link${isActive ? " is-active" : ""}`
           }
@@ -65,13 +63,8 @@ function OrgNav({ variant = "desktop", onNavigate }) {
 
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+
   const loc = useLocation();
-
-  // Only show org navigation when inside an org workspace.
-  const orgId = useOrgIdFromPath();
-  const hasOrgNav = !!orgId;
-
-  // Close drawer on route change.
   React.useEffect(() => setMobileOpen(false), [loc.pathname]);
 
   return (
@@ -81,39 +74,30 @@ export default function AppHeader({ onLogout, showLogout }) {
       </div>
 
       <div className="bf-appHeader-right">
-        {/* Desktop nav */}
         <div className="bf-nav-desktop">
-          {hasOrgNav ? <OrgNav variant="desktop" /> : null}
+          <OrgNav variant="desktop" />
         </div>
 
         {showLogout ? (
-          <button className="bf-logout" type="button" onClick={onLogout}>
+          <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
             Logout
           </button>
         ) : null}
 
-        {/* Mobile hamburger */}
-        {hasOrgNav ? (
-          <button
-            className="bf-hamburger"
-            type="button"
-            aria-label={mobileOpen ? "Close menu" : "Open menu"}
-            aria-expanded={mobileOpen ? "true" : "false"}
-            onClick={() => setMobileOpen((v) => !v)}
-          >
-            <span aria-hidden="true">☰</span>
-          </button>
-        ) : null}
+        <button
+          className="bf-hamburger"
+          type="button"
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen ? "true" : "false"}
+          onClick={() => setMobileOpen((v) => !v)}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
       </div>
 
-      {/* Drawer is *CSS-gated* to mobile. On desktop it is display:none. */}
-      {hasOrgNav ? (
-        <div className={`bf-drawer${mobileOpen ? " is-open" : ""}`}>
-        <div
-          className="bf-drawer-backdrop"
-          onClick={() => setMobileOpen(false)}
-        />
-        <aside className="bf-drawer-panel" aria-label="Navigation menu">
+      <div className={`bf-drawer${mobileOpen ? " is-open" : ""}`} role="dialog" aria-modal="true">
+        <div className="bf-drawer-backdrop" onClick={() => setMobileOpen(false)} />
+        <div className="bf-drawer-panel">
           <div className="bf-drawer-top">
             <div className="bf-drawer-title">Menu</div>
             <button
@@ -126,20 +110,15 @@ export default function AppHeader({ onLogout, showLogout }) {
             </button>
           </div>
 
-          <OrgNav variant="drawer" onNavigate={() => setMobileOpen(false)} />
+          <OrgNav variant="drawer" />
 
           {showLogout ? (
-            <button
-              className="bf-drawer-logout"
-              type="button"
-              onClick={onLogout}
-            >
+            <button className="bf-drawer-logout" type="button" onClick={onLogout}>
               Logout
             </button>
           ) : null}
-        </aside>
         </div>
-      ) : null}
+      </div>
     </header>
   );
 }
