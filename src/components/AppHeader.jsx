@@ -3,10 +3,21 @@ import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
 function useOrgIdFromPath() {
-  const { pathname = "" } = useLocation();
-  const m = pathname.match(/\/org\/([^/]+)/i);
-  return m ? decodeURIComponent(m[1]) : null;
+  const loc = useLocation();
+
+  // Works for BrowserRouter paths like /org/:orgId/...
+  const path = loc?.pathname || "";
+  let m = path.match(/\/org\/([^/]+)/i);
+  if (m && m[1]) return decodeURIComponent(m[1]);
+
+  // Works for HashRouter urls like .../#/org/:orgId/...
+  const hash = (typeof window !== "undefined" && window.location && window.location.hash) ? window.location.hash : "";
+  m = hash.match(/#\/org\/([^/]+)/i);
+  if (m && m[1]) return decodeURIComponent(m[1]);
+
+  return null;
 }
+
 
 function Brand({ logoSrc = "/logo-bondfire.png" }) {
   const orgId = useOrgIdFromPath();
