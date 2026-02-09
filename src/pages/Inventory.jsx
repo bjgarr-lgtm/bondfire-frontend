@@ -205,7 +205,7 @@ export default function Inventory() {
         ) : null}
 
         {/* Extra right padding so Pub/Delete do not get clipped by card edge */}
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 28 }}>
+        <div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto", paddingRight: 28 }}>
           <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
             <colgroup>
               <col /> {/* Name */}
@@ -357,7 +357,118 @@ export default function Inventory() {
               <option key={v} value={v} />
             ))}
           </datalist>
+        
+<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+  {list.map((i) => (
+    <div key={i.id} className="card" style={{ padding: 12 }}>
+      <div className="grid" style={{ gap: 10 }}>
+        <label className="grid" style={{ gap: 6 }}>
+          <span className="helper">Name</span>
+          <input
+            className="input"
+            defaultValue={i.name || ""}
+            onBlur={(e) => {
+              const v = e.target.value || "";
+              if (v !== (i.name || "")) putItem(i.id, { name: v }).catch(console.error);
+            }}
+          />
+        </label>
+
+        <div className="grid cols-2">
+          <label className="grid" style={{ gap: 6 }}>
+            <span className="helper">Qty</span>
+            <input
+              className="input"
+              type="number"
+              step="any"
+              defaultValue={i.qty === null || typeof i.qty === "undefined" ? "" : i.qty}
+              onBlur={(e) => {
+                const raw = e.target.value;
+                const v = raw === "" ? null : Number(raw);
+                const curr = i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
+                if (v !== curr) putItem(i.id, { qty: v }).catch(console.error);
+              }}
+            />
+          </label>
+
+          <label className="grid" style={{ gap: 6 }}>
+            <span className="helper">Unit</span>
+            <input
+              className="input"
+              list="bf_inv_units"
+              defaultValue={i.unit || ""}
+              onBlur={(e) => {
+                const v = (e.target.value || "").trim();
+                if (v !== (i.unit || "")) putItem(i.id, { unit: v }).catch(console.error);
+              }}
+            />
+          </label>
         </div>
+
+        <div className="grid cols-2">
+          <label className="grid" style={{ gap: 6 }}>
+            <span className="helper">Category</span>
+            <input
+              className="input"
+              list="bf_inv_categories"
+              defaultValue={i.category || ""}
+              onBlur={(e) => {
+                const v = (e.target.value || "").trim();
+                if (v !== (i.category || "")) putItem(i.id, { category: v }).catch(console.error);
+              }}
+            />
+          </label>
+
+          <label className="grid" style={{ gap: 6 }}>
+            <span className="helper">Location</span>
+            <input
+              className="input"
+              list="bf_inv_locations"
+              defaultValue={i.location || ""}
+              onBlur={(e) => {
+                const v = (e.target.value || "").trim();
+                if (v !== (i.location || "")) putItem(i.id, { location: v }).catch(console.error);
+              }}
+            />
+          </label>
+        </div>
+
+        <label className="grid" style={{ gap: 6 }}>
+          <span className="helper">Notes</span>
+          <input
+            className="input"
+            defaultValue={i.notes || ""}
+            onBlur={(e) => {
+              const v = e.target.value || "";
+              if (v !== (i.notes || "")) putItem(i.id, { notes: v }).catch(console.error);
+            }}
+          />
+        </label>
+
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <label className="row" style={{ gap: 10 }}>
+            <input
+              type="checkbox"
+              defaultChecked={!!i.is_public}
+              onChange={(e) => putItem(i.id, { is_public: e.target.checked }).catch(console.error)}
+            />
+            <span className="helper">Public</span>
+          </label>
+
+          <button className="btn" type="button" onClick={() => delItem(i.id).catch(console.error)}>
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  ))}
+
+  {list.length === 0 && (
+    <div className="helper">No inventory items match.</div>
+  )}
+</div>
+
+</div>
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
           <input
