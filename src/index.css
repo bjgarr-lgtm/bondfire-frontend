@@ -94,6 +94,189 @@ h3{margin:0 0 8px 0}
 input[type="file"]{padding:6px}
 .toast{position:fixed;right:16px;bottom:80px;background:#111;border:1px solid var(--border);padding:10px 12px;border-radius:12px}
 
+/* ===============================
+   App header + navigation (clean, non-cursed)
+   =============================== */
+
+.bf-appHeader{
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(10,10,10,.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.bf-appHeader-left,
+.bf-appHeader-right{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bf-appHeader-right{ margin-left: auto; }
+
+.bf-brand{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+
+.bf-brand img{
+  height: 28px;
+  width: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.bf-nav-desktop{ display: block; }
+
+.bf-appnav{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.bf-appnav-link{
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.92);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bf-appnav-link:hover{ filter: brightness(1.08); }
+
+.bf-appnav-link.is-active{
+  border-color: rgba(255,0,0,0.28);
+  background: rgba(255,0,0,0.14);
+}
+
+.bf-logout{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.bf-hamburger{
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  width: 44px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Drawer is ALWAYS present in markup, but hidden by default (desktop). */
+.bf-drawer{ display: none; }
+
+@media (max-width: 840px){
+  .bf-nav-desktop{ display: none; }
+  .bf-hamburger{ display: inline-flex; }
+
+  /* Drawer scaffold */
+  .bf-drawer{
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    pointer-events: none;
+  }
+  .bf-drawer.is-open{ pointer-events: auto; }
+
+  .bf-drawer-backdrop{
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    opacity: 0;
+    transition: opacity 160ms ease;
+  }
+  .bf-drawer.is-open .bf-drawer-backdrop{ opacity: 1; }
+
+  .bf-drawer-panel{
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: min(340px, 90vw);
+    background: #0b0b0b; /* opaque, because reading is good actually */
+    border-left: 1px solid rgba(255,255,255,0.12);
+    padding: 14px;
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 180ms ease;
+  }
+  .bf-drawer.is-open .bf-drawer-panel{ transform: translateX(0); }
+
+  .bf-drawer-top{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .bf-drawer-title{ font-weight: 800; letter-spacing: .3px; }
+
+  .bf-drawer-close{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    width: 44px;
+    padding: 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.04);
+    color: #fff;
+  }
+
+  .bf-appnav.is-drawer{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .bf-appnav.is-drawer .bf-appnav-link{
+    width: 100%;
+    justify-content: flex-start;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.06);
+  }
+
+  .bf-drawer-logout{
+    margin-top: 14px;
+    width: 100%;
+  }
+}
+
+
 .primary {
   background: #7a0e0e;
   color: #fff;
@@ -695,90 +878,4 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-
-/* ===============================
-   Bondfire mobile overrides (v6)
-   Fix: desktop nav, hamburger, and card lists
-   =============================== */
-
-.bf-appHeader { flex-wrap: nowrap; }
-.bf-appHeader-right { margin-left: auto; }
-.bf-hamburger { margin-left: 8px; }
-
-.bf-appnav {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.table th { white-space: nowrap !important; }
-.table td { overflow-wrap: anywhere; }
-
-.bf-table-desktop { display: block; }
-.bf-cards-mobile { display: none; }
-
-/* Mobile: hide desktop nav + table, show hamburger + drawer + cards */
-@media (max-width: 840px) {
-  .bf-nav-desktop { display: none !important; }
-  .bf-hamburger { display: inline-flex !important; align-items: center; justify-content: center; }
-  .bf-drawer { display: block !important; }
-  .bf-table-desktop { display: none !important; }
-  .bf-cards-mobile { display: grid !important; gap: 10px; }
-}
-
-/* Make drawer readable no matter what earlier CSS tried to do */
-.bf-drawer-panel { background: #0b0b0b !important; }
-.bf-drawer-backdrop { background: rgba(0,0,0,0.65) !important; }
-
-/* Inventory mobile cards */
-.bf-rowcard {
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.03);
-  border-radius: 16px;
-  padding: 12px;
-}
-
-.bf-rowcard-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.bf-rowcard-title {
-  font-weight: 800;
-  opacity: 0.9;
-}
-
-.bf-field {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.bf-field-label {
-  font-size: 12px;
-  color: rgba(255,255,255,0.72);
-}
-
-.bf-two {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-@media (max-width: 420px) {
-  .bf-two { grid-template-columns: 1fr; }
-}
-
-.bf-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
 }
