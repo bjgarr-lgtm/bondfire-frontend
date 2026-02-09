@@ -2,21 +2,46 @@
 import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
-function useOrgIdFromPath() {
-  const loc = useLocation();
+function readOrgIdFromUrl() {
+  try {
+    // 1) Hash-style: /app/#/org/:orgId/...
+    const hash = window.location.hash || "";
+    let m = hash.match(/#\/org\/([^/]+)/i);
+    if (m && m[1]) return decodeURIComponent(m[1]);
 
-  // Works for BrowserRouter paths like /org/:orgId/...
-  const path = loc?.pathname || "";
-  let m = path.match(/\/org\/([^/]+)/i);
-  if (m && m[1]) return decodeURIComponent(m[1]);
+    // 2) Path-style: /org/:orgId/...
+    const path = window.location.pathname || "";
+    m = path.match(/\/org\/([^/]+)/i);
+    if (m && m[1]) return decodeURIComponent(m[1]);
 
-  // Works for HashRouter urls like .../#/org/:orgId/...
-  const hash = (typeof window !== "undefined" && window.location && window.location.hash) ? window.location.hash : "";
-  m = hash.match(/#\/org\/([^/]+)/i);
-  if (m && m[1]) return decodeURIComponent(m[1]);
-
-  return null;
+    return null;
+  } catch {
+    return null;
+  }
 }
+
+function useOrgIdFromPath() {
+  // This forces re-renders when normal route changes happen
+  useLocation();
+
+  const [orgId, setOrgId] = React.useState(() => readOrgIdFromUrl());
+
+  React.useEffect(() => {
+    const sync = () => setOrgId(readOrgIdFromUrl());
+    sync();
+
+    window.addEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+
+  return orgId;
+}
+
 
 
 function Brand({ logoSrc = "/logo-bondfire.png" }) {
