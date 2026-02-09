@@ -8,16 +8,18 @@ function useOrgIdFromPath() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
+function Brand({ logoSrc = "/logo-bondfire.png" }) {
   const orgId = useOrgIdFromPath();
   const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
+
   return (
-    <Link to={homeHref} className="brand">
+    <Link to={homeHref} className="bf-brand" aria-label="Bondfire home">
       <img
         src={logoSrc}
-        alt="Bondfire"
+        alt=""
         width={28}
         height={28}
+        loading="eager"
         onError={(e) => {
           e.currentTarget.style.display = "none";
         }}
@@ -25,7 +27,7 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
       <span>Bondfire</span>
     </Link>
   );
-};
+}
 
 function OrgNav({ variant = "desktop" }) {
   const orgId = useOrgIdFromPath();
@@ -63,9 +65,20 @@ function OrgNav({ variant = "desktop" }) {
 
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-
   const loc = useLocation();
+
+  // Close drawer on route change.
   React.useEffect(() => setMobileOpen(false), [loc.pathname]);
+
+  // Escape closes drawer.
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileOpen]);
 
   return (
     <header className="bf-appHeader">
@@ -95,7 +108,11 @@ export default function AppHeader({ onLogout, showLogout }) {
         </button>
       </div>
 
-      <div className={`bf-drawer${mobileOpen ? " is-open" : ""}`} role="dialog" aria-modal="true">
+      <div
+        className={`bf-drawer${mobileOpen ? " is-open" : ""}`
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="bf-drawer-backdrop" onClick={() => setMobileOpen(false)} />
         <div className="bf-drawer-panel">
           <div className="bf-drawer-top">
