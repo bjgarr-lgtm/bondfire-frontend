@@ -879,3 +879,20 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* === FIX: mobile drawer nav not visible (force it to exist) === */
+@media (max-width: 840px) {
+  .bf-drawer-panel .bf-appnav,
+  .bf-drawer-panel .bf-appnav.is-drawer {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    margin-top: 14px !important;
+  }
+
+  .bf-drawer-panel .bf-appnav-link {
+    display: block !important;
+    width: 100% !important;
+  }
+}
