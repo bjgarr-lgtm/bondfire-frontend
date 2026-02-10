@@ -915,81 +915,64 @@ React.useEffect(() => {
 
               <div style={{ marginTop: 12 }}>
                 {members.length === 0 ? (
-                  <div className="helper">No members found.</div>
+                  <div style={{ opacity: 0.7 }}>No members yet.</div>
                 ) : (
-                  <div className="bf-table-desktop">
-<table className="table">
-                    <thead>
-                      <tr>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Role</th>
-                        <th>Remove</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <>
+                    <div className="bf-table-desktop" style={{ overflowX: "auto" }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Email</th>
+                            <th>Name</th>
+                            <th>Role</th>
+                            <th>Remove</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {members.map((m) => (
+                            <tr key={m.userId || m.email}>
+                              <td>{m.email}</td>
+                              <td>{m.name || ""}</td>
+                              <td>{m.role || ""}</td>
+                              <td>
+                                <button
+                                  className="primary"
+                                  type="button"
+                                  onClick={() => removeMember(m.userId, m.email)}
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="bf-cards-mobile" style={{ marginTop: 12 }}>
                       {members.map((m) => (
-                        <tr key={m.userId}>
-                          <td>
-                            <code>{m.email || m.userId}</code>
-                          </td>
-                          <td>{m.name || ""}</td>
-                          <td>
-                            <select
-                              className="input"
-                              value={m.role || "member"}
-                              onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
-                              disabled={membersBusy}
+                        <div key={m.userId || m.email} className="bf-rowcard">
+                          <div className="bf-rowcard-top">
+                            <div className="bf-rowcard-title">{m.name || m.email}</div>
+                            <span className="tag">{m.role || "member"}</span>
+                          </div>
+                          <div className="bf-field">
+                            <div className="bf-field-label">email</div>
+                            <div style={{ opacity: 0.85 }}>{m.email}</div>
+                          </div>
+                          <div className="actions" style={{ marginTop: 10 }}>
+                            <button
+                              className="primary"
+                              type="button"
+                              onClick={() => removeMember(m.userId, m.email)}
                             >
-                              <option value="viewer">viewer</option>
-                              <option value="member">member</option>
-                              <option value="admin">admin</option>
-                              <option value="owner">owner</option>
-                            </select>
-                          </td>
-                          <td style={{ whiteSpace: "nowrap" }}>
-                            {m.role === "owner" ? (
-                              <span className="helper">owner</span>
-                            ) : (
-                              <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
-                                Remove
-                              </button>
-                            )}
-                          </td>
-                        </tr>
+                              Remove
+                            </button>
+                          </div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-</div>
-
-<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-  {members.map((m) => (
-    <div key={m.userId || m.email} className="bf-rowcard">
-      <div className="bf-rowcard-top">
-        <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-        <button className="btn" type="button" onClick={() => removeMember(m.id)} disabled={membersBusy}>
-          Remove
-        </button>
-      </div>
-
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">name</div>
-          <div>{m.name || ""}</div>
-        </div>
-        <div className="bf-field">
-          <div className="bf-field-label">email</div>
-          <div style={{ overflowWrap: "anywhere" }}>{m.email || ""}</div>
-        </div>
-      </div>
-
-      <div className="bf-field">
-        <div className="bf-field-label">role</div>
-        <div>{m.role || "member"}</div>
-      </div>
-    </div>
-  ))}
-</div>
+                    </div>
+                  </>
                 )}
               </div>
             </>
