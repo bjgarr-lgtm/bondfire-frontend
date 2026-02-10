@@ -275,7 +275,7 @@ export default function Meetings() {
                 </tr>
               )}
             </tbody>
-          </table></div>
+          </table>
         </div>
 
         {/* Add form */}
