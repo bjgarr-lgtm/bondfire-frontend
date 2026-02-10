@@ -225,61 +225,81 @@ export default function Meetings() {
           </div>
         )}
 
-        {/* Read only list */}
-        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
-            <thead>
-              <tr>
-                <th style={{ width: "32%" }}>Title</th>
-                <th style={{ width: "16%" }}>Starts</th>
-                <th style={{ width: "16%" }}>Ends</th>
-                <th style={{ width: "20%" }}>Location</th>
-                <th style={{ width: "8%", textAlign: "center" }}>Public</th>
-                <th style={{ width: "8%" }} />
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((m) => (
-                <tr key={m.id}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{m.title || ""}</div>
-                    <div className="helper" style={{ marginTop: 6 }}>
-                      <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>
-                        Open
-                      </Link>
-                    </div>
-                  </td>
-                  <td className="helper">{formatDT(m.starts_at) || "not scheduled"}</td>
-                  <td className="helper">{formatDT(m.ends_at) || ""}</td>
-                  <td>{m.location || ""}</td>
-                  <td style={{ textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      style={{ margin: 0 }}
-                      checked={!!m.is_public}
-                      onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
-                    />
-                  </td>
-                  <td>
-                    <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {list.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="helper">
-                    No meetings.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        
+{/* Read only list */}
+<div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+  <table className="table" style={{ minWidth: 940, tableLayout: "fixed" }}>
+    <thead>
+      <tr>
+        <th style={{ width: 220 }}>Title</th>
+        <th style={{ width: 140 }}>Date</th>
+        <th style={{ width: 120 }}>Time</th>
+        <th>Notes</th>
+        <th style={{ width: 90 }} />
+      </tr>
+    </thead>
+    <tbody>
+      {filtered.map((m) => (
+        <tr key={m.id}>
+          <td>{m.title || ""}</td>
+          <td>{m.date || ""}</td>
+          <td>{m.time || ""}</td>
+          <td style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{m.notes || ""}</td>
+          <td>
+            <button className="btn" onClick={() => delMeeting(m.id)} style={{ padding: "6px 10px" }}>
+              Delete
+            </button>
+          </td>
+        </tr>
+      ))}
+      {filtered.length === 0 && (
+        <tr>
+          <td colSpan={5} style={{ opacity: 0.7 }}>
+            No meetings yet.
+          </td>
+        </tr>
+      )}
+    </tbody>
+  </table>
+</div>
 
-        {/* Add form */}
-        <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
+{/* Mobile cards */}
+<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+  {filtered.map((m) => (
+    <div key={m.id} className="bf-rowcard">
+      <div className="bf-rowcard-top">
+        <div className="bf-rowcard-title">{m.title || "Untitled meeting"}</div>
+        <button className="btn" onClick={() => delMeeting(m.id)} style={{ padding: "8px 10px" }}>
+          Delete
+        </button>
+      </div>
+
+      <div className="bf-two">
+        <div className="bf-field">
+          <div className="bf-field-label">date</div>
+          <div>{m.date || " "}</div>
+        </div>
+        <div className="bf-field">
+          <div className="bf-field-label">time</div>
+          <div>{m.time || " "}</div>
+        </div>
+      </div>
+
+      {m.notes ? (
+        <div className="bf-field">
+          <div className="bf-field-label">notes</div>
+          <div style={{ whiteSpace: "pre-wrap" }}>{m.notes}</div>
+        </div>
+      ) : null}
+    </div>
+  ))}
+
+  {filtered.length === 0 ? (
+    <div style={{ opacity: 0.7 }}>No meetings yet.</div>
+  ) : null}
+</div>
+
+      <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
           <input
             className="input"
             name="title"
