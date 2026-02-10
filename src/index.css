@@ -880,46 +880,87 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   text-overflow: ellipsis;
 }
 
-/* === FIX: mobile drawer nav not visible (force it to exist) === */
+/* ===============================
+   Mobile: no sideways scrolling + tables become cards
+   =============================== */
+
+html, body {
+  overflow-x: hidden;
+}
+
+.bf-table-desktop { display: block; }
+.bf-cards-mobile { display: none; }
+
 @media (max-width: 840px) {
-  .bf-drawer-panel .bf-appnav,
-  .bf-drawer-panel .bf-appnav.is-drawer {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 10px !important;
-    margin-top: 14px !important;
-  }
+  .bf-table-desktop { display: none; }
+  .bf-cards-mobile { display: grid; gap: 10px; }
 
-  .bf-drawer-panel .bf-appnav-link {
-    display: block !important;
-    width: 100% !important;
+  /* Let flex rows wrap instead of pushing the viewport sideways */
+  .row, .actions, .search { flex-wrap: wrap; }
+
+  /* Tables: if any remain, make them wrap instead of forcing horizontal scroll */
+  .table {
+    width: 100%;
+    table-layout: fixed;
+  }
+  .table th {
+    white-space: nowrap;
+  }
+  .table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 
-/* Debug panel for drawer nav: only appears when AppHeader renders it */
-.bf-nav-debug{
-  margin-top: 14px;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.04);
-  color: rgba(255,255,255,0.9);
+/* Reusable mobile "row card" */
+.bf-rowcard {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.bf-rowcard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.bf-rowcard-title {
+  font-weight: 800;
+  opacity: 0.92;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bf-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.bf-field-label {
   font-size: 12px;
-  line-height: 1.35;
-  white-space: pre-wrap;
-  word-break: break-word;
+  color: rgba(255,255,255,0.72);
 }
 
-/* Force drawer links to be visible, period. If they still don't show,
-   your problem is stacking/overlay, not "styles". */
-@media (max-width: 840px){
-  .bf-drawer-panel .bf-appnav-link{
-    opacity: 1 !important;
-    visibility: visible !important;
-    display: block !important;
-    color: #fff !important;
-    background: rgba(255,255,255,0.06) !important;
-    border: 1px solid rgba(255,255,255,0.12) !important;
-  }
+.bf-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 420px) {
+  .bf-two { grid-template-columns: 1fr; }
+}
+
+.bf-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }

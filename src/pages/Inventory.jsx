@@ -181,7 +181,11 @@ export default function Inventory() {
           <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
             Inventory
           </h2>
-          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+          <button
+            className="btn"
+            onClick={() => refresh().catch(console.error)}
+            disabled={loading}
+          >
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
@@ -200,18 +204,18 @@ export default function Inventory() {
           </div>
         ) : null}
 
-        {/* Desktop/table view */}
+        {/* Desktop table */}
         <div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto", paddingRight: 28 }}>
           <table className="table" style={{ width: "100%", tableLayout: "fixed" }}>
             <colgroup>
-              <col />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 100 }} />
-              <col style={{ width: 160 }} />
-              <col style={{ width: 160 }} />
-              <col />
-              <col style={{ width: 84 }} />
-              <col style={{ width: 120 }} />
+              <col /> {/* Name */}
+              <col style={{ width: 90 }} /> {/* Qty */}
+              <col style={{ width: 100 }} /> {/* Unit */}
+              <col style={{ width: 160 }} /> {/* Category */}
+              <col style={{ width: 160 }} /> {/* Location */}
+              <col /> {/* Notes */}
+              <col style={{ width: 84 }} /> {/* Public */}
+              <col style={{ width: 120 }} /> {/* Delete */}
             </colgroup>
 
             <thead>
@@ -252,7 +256,8 @@ export default function Inventory() {
                       onBlur={(e) => {
                         const raw = e.target.value;
                         const v = raw === "" ? null : Number(raw);
-                        const curr = i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
+                        const curr =
+                          i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
                         if (v !== curr) putItem(i.id, { qty: v }).catch(console.error);
                       }}
                     />
@@ -336,6 +341,7 @@ export default function Inventory() {
             </tbody>
           </table>
 
+          {/* datalists for consistent values */}
           <datalist id="bf_inv_units">
             {unitOptions.map((v) => (
               <option key={v} value={v} />
@@ -353,113 +359,105 @@ export default function Inventory() {
           </datalist>
         </div>
 
-        {/* Mobile/cards view */}
-        <div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-          {list.map((i) => (
-            <div key={i.id} className="bf-rowcard">
-              <div className="bf-rowcard-top">
-                <div className="bf-rowcard-title">Item</div>
-                <button className="btn" type="button" onClick={() => delItem(i.id).catch(console.error)}>
-                  Delete
-                </button>
-              </div>
+{/* Mobile cards */}
+<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+  {list.map((i) => (
+    <div key={i.id} className="bf-rowcard">
+      <div className="bf-rowcard-top">
+        <div className="bf-rowcard-title">{i.name || "Item"}</div>
+        <button className="btn" style={{ padding: "8px 10px" }} onClick={() => delItem(i.id).catch(console.error)}>
+          Delete
+        </button>
+      </div>
 
-              <label className="bf-field">
-                <span className="bf-field-label">Name</span>
-                <input
-                  className="input"
-                  defaultValue={i.name || ""}
-                  onBlur={(e) => {
-                    const v = String(e.target.value || "").trim();
-                    if (v !== String(i.name || "")) putItem(i.id, { name: v }).catch(console.error);
-                  }}
-                />
-              </label>
-
-              <div className="bf-two">
-                <label className="bf-field">
-                  <span className="bf-field-label">Qty</span>
-                  <input
-                    className="input"
-                    type="number"
-                    step="any"
-                    defaultValue={i.qty === null || typeof i.qty === "undefined" ? "" : i.qty}
-                    onBlur={(e) => {
-                      const raw = e.target.value;
-                      const v = raw === "" ? null : Number(raw);
-                      const curr = i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
-                      if (v !== curr) putItem(i.id, { qty: v }).catch(console.error);
-                    }}
-                  />
-                </label>
-
-                <label className="bf-field">
-                  <span className="bf-field-label">Unit</span>
-                  <input
-                    className="input"
-                    list="bf_inv_units"
-                    defaultValue={i.unit || ""}
-                    onBlur={(e) => {
-                      const v = (e.target.value || "").trim();
-                      if (v !== (i.unit || "")) putItem(i.id, { unit: v }).catch(console.error);
-                    }}
-                  />
-                </label>
-              </div>
-
-              <div className="bf-two">
-                <label className="bf-field">
-                  <span className="bf-field-label">Category</span>
-                  <input
-                    className="input"
-                    list="bf_inv_categories"
-                    defaultValue={i.category || ""}
-                    onBlur={(e) => {
-                      const v = (e.target.value || "").trim();
-                      if (v !== (i.category || "")) putItem(i.id, { category: v }).catch(console.error);
-                    }}
-                  />
-                </label>
-
-                <label className="bf-field">
-                  <span className="bf-field-label">Location</span>
-                  <input
-                    className="input"
-                    list="bf_inv_locations"
-                    defaultValue={i.location || ""}
-                    onBlur={(e) => {
-                      const v = (e.target.value || "").trim();
-                      if (v !== (i.location || "")) putItem(i.id, { location: v }).catch(console.error);
-                    }}
-                  />
-                </label>
-              </div>
-
-              <label className="bf-field">
-                <span className="bf-field-label">Notes</span>
-                <input
-                  className="input"
-                  defaultValue={i.notes || ""}
-                  onBlur={(e) => {
-                    const v = e.target.value || "";
-                    if (v !== (i.notes || "")) putItem(i.id, { notes: v }).catch(console.error);
-                  }}
-                />
-              </label>
-
-              <label className="bf-field bf-inline">
-                <span className="bf-field-label">Public</span>
-                <input
-                  type="checkbox"
-                  defaultChecked={!!i.is_public}
-                  onChange={(e) => putItem(i.id, { is_public: e.target.checked }).catch(console.error)}
-                />
-              </label>
-            </div>
-          ))}
-
-          {list.length === 0 ? <div className="helper">No inventory items match.</div> : null}
+      <div className="bf-two">
+        <div className="bf-field">
+          <div className="bf-field-label">qty</div>
+          <input
+            className="input"
+            type="number"
+            step="any"
+            defaultValue={i.qty === null || typeof i.qty === "undefined" ? "" : i.qty}
+            onBlur={(e) => {
+              const raw = e.target.value;
+              const v = raw === "" ? null : Number(raw);
+              const curr = i.qty === null || typeof i.qty === "undefined" ? null : Number(i.qty);
+              if (v !== curr) putItem(i.id, { qty: v }).catch(console.error);
+            }}
+          />
         </div>
+
+        <div className="bf-field">
+          <div className="bf-field-label">unit</div>
+          <input
+            className="input"
+            list="bf_inv_units"
+            defaultValue={i.unit || ""}
+            onBlur={(e) => {
+              const v = (e.target.value || "").trim();
+              if (v !== (i.unit || "")) putItem(i.id, { unit: v }).catch(console.error);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="bf-two">
+        <div className="bf-field">
+          <div className="bf-field-label">category</div>
+          <input
+            className="input"
+            list="bf_inv_categories"
+            defaultValue={i.category || ""}
+            onBlur={(e) => {
+              const v = (e.target.value || "").trim();
+              if (v !== (i.category || "")) putItem(i.id, { category: v }).catch(console.error);
+            }}
+          />
+        </div>
+
+        <div className="bf-field">
+          <div className="bf-field-label">location</div>
+          <input
+            className="input"
+            list="bf_inv_locations"
+            defaultValue={i.location || ""}
+            onBlur={(e) => {
+              const v = (e.target.value || "").trim();
+              if (v !== (i.location || "")) putItem(i.id, { location: v }).catch(console.error);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="bf-field">
+        <div className="bf-field-label">notes</div>
+        <input
+          className="input"
+          defaultValue={i.notes || ""}
+          onBlur={(e) => {
+            const v = e.target.value || "";
+            if (v !== (i.notes || "")) putItem(i.id, { notes: v }).catch(console.error);
+          }}
+        />
+      </div>
+
+      <div className="bf-inline" style={{ marginTop: 12 }}>
+        <div className="bf-field-label">public</div>
+        <input
+          type="checkbox"
+          defaultChecked={!!i.is_public}
+          onChange={(e) => putItem(i.id, { is_public: e.target.checked }).catch(console.error)}
+        />
+      </div>
+    </div>
+  ))}
+
+  {list.length === 0 && (
+    <div className="bf-rowcard">
+      <div className="bf-field-label">no inventory items match.</div>
+    </div>
+  )}
+</div>
 
         <form onSubmit={onAdd} className="grid cols-3" style={{ marginTop: 12 }}>
           <input

@@ -225,10 +225,9 @@ export default function Meetings() {
           </div>
         )}
 
-        {/* Read only list (desktop table + mobile cards) */}
-        <div className="bf-table-desktop" style={{ marginTop: 12 }}>
-          <div style={{ overflowX: "auto", paddingRight: 16 }}>
-            <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
+        {/* Read only list */}
+        <div style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
+          <table className="table" style={{ width: "100%", tableLayout: "fixed", minWidth: 940 }}>
             <thead>
               <tr>
                 <th style={{ width: "32%" }}>Title</th>
@@ -276,58 +275,7 @@ export default function Meetings() {
                 </tr>
               )}
             </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-          {list.map((m) => (
-            <div key={m.id} className="card" style={{ padding: 12, marginBottom: 10 }}>
-              <div className="row" style={{ justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, wordBreak: "break-word" }}>{m.title || ""}</div>
-                  <div className="helper" style={{ marginTop: 6 }}>
-                    <Link to={`/org/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(m.id)}`}>Open</Link>
-                  </div>
-                </div>
-
-                <label className="row" style={{ gap: 8, alignItems: "center" }}>
-                  <span className="helper">Public</span>
-                  <input
-                    type="checkbox"
-                    style={{ margin: 0 }}
-                    checked={!!m.is_public}
-                    onChange={(e) => togglePublic(m.id, e.target.checked).catch(console.error)}
-                  />
-                </label>
-              </div>
-
-              <div className="grid" style={{ gap: 6, marginTop: 10 }}>
-                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
-                  <div className="helper">Starts</div>
-                  <div className="helper" style={{ textAlign: "right" }}>{formatDT(m.starts_at) || "not scheduled"}</div>
-                </div>
-                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
-                  <div className="helper">Ends</div>
-                  <div className="helper" style={{ textAlign: "right" }}>{formatDT(m.ends_at) || ""}</div>
-                </div>
-                {m.location ? (
-                  <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
-                    <div className="helper">Location</div>
-                    <div style={{ textAlign: "right", wordBreak: "break-word" }}>{m.location}</div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-                <button className="btn" onClick={() => delMeeting(m.id).catch(console.error)}>
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {list.length === 0 ? <div className="helper">No meetings.</div> : null}
+          </table></div>
         </div>
 
         {/* Add form */}
