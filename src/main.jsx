@@ -2,6 +2,10 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
+import { registerSW } from "virtual:pwa-register";
+
+registerSW({ immediate: true });
+
 
 // === CANARY: proves a new build is running ===
 const __BUILD_STAMP__ = new Date().toISOString() + ' #' + Math.floor(Math.random()*1e6);
