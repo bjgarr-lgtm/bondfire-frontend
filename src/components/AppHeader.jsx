@@ -49,17 +49,52 @@ function OrgNav({ variant = "desktop" }) {
     ["Chat", `${base}/chat`],
   ];
 
-  const navClass = `bf-appnav${variant === "drawer" ? " is-drawer" : ""}`;
+  const isDrawer = variant === "drawer";
+
+  // Inline styles for drawer so CSS can't hide it.
+  const drawerNavStyle = isDrawer
+    ? {
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        marginTop: 14,
+      }
+    : undefined;
+
+  const drawerLinkStyle = isDrawer
+    ? {
+        display: "block",
+        width: "100%",
+        padding: "12px 14px",
+        borderRadius: 12,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        color: "#fff",
+        fontWeight: 700,
+      }
+    : undefined;
 
   return (
-    <nav className={navClass} aria-label="Org navigation">
+    <nav
+      className={`bf-appnav${isDrawer ? " is-drawer" : ""}`}
+      aria-label="Org navigation"
+      style={drawerNavStyle}
+      data-bf-orgnav={isDrawer ? "drawer" : "desktop"}
+    >
       {items.map(([label, to]) => (
         <NavLink
           key={to}
           to={to}
-          className={({ isActive }) =>
-            `bf-appnav-link${isActive ? " is-active" : ""}`
+          style={({ isActive }) =>
+            isDrawer
+              ? {
+                  ...drawerLinkStyle,
+                  background: isActive ? "rgba(255,0,0,0.20)" : drawerLinkStyle.background,
+                  border: isActive ? "1px solid rgba(255,0,0,0.30)" : drawerLinkStyle.border,
+                }
+              : undefined
           }
+          className={({ isActive }) => `bf-appnav-link${isActive ? " is-active" : ""}`}
         >
           {label}
         </NavLink>
@@ -71,122 +106,178 @@ function OrgNav({ variant = "desktop" }) {
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
+  const orgId = useOrgIdFromPath();
 
-  // Debug toggle: add ?debugNav=1 to the URL
+  // Debug toggle: add ?debugNav=1 to URL
   const debugNav =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).has("debugNav");
 
-  const orgId = useOrgIdFromPath();
-
   React.useEffect(() => setMobileOpen(false), [loc.pathname, loc.hash]);
 
-  // Compute diagnostics for the first nav link when drawer is open
   const [diag, setDiag] = React.useState(null);
+
   React.useEffect(() => {
     if (!debugNav) return;
-    if (!mobileOpen) return;
 
-    const t = setTimeout(() => {
-      const el = document.querySelector(".bf-drawer-panel .bf-appnav-link");
-      if (!el) {
-        setDiag({ foundLink: false });
-        return;
-      }
-      const r = el.getBoundingClientRect();
-      const s = window.getComputedStyle(el);
+    const t = setInterval(() => {
+      const drawer = document.querySelector(".bf-drawer");
+      const panel = document.querySelector(".bf-drawer-panel");
+      const nav = document.querySelector(".bf-drawer-panel nav[data-bf-orgnav='drawer']");
+      const link = document.querySelector(".bf-drawer-panel a");
+
+      const panelCS = panel ? window.getComputedStyle(panel) : null;
+      const linkCS = link ? window.getComputedStyle(link) : null;
+      const linkRect = link ? link.getBoundingClientRect() : null;
+
       setDiag({
-        foundLink: true,
-        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
-        display: s.display,
-        visibility: s.visibility,
-        opacity: s.opacity,
-        color: s.color,
-        background: s.backgroundColor,
-        zIndex: s.zIndex,
-        pointerEvents: s.pointerEvents,
-        fontSize: s.fontSize,
-        lineHeight: s.lineHeight,
+        orgId,
+        pathname: loc.pathname,
+        hash: loc.hash,
+        mobileOpen,
+        drawerFound: !!drawer,
+        panelFound: !!panel,
+        navFound: !!nav,
+        linkFound: !!link,
+        panelDisplay: panelCS ? panelCS.display : null,
+        panelVisibility: panelCS ? panelCS.visibility : null,
+        panelOpacity: panelCS ? panelCS.opacity : null,
+        panelTransform: panelCS ? panelCS.transform : null,
+        panelZ: panelCS ? panelCS.zIndex : null,
+        linkDisplay: linkCS ? linkCS.display : null,
+        linkVisibility: linkCS ? linkCS.visibility : null,
+        linkOpacity: linkCS ? linkCS.opacity : null,
+        linkColor: linkCS ? linkCS.color : null,
+        linkBG: linkCS ? linkCS.backgroundColor : null,
+        linkRect: linkRect
+          ? { x: linkRect.x, y: linkRect.y, w: linkRect.width, h: linkRect.height }
+          : null,
       });
-    }, 50);
+    }, 500);
 
-    return () => clearTimeout(t);
-  }, [debugNav, mobileOpen]);
+    return () => clearInterval(t);
+  }, [debugNav, orgId, loc.pathname, loc.hash, mobileOpen]);
+
+  // Inline forced drawer styles so CSS can't make it invisible/offscreen.
+  const drawerStyle = {
+    position: "fixed",
+    inset: 0,
+    zIndex: 999999,
+    pointerEvents: mobileOpen ? "auto" : "none",
+  };
+
+  const backdropStyle = {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(0,0,0,0.65)",
+    opacity: mobileOpen ? 1 : 0,
+    transition: "opacity 160ms ease",
+  };
+
+  const panelStyle = {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    height: "100%",
+    width: "min(340px, 90vw)",
+    background: "#0b0b0b",
+    borderLeft: "1px solid rgba(255,255,255,0.12)",
+    padding: 14,
+    overflowY: "auto",
+    transform: mobileOpen ? "translateX(0)" : "translateX(100%)",
+    transition: "transform 180ms ease",
+    color: "#fff",
+  };
+
+  const debugOverlayStyle = {
+    position: "fixed",
+    right: 10,
+    bottom: 10,
+    zIndex: 1000000,
+    width: "min(420px, 92vw)",
+    maxHeight: "40vh",
+    overflow: "auto",
+    padding: 10,
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(0,0,0,0.85)",
+    color: "#fff",
+    fontSize: 12,
+    lineHeight: 1.35,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  };
 
   return (
-    <header className="bf-appHeader">
-      <div className="bf-appHeader-left">
-        <Brand />
-      </div>
-
-      <div className="bf-appHeader-right">
-        <div className="bf-nav-desktop">
-          <OrgNav variant="desktop" />
+    <>
+      <header className="bf-appHeader">
+        <div className="bf-appHeader-left">
+          <Brand />
         </div>
 
-        {showLogout ? (
-          <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
-            Logout
+        <div className="bf-appHeader-right">
+          <div className="bf-nav-desktop">
+            <OrgNav variant="desktop" />
+          </div>
+
+          {showLogout ? (
+            <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
+              Logout
+            </button>
+          ) : null}
+
+          <button
+            className="bf-hamburger"
+            type="button"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileOpen ? "true" : "false"}
+            onClick={() => setMobileOpen((v) => !v)}
+          >
+            <span aria-hidden="true">☰</span>
           </button>
-        ) : null}
+        </div>
+      </header>
 
-        <button
-          className="bf-hamburger"
-          type="button"
-          aria-label={mobileOpen ? "Close menu" : "Open menu"}
-          aria-expanded={mobileOpen ? "true" : "false"}
-          onClick={() => setMobileOpen((v) => !v)}
-        >
-          <span aria-hidden="true">☰</span>
-        </button>
-      </div>
-
-      <div
-        className={`bf-drawer${mobileOpen ? " is-open" : ""}`}
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="bf-drawer-backdrop" onClick={() => setMobileOpen(false)} />
-        <div className="bf-drawer-panel">
-          <div className="bf-drawer-top">
-            <div className="bf-drawer-title">Menu</div>
+      {/* Drawer lives outside header so nothing in header layout can clip it */}
+      <div className="bf-drawer" style={drawerStyle} role="dialog" aria-modal="true">
+        <div style={backdropStyle} onClick={() => setMobileOpen(false)} />
+        <div className="bf-drawer-panel" style={panelStyle}>
+          <div className="bf-drawer-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div className="bf-drawer-title" style={{ fontWeight: 800, letterSpacing: ".3px" }}>
+              Menu
+            </div>
             <button
               className="bf-drawer-close"
               type="button"
               onClick={() => setMobileOpen(false)}
               aria-label="Close menu"
+              style={{
+                height: 40,
+                width: 44,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.04)",
+                color: "#fff",
+              }}
             >
               ✕
             </button>
           </div>
 
-          {/* The actual drawer nav */}
           <OrgNav variant="drawer" />
 
           {showLogout ? (
-            <button className="bf-drawer-logout" type="button" onClick={onLogout}>
+            <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
               Logout
             </button>
           ) : null}
-
-          {/* Debug block */}
-          {debugNav ? (
-            <pre className="bf-nav-debug">
-              {JSON.stringify(
-                {
-                  orgId,
-                  pathname: loc.pathname,
-                  hash: loc.hash,
-                  mobileOpen,
-                  diag,
-                },
-                null,
-                2
-              )}
-            </pre>
-          ) : null}
         </div>
       </div>
-    </header>
+
+      {/* Always visible debug overlay */}
+      {debugNav ? (
+        <pre style={debugOverlayStyle}>{JSON.stringify(diag, null, 2)}</pre>
+      ) : null}
+    </>
   );
 }
