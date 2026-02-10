@@ -1,55 +1,25 @@
 // src/components/AppHeader.jsx
 import React from "react";
-import { useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
-function readOrgId() {
-  try {
-    const path = window.location.pathname || "";
-    const hash = window.location.hash || "";
+function useOrgIdFromPath() {
+  const loc = useLocation();
+  const pathname = loc.pathname || "";
+  const hash = loc.hash || "";
 
-    // If you are using HashRouter, orgId may be in pathname like /org/<id>/inventory
-    let m = path.match(/\/org\/([^/]+)/i);
-    if (m && m[1]) return decodeURIComponent(m[1]);
+  // Support BOTH BrowserRouter (/org/...) and HashRouter (#/org/...)
+  const m1 = pathname.match(/\/org\/([^/]+)/i);
+  const m2 = hash.match(/#\/org\/([^/]+)/i);
 
-    // If you are using /app/#/org/<id>/inventory, orgId is in hash
-    m = hash.match(/#\/org\/([^/]+)/i);
-    if (m && m[1]) return decodeURIComponent(m[1]);
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function useOrgId() {
-  const loc = useLocation(); // triggers re-render on route changes
-  const [orgId, setOrgId] = React.useState(() => readOrgId());
-
-  React.useEffect(() => {
-    setOrgId(readOrgId());
-  }, [loc.pathname, loc.search, loc.hash]);
-
-  React.useEffect(() => {
-    const sync = () => setOrgId(readOrgId());
-    window.addEventListener("hashchange", sync);
-    window.addEventListener("popstate", sync);
-    return () => {
-      window.removeEventListener("hashchange", sync);
-      window.removeEventListener("popstate", sync);
-    };
-  }, []);
-
-  return orgId;
+  const raw = (m1 && m1[1]) || (m2 && m2[1]) || null;
+  return raw ? decodeURIComponent(raw) : null;
 }
 
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
-  const orgId = useOrgId();
-
-  // Keep your existing branding className if you want. This is just the link.
-  const homeHref = orgId ? `#/org/${encodeURIComponent(orgId)}/overview` : "#/orgs";
-
+  const orgId = useOrgIdFromPath();
+  const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
   return (
-    <a href={homeHref} className="brand">
+    <Link to={homeHref} className="brand">
       <img
         src={logoSrc}
         alt="Bondfire"
@@ -60,15 +30,15 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
         }}
       />
       <span>Bondfire</span>
-    </a>
+    </Link>
   );
 };
 
 function OrgNav({ variant = "desktop" }) {
-  const orgId = useOrgId();
+  const orgId = useOrgIdFromPath();
   if (!orgId) return null;
 
-  const base = `#/org/${encodeURIComponent(orgId)}`;
+  const base = `/org/${orgId}`;
   const items = [
     ["Dashboard", `${base}/overview`],
     ["People", `${base}/people`],
@@ -80,22 +50,20 @@ function OrgNav({ variant = "desktop" }) {
   ];
 
   const navClass = `bf-appnav${variant === "drawer" ? " is-drawer" : ""}`;
-  const currentHash = window.location.hash || "";
 
   return (
     <nav className={navClass} aria-label="Org navigation">
-      {items.map(([label, href]) => {
-        const isActive = currentHash.startsWith(href);
-        return (
-          <a
-            key={href}
-            href={href}
-            className={`bf-appnav-link${isActive ? " is-active" : ""}`}
-          >
-            {label}
-          </a>
-        );
-      })}
+      {items.map(([label, to]) => (
+        <NavLink
+          key={to}
+          to={to}
+          className={({ isActive }) =>
+            `bf-appnav-link${isActive ? " is-active" : ""}`
+          }
+        >
+          {label}
+        </NavLink>
+      ))}
     </nav>
   );
 }
@@ -104,7 +72,46 @@ export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
 
+  // Debug toggle: add ?debugNav=1 to the URL
+  const debugNav =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("debugNav");
+
+  const orgId = useOrgIdFromPath();
+
   React.useEffect(() => setMobileOpen(false), [loc.pathname, loc.hash]);
+
+  // Compute diagnostics for the first nav link when drawer is open
+  const [diag, setDiag] = React.useState(null);
+  React.useEffect(() => {
+    if (!debugNav) return;
+    if (!mobileOpen) return;
+
+    const t = setTimeout(() => {
+      const el = document.querySelector(".bf-drawer-panel .bf-appnav-link");
+      if (!el) {
+        setDiag({ foundLink: false });
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      setDiag({
+        foundLink: true,
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        display: s.display,
+        visibility: s.visibility,
+        opacity: s.opacity,
+        color: s.color,
+        background: s.backgroundColor,
+        zIndex: s.zIndex,
+        pointerEvents: s.pointerEvents,
+        fontSize: s.fontSize,
+        lineHeight: s.lineHeight,
+      });
+    }, 50);
+
+    return () => clearTimeout(t);
+  }, [debugNav, mobileOpen]);
 
   return (
     <header className="bf-appHeader">
@@ -153,12 +160,30 @@ export default function AppHeader({ onLogout, showLogout }) {
             </button>
           </div>
 
+          {/* The actual drawer nav */}
           <OrgNav variant="drawer" />
 
           {showLogout ? (
             <button className="bf-drawer-logout" type="button" onClick={onLogout}>
               Logout
             </button>
+          ) : null}
+
+          {/* Debug block */}
+          {debugNav ? (
+            <pre className="bf-nav-debug">
+              {JSON.stringify(
+                {
+                  orgId,
+                  pathname: loc.pathname,
+                  hash: loc.hash,
+                  mobileOpen,
+                  diag,
+                },
+                null,
+                2
+              )}
+            </pre>
           ) : null}
         </div>
       </div>

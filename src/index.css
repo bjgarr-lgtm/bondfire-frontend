@@ -896,3 +896,30 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     width: 100% !important;
   }
 }
+
+/* Debug panel for drawer nav: only appears when AppHeader renders it */
+.bf-nav-debug{
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.9);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Force drawer links to be visible, period. If they still don't show,
+   your problem is stacking/overlay, not "styles". */
+@media (max-width: 840px){
+  .bf-drawer-panel .bf-appnav-link{
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: block !important;
+    color: #fff !important;
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+  }
+}
