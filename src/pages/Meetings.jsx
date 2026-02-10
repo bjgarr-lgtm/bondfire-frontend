@@ -1,6 +1,5 @@
 // src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../utils/api.js";
 
 function getOrgId() {
@@ -126,14 +125,37 @@ export default function Meetings() {
     refresh().catch(console.error);
   }, [orgId]);
 
-  const list = useMemo(() => {
-    const needle = q.toLowerCase();
-    return items.filter((m) =>
+  const filtered = useMemo(() => {
+    const needle = String(q || "").toLowerCase();
+
+    return (items || []).map((m) => {
+      const starts = m?.starts_at ? Number(m.starts_at) : null;
+
+      return {
+        ...m,
+        // What your table renders
+        date: starts ? new Date(starts).toLocaleDateString() : "",
+        time: (() => {
+          const s = m?.starts_at ? Number(m.starts_at) : null;
+          const e = m?.ends_at ? Number(m.ends_at) : null;
+
+          const fmt = (ms) =>
+            new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+          if (s && e) return `${fmt(s)}–${fmt(e)}`;
+          if (s) return fmt(s);
+          return "";
+        })(),
+
+        notes: m?.agenda || "",
+      };
+    }).filter((m) =>
       `${m.title || ""} ${m.location || ""} ${m.agenda || ""}`
         .toLowerCase()
         .includes(needle)
     );
   }, [items, q]);
+
 
   async function delMeeting(id) {
     if (!orgId || !id) return;
