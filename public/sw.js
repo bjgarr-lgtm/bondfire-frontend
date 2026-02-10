@@ -4,7 +4,7 @@
    - updates automatically on next load
 */
 
-const CACHE_NAME = "bondfire-v1";
+const CACHE_NAME = "bondfire-2026-02-10-01";
 
 // Keep this list small and stable.
 // Vite hashed assets change each build, so cache the basics.
