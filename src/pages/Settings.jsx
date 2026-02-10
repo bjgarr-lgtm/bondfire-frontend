@@ -917,79 +917,77 @@ React.useEffect(() => {
                 {members.length === 0 ? (
                   <div className="helper">No members found.</div>
                 ) : (
-                  <div className="bf-table-desktop">
-<table className="table">
-                    <thead>
-                      <tr>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Role</th>
-                        <th>Remove</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {members.map((m) => (
-                        <tr key={m.userId}>
-                          <td>
-                            <code>{m.email || m.userId}</code>
-                          </td>
-                          <td>{m.name || ""}</td>
-                          <td>
-                            <select
-                              className="input"
-                              value={m.role || "member"}
-                              onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
-                              disabled={membersBusy}
-                            >
-                              <option value="viewer">viewer</option>
-                              <option value="member">member</option>
-                              <option value="admin">admin</option>
-                              <option value="owner">owner</option>
-                            </select>
-                          </td>
-                          <td style={{ whiteSpace: "nowrap" }}>
-                            {m.role === "owner" ? (
-                              <span className="helper">owner</span>
-                            ) : (
-                              <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
-                                Remove
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-</div>
+                  <><div className="bf-table-desktop">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Email</th>
+                              <th>Name</th>
+                              <th>Role</th>
+                              <th>Remove</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {members.map((m) => (
+                              <tr key={m.userId}>
+                                <td>
+                                  <code>{m.email || m.userId}</code>
+                                </td>
+                                <td>{m.name || ""}</td>
+                                <td>
+                                  <select
+                                    className="input"
+                                    value={m.role || "member"}
+                                    onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
+                                    disabled={membersBusy}
+                                  >
+                                    <option value="viewer">viewer</option>
+                                    <option value="member">member</option>
+                                    <option value="admin">admin</option>
+                                    <option value="owner">owner</option>
+                                  </select>
+                                </td>
+                                <td style={{ whiteSpace: "nowrap" }}>
+                                  {m.role === "owner" ? (
+                                    <span className="helper">owner</span>
+                                  ) : (
+                                    <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
+                                      Remove
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div><div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+                          {members.map((m) => (
+                            <div key={m.id || m.user_id || m.email} className="bf-rowcard">
+                              <div className="bf-rowcard-top">
+                                <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
+                                <button className="btn" type="button" onClick={() => removeMember(m.id)} disabled={busy}>
+                                  Remove
+                                </button>
+                              </div>
 
-<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-  {members.map((m) => (
-    <div key={m.id || m.user_id || m.email} className="bf-rowcard">
-      <div className="bf-rowcard-top">
-        <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-        <button className="btn" type="button" onClick={() => removeMember(m.id)} disabled={busy}>
-          Remove
-        </button>
-      </div>
+                              <div className="bf-two">
+                                <div className="bf-field">
+                                  <div className="bf-field-label">name</div>
+                                  <div>{m.name || ""}</div>
+                                </div>
+                                <div className="bf-field">
+                                  <div className="bf-field-label">email</div>
+                                  <div style={{ overflowWrap: "anywhere" }}>{m.email || ""}</div>
+                                </div>
+                              </div>
 
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">name</div>
-          <div>{m.name || ""}</div>
-        </div>
-        <div className="bf-field">
-          <div className="bf-field-label">email</div>
-          <div style={{ overflowWrap: "anywhere" }}>{m.email || ""}</div>
-        </div>
-      </div>
-
-      <div className="bf-field">
-        <div className="bf-field-label">role</div>
-        <div>{m.role || "member"}</div>
-      </div>
-    </div>
-  ))}
-</div>
+                              <div className="bf-field">
+                                <div className="bf-field-label">role</div>
+                                <div>{m.role || "member"}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div></>
                 )}
               </div>
             </>
@@ -1162,137 +1160,130 @@ React.useEffect(() => {
               {subscribers.length === 0 ? (
                 <div className="helper">No subscribers yet.</div>
               ) : (
-                <div className="bf-table-desktop">
-<table className="table">
-                  <thead>
-                    <tr>
-                      <th>Email</th>
-                      <th>Name</th>
-                      <th>Joined</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subscribers.slice(0, 200).map((s) => (
-                      <tr key={s.id || s.email}>
-                        <td>
-                          <code>{s.email}</code>
-                        </td>
-                        <td>{s.name || ""}</td>
-                        <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-</div>
+                <><div className="bf-table-desktop">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Email</th>
+                          <th>Name</th>
+                          <th>Joined</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {subscribers.slice(0, 200).map((s) => (
+                          <tr key={s.id || s.email}>
+                            <td>
+                              <code>{s.email}</code>
+                            </td>
+                            <td>{s.name || ""}</td>
+                            <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div><div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+                      {pledges.map((p) => (
+                        <div key={p.id} className="bf-rowcard">
+                          <div className="bf-rowcard-top">
+                            <div className="bf-rowcard-title">{p.pledger_name || p.pledger_email || "pledge"}</div>
+                            <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy} style={{ padding: "8px 10px" }}>
+                              Delete
+                            </button>
+                          </div>
 
-<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-  {pledges.map((p) => (
-    <div key={p.id} className="bf-rowcard">
-      <div className="bf-rowcard-top">
-        <div className="bf-rowcard-title">{p.pledger_name || p.pledger_email || "pledge"}</div>
-        <button className="btn" type="button" onClick={() => deletePledge(p.id)} disabled={pledgesBusy} style={{ padding: "8px 10px" }}>
-          Delete
-        </button>
-      </div>
+                          <div className="bf-two">
+                            <div className="bf-field">
+                              <div className="bf-field-label">name</div>
+                              <input
+                                className="input"
+                                defaultValue={p.pledger_name || ""}
+                                onBlur={(e) => {
+                                  const v = String(e.target.value || "");
+                                  if (v !== String(p.pledger_name || "")) upsertPledge(p.id, { pledger_name: v });
+                                } }
+                                disabled={pledgesBusy} />
+                            </div>
 
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">name</div>
-          <input
-            className="input"
-            defaultValue={p.pledger_name || ""}
-            onBlur={(e) => {
-              const v = String(e.target.value || "");
-              if (v !== String(p.pledger_name || "")) upsertPledge(p.id, { pledger_name: v });
-            }}
-            disabled={pledgesBusy}
-          />
-        </div>
+                            <div className="bf-field">
+                              <div className="bf-field-label">email</div>
+                              <input
+                                className="input"
+                                defaultValue={p.pledger_email || ""}
+                                onBlur={(e) => {
+                                  const v = String(e.target.value || "");
+                                  if (v !== String(p.pledger_email || "")) upsertPledge(p.id, { pledger_email: v });
+                                } }
+                                disabled={pledgesBusy} />
+                            </div>
+                          </div>
 
-        <div className="bf-field">
-          <div className="bf-field-label">email</div>
-          <input
-            className="input"
-            defaultValue={p.pledger_email || ""}
-            onBlur={(e) => {
-              const v = String(e.target.value || "");
-              if (v !== String(p.pledger_email || "")) upsertPledge(p.id, { pledger_email: v });
-            }}
-            disabled={pledgesBusy}
-          />
-        </div>
-      </div>
+                          <div className="bf-field">
+                            <div className="bf-field-label">need</div>
+                            <div style={{ opacity: 0.9 }}>{needTitle(p.need_id) || ""}</div>
+                          </div>
 
-      <div className="bf-field">
-        <div className="bf-field-label">need</div>
-        <div style={{ opacity: 0.9 }}>{needTitle(p.need_id) || ""}</div>
-      </div>
+                          <div className="bf-two">
+                            <div className="bf-field">
+                              <div className="bf-field-label">type</div>
+                              <input
+                                className="input"
+                                defaultValue={p.type || ""}
+                                onBlur={(e) => {
+                                  const v = String(e.target.value || "");
+                                  if (v !== String(p.type || "")) upsertPledge(p.id, { type: v });
+                                } }
+                                disabled={pledgesBusy} />
+                            </div>
 
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">type</div>
-          <input
-            className="input"
-            defaultValue={p.type || ""}
-            onBlur={(e) => {
-              const v = String(e.target.value || "");
-              if (v !== String(p.type || "")) upsertPledge(p.id, { type: v });
-            }}
-            disabled={pledgesBusy}
-          />
-        </div>
+                            <div className="bf-field">
+                              <div className="bf-field-label">status</div>
+                              <select
+                                className="input"
+                                value={p.status || "offered"}
+                                onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
+                                disabled={pledgesBusy}
+                              >
+                                <option value="offered">offered</option>
+                                <option value="accepted">accepted</option>
+                                <option value="fulfilled">fulfilled</option>
+                                <option value="cancelled">cancelled</option>
+                              </select>
+                            </div>
+                          </div>
 
-        <div className="bf-field">
-          <div className="bf-field-label">status</div>
-          <select
-            className="input"
-            value={p.status || "offered"}
-            onChange={(e) => upsertPledge(p.id, { status: e.target.value })}
-            disabled={pledgesBusy}
-          >
-            <option value="offered">offered</option>
-            <option value="accepted">accepted</option>
-            <option value="fulfilled">fulfilled</option>
-            <option value="cancelled">cancelled</option>
-          </select>
-        </div>
-      </div>
+                          <div className="bf-two">
+                            <div className="bf-field">
+                              <div className="bf-field-label">amount</div>
+                              <input
+                                className="input"
+                                defaultValue={p.amount || ""}
+                                onBlur={(e) => {
+                                  const v = String(e.target.value || "");
+                                  if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
+                                } }
+                                disabled={pledgesBusy} />
+                            </div>
 
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">amount</div>
-          <input
-            className="input"
-            defaultValue={p.amount || ""}
-            onBlur={(e) => {
-              const v = String(e.target.value || "");
-              if (v !== String(p.amount || "")) upsertPledge(p.id, { amount: v });
-            }}
-            disabled={pledgesBusy}
-          />
-        </div>
+                            <div className="bf-field">
+                              <div className="bf-field-label">unit</div>
+                              <input
+                                className="input"
+                                defaultValue={p.unit || ""}
+                                onBlur={(e) => {
+                                  const v = String(e.target.value || "");
+                                  if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
+                                } }
+                                disabled={pledgesBusy} />
+                            </div>
+                          </div>
 
-        <div className="bf-field">
-          <div className="bf-field-label">unit</div>
-          <input
-            className="input"
-            defaultValue={p.unit || ""}
-            onBlur={(e) => {
-              const v = String(e.target.value || "");
-              if (v !== String(p.unit || "")) upsertPledge(p.id, { unit: v });
-            }}
-            disabled={pledgesBusy}
-          />
-        </div>
-      </div>
-
-      <div className="bf-field">
-        <div className="bf-field-label">note</div>
-        <div style={{ opacity: 0.85, overflowWrap: "anywhere" }}>{p.note || ""}</div>
-      </div>
-    </div>
-  ))}
-</div>
+                          <div className="bf-field">
+                            <div className="bf-field-label">note</div>
+                            <div style={{ opacity: 0.85, overflowWrap: "anywhere" }}>{p.note || ""}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div></>
               )}
               {subscribers.length > 200 ? (
                 <div className="helper" style={{ marginTop: 8 }}>
