@@ -731,12 +731,22 @@ export default function BondfireChat() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "280px 1fr",
+            gridTemplateColumns:
+              window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+                ? "1fr"
+                : "280px 1fr",
             gap: 12,
             marginTop: 12,
           }}
         >
-          <aside className="card" style={{ padding: 12, minHeight: 420 }}>
+
+          <aside
+            className="card"
+            style={{
+              padding: 12,
+              minHeight: 0,
+            }}
+          >
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -785,10 +795,15 @@ export default function BondfireChat() {
             style={{
               padding: 12,
               minHeight: 420,
+              height:
+                window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+                  ? "calc(100dvh - 220px)"
+                  : "auto",
               display: "flex",
               flexDirection: "column",
             }}
           >
+
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
