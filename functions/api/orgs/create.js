@@ -2,23 +2,29 @@ import { json, bad, now, uuid } from "../_lib/http.js";
 import { getDb, requireUser } from "../_lib/auth.js";
 
 async function ensureTables(db) {
-  // orgs + org_memberships already exist in schema, but in case you deploy to a fresh DB
-  // this keeps the endpoint from hard-failing.
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS orgs (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS org_memberships (
-      org_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (org_id, user_id)
-    );
-  `);
+  await db
+    .prepare(`
+      CREATE TABLE IF NOT EXISTS orgs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `)
+    .run();
+
+  await db
+    .prepare(`
+      CREATE TABLE IF NOT EXISTS org_memberships (
+        org_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (org_id, user_id)
+      )
+    `)
+    .run();
 }
+
 
 export async function onRequestPost({ request, env }) {
   if (!env.JWT_SECRET) return bad(500, "JWT_SECRET_MISSING");
