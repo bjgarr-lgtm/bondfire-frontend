@@ -1,5 +1,5 @@
 // src/pages/OrgDash.jsx
-import * as React from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 
 /* ---------- API helper ---------- */
@@ -29,23 +29,16 @@ function useIsMobile(maxWidthPx = 720) {
 }
 
 function getToken() {
-  return (
-    localStorage.getItem("bf_auth_token") ||
-    sessionStorage.getItem("bf_auth_token") ||
-    ""
-  );
+  return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
 }
 
 async function authFetch(path, opts = {}) {
   const token = getToken();
-
   const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 
-  // Invites are frequently hosted on Pages Functions even when the rest of the API is elsewhere.
-  // So we try same-origin first for invite endpoints, then fall back to API_BASE.
   const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
 
   const headers = {
@@ -61,17 +54,14 @@ async function authFetch(path, opts = {}) {
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok || j.ok === false) {
-      throw new Error(j.error || j.message || `HTTP ${res.status}`);
-    }
+    if (!res.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${res.status}`);
     return j;
   };
 
-  // Prefer local functions for invites.
   if (isInviteEndpoint && API_BASE && remote !== relative) {
     try {
       return await doReq(relative);
-    } catch (e) {
+    } catch {
       return await doReq(remote);
     }
   }
@@ -80,7 +70,6 @@ async function authFetch(path, opts = {}) {
     return await doReq(remote);
   } catch (e) {
     const msg = String(e?.message || "");
-    // fallback if remote isn't serving this path (or is borked)
     if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
       return await doReq(relative);
     }
@@ -120,13 +109,9 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
-      const r = await authFetch("/api/orgs/create", {
-        method: "POST",
-        body: { name },
-      });
+      const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
       setNewOrgName("");
       await load();
-      // jump straight into the org
       if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
     } catch (e2) {
       setMsg(e2.message || "Failed to create org");
@@ -142,10 +127,7 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
-      const r = await authFetch("/api/invites/redeem", {
-        method: "POST",
-        body: { code },
-      });
+      const r = await authFetch("/api/invites/redeem", { method: "POST", body: { code } });
       setInviteCode("");
       await load();
       if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
@@ -160,9 +142,7 @@ export default function OrgDash() {
   return (
     <div style={{ padding: 16 }}>
       <h1 style={{ marginTop: 0 }}>Org Dashboard</h1>
-      <p className="helper">
-        Choose an organization to enter its workspace, or create or join one.
-      </p>
+      <p className="helper">Choose an organization to enter its workspace, or create or join one.</p>
 
       <div
         className="grid"
@@ -225,9 +205,7 @@ export default function OrgDash() {
         )}
 
         {orgs.length === 0 ? (
-          <div className="helper" style={{ marginTop: 12 }}>
-            No orgs yet.
-          </div>
+          <div className="helper" style={{ marginTop: 12 }}>No orgs yet.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {orgs.map((o) => (
@@ -249,11 +227,7 @@ export default function OrgDash() {
                   </div>
                   <div className="helper">Role: {o.role || "member"}</div>
                 </div>
-                <button
-                  className="btn-red"
-                  style={{ whiteSpace: "nowrap" }}
-                  onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}
-                >
+                <button className="btn-red" style={{ whiteSpace: "nowrap" }} onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}>
                   Open
                 </button>
               </div>
