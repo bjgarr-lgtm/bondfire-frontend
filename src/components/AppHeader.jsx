@@ -1,6 +1,6 @@
 // src/components/AppHeader.jsx
 import React from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
 function useOrgIdFromPath() {
   const loc = useLocation();
@@ -107,6 +107,13 @@ export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
   const orgId = useOrgIdFromPath();
+  const nav = useNavigate();
+
+  const goAllOrgs = () => {
+    setMobileOpen(false);
+    nav("/orgs");
+  };
+
 
   // Debug toggle: add ?debugNav=1 to URL
   const debugNav =
@@ -221,6 +228,18 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           {showLogout ? (
+            <button
+              className="bf-logout"
+              type="button"
+              onClick={goAllOrgs}
+              title="All Orgs"
+            >
+              All Orgs
+            </button>
+          ) : null}
+
+
+          {showLogout ? (
             <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
               Logout
             </button>
@@ -265,6 +284,17 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           <OrgNav variant="drawer" />
+
+          {showLogout ? (
+            <button
+              className="bf-drawer-logout"
+              type="button"
+              onClick={goAllOrgs}
+              style={{ marginTop: 14, width: "100%" }}
+            >
+              All Orgs
+            </button>
+          ) : null}
 
           {showLogout ? (
             <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
