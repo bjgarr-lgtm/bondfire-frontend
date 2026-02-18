@@ -241,7 +241,7 @@ export default function AppHeader({ onLogout, showLogout }) {
 
           {showLogout ? (
             <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
-              Logout
+              Logout_123
             </button>
           ) : null}
 
