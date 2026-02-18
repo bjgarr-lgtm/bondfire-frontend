@@ -80,43 +80,6 @@ function logoutEverywhere() {
   window.location.reload();
 }
 
-/* ------------------------------ Floating Logout ------------------------------ */
-/** Renders a small logout button near the header brand (left side),
- *  and hides itself on pages where the header is hidden. */
-function GlobalLogoutButton() {
-  const loc = useLocation();
-  const token = getToken();
-
-  // pages where we don't show header or the button
-  const path = loc.pathname || "/";
-  const hide =
-    path === "/" || path === "/orgs" || path.startsWith("/p/") || path === "/signin";
-
-  if (!token || hide) return null;
-
-  // Nudge to the right of the brand area so it doesn't overlap the logo
-  const btnStyle = {
-    position: "fixed",
-    top: 10,
-    left: 140, // <- adjust if your brand is wider/narrower
-    zIndex: 1000,
-    padding: "6px 10px",
-    fontSize: 12,
-    borderRadius: 8,
-    background: "#111",
-    color: "#eee",
-    border: "1px solid #333",
-    cursor: "pointer",
-    opacity: 0.9,
-  };
-
-  return (
-    <button title="Logout" style={btnStyle} onClick={logoutEverywhere}>
-      Logout_123
-    </button>
-  );
-}
-
 /* ---------------------------------- Shell ---------------------------------- */
 function Shell() {
   const loc = useLocation();
@@ -132,8 +95,13 @@ function Shell() {
 
   return (
     <>
-      {!hideHeader && <AppHeader />}
-      <GlobalLogoutButton />
+      {!hideHeader && (
+        <AppHeader
+          showLogout={hasAuth}
+          onLogout={logoutEverywhere}
+        />
+      )}
+
 
       <Routes>
         {/* PUBLIC */}

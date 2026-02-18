@@ -15,6 +15,14 @@ function useOrgIdFromPath() {
   return raw ? decodeURIComponent(raw) : null;
 }
 
+function goToOrgDash() {
+  // Works for BOTH BrowserRouter and HashRouter
+  if (typeof window !== "undefined") {
+    window.location.hash = "#/orgs";
+  }
+}
+
+
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgIdFromPath();
   const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
@@ -240,10 +248,24 @@ export default function AppHeader({ onLogout, showLogout }) {
 
 
           {showLogout ? (
-            <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
-              Logout_123
-            </button>
+            <>
+              {orgId ? (
+                <button
+                  className="bf-logout"
+                  type="button"
+                  onClick={goToOrgDash}
+                  title="All Orgs"
+                >
+                  All Orgs
+                </button>
+              ) : null}
+
+              <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
+                Logout
+              </button>
+            </>
           ) : null}
+
 
           <button
             className="bf-hamburger"
