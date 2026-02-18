@@ -112,7 +112,7 @@ function GlobalLogoutButton() {
 
   return (
     <button title="Logout" style={btnStyle} onClick={logoutEverywhere}>
-      Logout
+      Logout_123
     </button>
   );
 }
