@@ -236,18 +236,6 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           {showLogout ? (
-            <button
-              className="bf-logout"
-              type="button"
-              onClick={goAllOrgs}
-              title="All Orgs"
-            >
-              All Orgs
-            </button>
-          ) : null}
-
-
-          {showLogout ? (
             <>
               {orgId ? (
                 <button
