@@ -308,17 +308,6 @@ export default function AppHeader({ onLogout, showLogout }) {
           <OrgNav variant="drawer" />
 
           {showLogout ? (
-            <button
-              className="bf-drawer-logout"
-              type="button"
-              onClick={goAllOrgs}
-              style={{ marginTop: 14, width: "100%" }}
-            >
-              All Orgs
-            </button>
-          ) : null}
-
-          {showLogout ? (
             <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
               Logout
             </button>
