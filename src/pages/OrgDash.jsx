@@ -87,6 +87,26 @@ export default function OrgDash() {
 
   const [newOrgName, setNewOrgName] = React.useState("");
   const [inviteCode, setInviteCode] = React.useState("");
+  const deleteOrg = async (org) => {
+    const id = org?.id;
+    if (!id) return;
+
+    const name = org?.name || id;
+    const ok = window.confirm(`Delete org "${name}"?\n\nThis cannot be undone.`);
+    if (!ok) return;
+
+    setBusy(true);
+    setMsg("");
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await load();
+      setMsg(`Deleted "${name}".`);
+    } catch (e) {
+      setMsg(e?.message || "Failed to delete org");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = React.useCallback(async () => {
     setMsg("");
@@ -227,9 +247,27 @@ export default function OrgDash() {
                   </div>
                   <div className="helper">Role: {o.role || "member"}</div>
                 </div>
-                <button className="btn-red" style={{ whiteSpace: "nowrap" }} onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}>
-                  Open
-                </button>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    className="btn-red"
+                    style={{ whiteSpace: "nowrap" }}
+                    onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}
+                    disabled={busy}
+                  >
+                    Open
+                  </button>
+
+                  <button
+                    className="btn"
+                    style={{ whiteSpace: "nowrap" }}
+                    onClick={() => deleteOrg(o)}
+                    disabled={busy}
+                    title="Delete this org"
+                  >
+                    Delete
+                  </button>
+                </div>
+
               </div>
             ))}
           </div>

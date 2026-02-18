@@ -147,6 +147,11 @@ input[type="file"]{padding:6px}
   flex-wrap: nowrap;
 }
 
+.bf-appnav-link-btn {
+  cursor: pointer;
+}
+
+
 .bf-appnav-link{
   display: inline-flex;
   align-items: center;

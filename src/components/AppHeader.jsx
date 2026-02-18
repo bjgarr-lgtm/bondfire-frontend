@@ -43,6 +43,14 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
 };
 
 function OrgNav({ variant = "desktop" }) {
+  <NavLink
+    to="/orgs"
+    className={({ isActive }) => `bf-appnav-link${isActive ? " is-active" : ""}`}
+    title="All orgs"
+  >
+    All Orgs
+  </NavLink>
+
   const orgId = useOrgIdFromPath();
   if (!orgId) return null;
 
@@ -110,6 +118,8 @@ function OrgNav({ variant = "desktop" }) {
     </nav>
   );
 }
+
+
 
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -236,23 +246,16 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           {showLogout ? (
-            <>
-              {orgId ? (
-                <button
-                  className="bf-logout"
-                  type="button"
-                  onClick={goToOrgDash}
-                  title="All Orgs"
-                >
-                  All Orgs
-                </button>
-              ) : null}
-
-              <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
-                Logout
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="bf-appnav-link bf-appnav-link-btn"
+              title="Logout"
+            >
+              Logout
+            </button>
           ) : null}
+
 
 
           <button
