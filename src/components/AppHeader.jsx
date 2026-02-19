@@ -1,6 +1,6 @@
 // src/components/AppHeader.jsx
 import React from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 function useOrgIdFromPath() {
   const loc = useLocation();
@@ -14,14 +14,6 @@ function useOrgIdFromPath() {
   const raw = (m1 && m1[1]) || (m2 && m2[1]) || null;
   return raw ? decodeURIComponent(raw) : null;
 }
-
-function goToOrgDash() {
-  // Works for BOTH BrowserRouter and HashRouter
-  if (typeof window !== "undefined") {
-    window.location.hash = "#/orgs";
-  }
-}
-
 
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgIdFromPath();
@@ -129,19 +121,9 @@ function OrgNav({ variant = "desktop" }) {
   );
 }
 
-
-
 export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
-  const orgId = useOrgIdFromPath();
-  const nav = useNavigate();
-
-  const goAllOrgs = () => {
-    setMobileOpen(false);
-    nav("/orgs");
-  };
-
 
   // Debug toggle: add ?debugNav=1 to URL
   const debugNav =
@@ -150,50 +132,6 @@ export default function AppHeader({ onLogout, showLogout }) {
 
   React.useEffect(() => setMobileOpen(false), [loc.pathname, loc.hash]);
 
-  const [diag, setDiag] = React.useState(null);
-
-  React.useEffect(() => {
-    if (!debugNav) return;
-
-    const t = setInterval(() => {
-      const drawer = document.querySelector(".bf-drawer");
-      const panel = document.querySelector(".bf-drawer-panel");
-      const nav = document.querySelector(".bf-drawer-panel nav[data-bf-orgnav='drawer']");
-      const link = document.querySelector(".bf-drawer-panel a");
-
-      const panelCS = panel ? window.getComputedStyle(panel) : null;
-      const linkCS = link ? window.getComputedStyle(link) : null;
-      const linkRect = link ? link.getBoundingClientRect() : null;
-
-      setDiag({
-        orgId,
-        pathname: loc.pathname,
-        hash: loc.hash,
-        mobileOpen,
-        drawerFound: !!drawer,
-        panelFound: !!panel,
-        navFound: !!nav,
-        linkFound: !!link,
-        panelDisplay: panelCS ? panelCS.display : null,
-        panelVisibility: panelCS ? panelCS.visibility : null,
-        panelOpacity: panelCS ? panelCS.opacity : null,
-        panelTransform: panelCS ? panelCS.transform : null,
-        panelZ: panelCS ? panelCS.zIndex : null,
-        linkDisplay: linkCS ? linkCS.display : null,
-        linkVisibility: linkCS ? linkCS.visibility : null,
-        linkOpacity: linkCS ? linkCS.opacity : null,
-        linkColor: linkCS ? linkCS.color : null,
-        linkBG: linkCS ? linkCS.backgroundColor : null,
-        linkRect: linkRect
-          ? { x: linkRect.x, y: linkRect.y, w: linkRect.width, h: linkRect.height }
-          : null,
-      });
-    }, 500);
-
-    return () => clearInterval(t);
-  }, [debugNav, orgId, loc.pathname, loc.hash, mobileOpen]);
-
-  // Inline forced drawer styles so CSS can't make it invisible/offscreen.
   const drawerStyle = {
     position: "fixed",
     inset: 0,
@@ -256,22 +194,10 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           {showLogout ? (
-            <>
-              <button
-                className="bf-logout"
-                type="button"
-                onClick={goToOrgDash}
-                title="All Orgs"
-              >
-                All Orgs
-              </button>
-
-              <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
-                Logout
-              </button>
-            </>
+            <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
+              Logout
+            </button>
           ) : null}
-
 
           <button
             className="bf-hamburger"
@@ -285,11 +211,13 @@ export default function AppHeader({ onLogout, showLogout }) {
         </div>
       </header>
 
-      {/* Drawer lives outside header so nothing in header layout can clip it */}
       <div className="bf-drawer" style={drawerStyle} role="dialog" aria-modal="true">
         <div style={backdropStyle} onClick={() => setMobileOpen(false)} />
         <div className="bf-drawer-panel" style={panelStyle}>
-          <div className="bf-drawer-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div
+            className="bf-drawer-top"
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+          >
             <div className="bf-drawer-title" style={{ fontWeight: 800, letterSpacing: ".3px" }}>
               Menu
             </div>
@@ -314,17 +242,19 @@ export default function AppHeader({ onLogout, showLogout }) {
           <OrgNav variant="drawer" />
 
           {showLogout ? (
-            <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
+            <button
+              className="bf-drawer-logout"
+              type="button"
+              onClick={onLogout}
+              style={{ marginTop: 14, width: "100%" }}
+            >
               Logout
             </button>
           ) : null}
         </div>
       </div>
 
-      {/* Always visible debug overlay */}
-      {debugNav ? (
-        <pre style={debugOverlayStyle}>{JSON.stringify(diag, null, 2)}</pre>
-      ) : null}
+      {debugNav ? <pre style={debugOverlayStyle}>{JSON.stringify({ pathname: loc.pathname, hash: loc.hash }, null, 2)}</pre> : null}
     </>
   );
 }

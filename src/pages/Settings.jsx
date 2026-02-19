@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import PublicPage from "./PublicPage.jsx";
+import Security from "./Security.jsx";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -131,6 +132,7 @@ export default function Settings() {
       ["public", "Public page"],
       ["newsletter", "Newsletter"],
       ["pledges", "Pledges"],
+      ["security", "Security"],
     ],
     []
   );
@@ -783,6 +785,15 @@ React.useEffect(() => {
           })}
         </div>
       </div>
+
+      {/* Security */}
+      {tab === "security" && (
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Security</h2>
+          <p className="helper">Account security is global, but lives here so you can actually find it.</p>
+          <Security />
+        </div>
+      )}
 
       {/* Organization */}
       {tab === "org" && (
