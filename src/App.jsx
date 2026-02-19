@@ -22,6 +22,7 @@ import Needs from "./pages/Needs.jsx";
 import Settings from "./pages/Settings.jsx";
 import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
+import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
@@ -118,6 +119,16 @@ function Shell() {
           element={
             <RequireAuth>
               <OrgDash />
+            </RequireAuth>
+          }
+        />
+
+        {/* User security (auth-gated) */}
+        <Route
+          path="/security"
+          element={
+            <RequireAuth>
+              <Security />
             </RequireAuth>
           }
         />

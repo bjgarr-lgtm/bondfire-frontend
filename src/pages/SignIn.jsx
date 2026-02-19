@@ -12,6 +12,10 @@ export default function SignIn() {
 
   const [inviteCode, setInviteCode] = useState("");
 
+  const [mfaStep, setMfaStep] = useState(null); // null | { challengeId, email }
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRecovery, setMfaRecovery] = useState("");
+
   const [name, setName] = useState("");
   const [orgName, setOrgName] = useState("Bondfire");
 
@@ -38,6 +42,14 @@ async function handleSubmit(e) {
     });
 
     const data = await res.json().catch(() => ({}));
+
+    // MFA challenge flow
+    if (mode === "login" && res.ok && data?.ok && data?.mfa_required && data?.challenge_id) {
+      setMfaStep({ challengeId: data.challenge_id, email });
+      setBusy(false);
+      return;
+    }
+
     if (!res.ok || !data?.ok || !data?.token) {
       throw new Error(
         data?.error || (mode === "register" ? "Register failed" : "Login failed")
@@ -91,6 +103,48 @@ async function handleSubmit(e) {
     setBusy(false);
   }
 }
+
+async function handleMfaVerify(e) {
+  e.preventDefault();
+  setErr("");
+  setBusy(true);
+  try {
+    const res = await fetch("/api/auth/login/mfa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        challenge_id: mfaStep?.challengeId,
+        code: mfaCode,
+        recovery_code: mfaRecovery,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok || !data?.token) {
+      throw new Error(data?.error || "MFA failed");
+    }
+
+    localStorage.setItem("bf_auth_token", data.token);
+    sessionStorage.removeItem("bf_auth_token");
+
+    // Load org memberships
+    const orgsRes = await fetch("/api/orgs", {
+      headers: { Authorization: `Bearer ${data.token}` },
+    });
+    const orgsData = await orgsRes.json().catch(() => ({}));
+    if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {
+      localStorage.setItem("bf_orgs", JSON.stringify(orgsData.orgs));
+    }
+
+    setMfaStep(null);
+    setMfaCode("");
+    setMfaRecovery("");
+    navigate("/orgs", { replace: true });
+  } catch (e) {
+    setErr(typeof e === "string" ? e : (e?.message || "MFA failed"));
+  } finally {
+    setBusy(false);
+  }
+}
   return (
     <div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
       <h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
@@ -120,7 +174,43 @@ async function handleSubmit(e) {
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid" style={{ gap: 10, marginTop: 12 }}>
+      {mfaStep ? (
+        <form onSubmit={handleMfaVerify} className="grid" style={{ gap: 10, marginTop: 12 }}>
+          <div className="helper">
+            MFA required for <b>{mfaStep.email}</b>. Enter your authenticator code or a recovery code.
+          </div>
+
+          <input
+            className="input"
+            type="text"
+            placeholder="Authenticator code (6 digits)"
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value)}
+            autoFocus
+          />
+
+          <input
+            className="input"
+            type="text"
+            placeholder="Recovery code (optional)"
+            value={mfaRecovery}
+            onChange={(e) => setMfaRecovery(e.target.value)}
+          />
+
+          <button className="btn-red" disabled={busy}>
+            {busy ? "Verifying…" : "Verify"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => { setMfaStep(null); setMfaCode(""); setMfaRecovery(""); }}
+          >
+            Back
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleSubmit} className="grid" style={{ gap: 10, marginTop: 12 }}>
         {mode === "register" && (
           <>
             <input
@@ -174,7 +264,8 @@ async function handleSubmit(e) {
         <button className="btn-red" disabled={busy}>
           {busy ? "Working" : (mode === "login" ? "Sign in" : "Create account")}
         </button>
-      </form>
+        </form>
+      )}
 
       {err && (
         <div className="helper" style={{ color: "tomato", marginTop: 10 }}>

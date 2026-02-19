@@ -258,6 +258,15 @@ export default function AppHeader({ onLogout, showLogout }) {
                 </button>
               ) : null}
 
+              <NavLink
+                to="/security"
+                className={() => "bf-logout"}
+                title="Security"
+                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              >
+                Security
+              </NavLink>
+
               <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
                 Logout
               </button>
@@ -304,6 +313,27 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           <OrgNav variant="drawer" />
+
+          {showLogout ? (
+            <NavLink
+              to="/security"
+              onClick={() => setMobileOpen(false)}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: "#fff",
+                fontWeight: 700,
+                textDecoration: "none",
+                marginTop: 10,
+              }}
+            >
+              Security
+            </NavLink>
+          ) : null}
 
           {showLogout ? (
             <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
