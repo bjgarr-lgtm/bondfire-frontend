@@ -1,23 +1,25 @@
-// functions/api/_lib/crypto.js
-// Worker-compatible helpers (no Node APIs).
-// - Base32 (RFC 4648) decode/encode
-// - TOTP verify (RFC 6238) using HMAC-SHA1
-// - AES-GCM encrypt/decrypt for small secrets (like TOTP secret) at rest
-// - sha256Hex helper
+// Cloudflare Pages Functions helper crypto utilities
+// - AES-GCM encrypt/decrypt for storing secrets at rest
+// - TOTP (RFC 6238) verify with clock-skew window
 
+const te = new TextEncoder();
+const td = new TextDecoder();
+
+/* ---------------- base32 (RFC 4648) ---------------- */
 const B32_ALPH = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-export function randomBase32(bytes = 20) {
-  const raw = crypto.getRandomValues(new Uint8Array(bytes));
-  return base32Encode(raw);
+export function randomBase32(byteLen = 20) {
+  const bytes = new Uint8Array(byteLen);
+  crypto.getRandomValues(bytes);
+  return bytesToBase32(bytes);
 }
 
-export function base32Encode(u8) {
+export function bytesToBase32(bytes) {
   let bits = 0;
   let value = 0;
   let out = "";
-  for (let i = 0; i < u8.length; i++) {
-    value = (value << 8) | u8[i];
+  for (const b of bytes) {
+    value = (value << 8) | b;
     bits += 8;
     while (bits >= 5) {
       out += B32_ALPH[(value >>> (bits - 5)) & 31];
@@ -28,14 +30,18 @@ export function base32Encode(u8) {
   return out;
 }
 
-export function base32Decode(str) {
-  const s = String(str || "").trim().replace(/=+$/g, "").toUpperCase();
+export function base32ToBytes(b32) {
+  const clean = String(b32 || "")
+    .toUpperCase()
+    .replace(/=+$/g, "")
+    .replace(/[^A-Z2-7]/g, "");
+
   let bits = 0;
   let value = 0;
   const out = [];
-  for (let i = 0; i < s.length; i++) {
-    const idx = B32_ALPH.indexOf(s[i]);
-    if (idx === -1) continue; // ignore whitespace/invalid
+  for (const ch of clean) {
+    const idx = B32_ALPH.indexOf(ch);
+    if (idx < 0) continue;
     value = (value << 5) | idx;
     bits += 5;
     if (bits >= 8) {
@@ -46,92 +52,100 @@ export function base32Decode(str) {
   return new Uint8Array(out);
 }
 
-function utf8(s) {
-  return new TextEncoder().encode(String(s));
-}
-
-async function importAesKey(keyMaterial) {
-  const hash = await crypto.subtle.digest("SHA-256", utf8(keyMaterial));
-  return crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
-}
-
-export async function aesGcmEncrypt(keyMaterial, plaintext) {
-  // Returns base64(iv || ciphertext)
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await importAesKey(keyMaterial);
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, utf8(plaintext));
-  const out = new Uint8Array(iv.length + ct.byteLength);
-  out.set(iv, 0);
-  out.set(new Uint8Array(ct), iv.length);
-  return b64(out);
-}
-
-export async function aesGcmDecrypt(keyMaterial, payloadB64) {
-  const raw = fromB64(payloadB64);
-  if (raw.length < 13) throw new Error("BAD_PAYLOAD");
-  const iv = raw.slice(0, 12);
-  const ct = raw.slice(12);
-  const key = await importAesKey(keyMaterial);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
-  return new TextDecoder().decode(pt);
-}
-
+/* ---------------- hashing ---------------- */
 export async function sha256Hex(input) {
-  const buf = await crypto.subtle.digest("SHA-256", utf8(input));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+  const buf = await crypto.subtle.digest("SHA-256", te.encode(String(input)));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function b64(u8) {
-  let bin = "";
-  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
-  return btoa(bin);
+/* ---------------- AES-GCM for at-rest secrets ---------------- */
+async function importAesKeyFromString(secret) {
+  // Derive a stable 256-bit key from an env string.
+  const digest = await crypto.subtle.digest("SHA-256", te.encode(String(secret || "")));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
 
-function fromB64(s) {
-  const bin = atob(String(s || ""));
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+export async function aesGcmEncrypt(plaintext, secretString) {
+  const key = await importAesKeyFromString(secretString);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, te.encode(String(plaintext)));
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  return {
+    v: 1,
+    iv: b64(iv),
+    ct: b64(new Uint8Array(ct)),
+  };
 }
 
+export async function aesGcmDecrypt(encObj, secretString) {
+  const key = await importAesKeyFromString(secretString);
+  const fromB64 = (s) => new Uint8Array(atob(String(s)).split("").map((c) => c.charCodeAt(0)));
+  const iv = fromB64(encObj?.iv);
+  const ct = fromB64(encObj?.ct);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+  return td.decode(pt);
+}
+
+/* ---------------- TOTP (RFC 6238) ---------------- */
 async function hmacSha1(keyBytes, msgBytes) {
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"]
+  );
   const sig = await crypto.subtle.sign("HMAC", key, msgBytes);
   return new Uint8Array(sig);
 }
 
 function counterBytes(counter) {
-  const out = new Uint8Array(8);
+  // 8-byte big-endian
+  const buf = new Uint8Array(8);
   let x = BigInt(counter);
   for (let i = 7; i >= 0; i--) {
-    out[i] = Number(x & 0xffn);
+    buf[i] = Number(x & 0xffn);
     x >>= 8n;
   }
-  return out;
+  return buf;
 }
 
-function dt(sig) {
-  const offset = sig[sig.length - 1] & 0x0f;
-  const p = ((sig[offset] & 0x7f) << 24) |
-            ((sig[offset + 1] & 0xff) << 16) |
-            ((sig[offset + 2] & 0xff) << 8) |
-            (sig[offset + 3] & 0xff);
-  return p >>> 0;
+async function totpAt(secretB32, counter, digits = 6) {
+  const keyBytes = base32ToBytes(secretB32);
+  const msg = counterBytes(counter);
+  const h = await hmacSha1(keyBytes, msg);
+  const offset = h[h.length - 1] & 0x0f;
+  const bin =
+    ((h[offset] & 0x7f) << 24) |
+    (h[offset + 1] << 16) |
+    (h[offset + 2] << 8) |
+    h[offset + 3];
+  const mod = 10 ** digits;
+  const code = (bin % mod).toString().padStart(digits, "0");
+  return code;
 }
 
-export async function totpVerify(base32Secret, code, { step = 30, digits = 6, window = 1, now = Date.now() } = {}) {
-  const secret = base32Decode(base32Secret);
-  const c = String(code || "").replace(/\s+/g, "");
-  if (!/^\d+$/.test(c)) return false;
+export async function totpVerify(secretB32, code, opts = {}) {
+  const digits = opts.digits ?? 6;
+  const step = opts.step ?? 30;
+  const window = opts.window ?? 1; // accept ±1 step by default
 
-  const t = Math.floor(now / 1000 / step);
+  const cleanCode = String(code || "").replace(/\s+/g, "");
+  if (!/^[0-9]{6,8}$/.test(cleanCode)) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  const counter = Math.floor(now / step);
 
   for (let w = -window; w <= window; w++) {
-    const ctr = counterBytes(t + w);
-    const sig = await hmacSha1(secret, ctr);
-    const bin = dt(sig);
-    const otp = String(bin % (10 ** digits)).padStart(digits, "0");
-    if (otp === c) return true;
+    const expected = await totpAt(secretB32, counter + w, digits);
+    if (timingSafeEqual(expected, cleanCode)) return true;
   }
   return false;
+}
+
+function timingSafeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
 }
