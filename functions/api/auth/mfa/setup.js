@@ -1,29 +1,48 @@
-import { ok, bad } from "../../_lib/http.js";
-import { requireUser } from "../../_lib/auth.js";
+import { ok, err, requireMethod, now } from "../../_lib/http.js";
+import { getDb, requireUser } from "../../_lib/auth.js";
 import { randomBase32, aesGcmEncrypt } from "../../_lib/crypto.js";
 
-export async function onRequestPost({ env, request }) {
-  const u = await requireUser({ env, request });
-  if (!u.ok) return u.resp;
+export async function onRequest(context) {
+  const { request, env } = context;
+  const m = requireMethod(request, "POST");
+  if (m) return m;
 
-  const userId = String(u.user.sub);
-  const issuer = String(env.TOTP_ISSUER || "Bondfire");
+  try {
+    const u = await requireUser({ env, request });
+    if (!u.ok) return u.resp;
 
-  const secret = randomBase32(20);
-  const encKey = env.MFA_ENC_KEY || env.JWT_SECRET;
-  const enc = await aesGcmEncrypt(encKey, secret);
+    const db = getDb(env);
+    if (!db) return err(500, "NO_DB_BINDING");
 
-  // Upsert row; keep disabled until confirmed.
-  await env.BF_DB.prepare(
-    "INSERT INTO user_mfa (user_id, totp_secret_encrypted, mfa_enabled, created_at) VALUES (?, ?, 0, ?) " +
-      "ON CONFLICT(user_id) DO UPDATE SET totp_secret_encrypted = excluded.totp_secret_encrypted, mfa_enabled = 0"
-  ).bind(userId, enc, Date.now()).run();
+    const encKey = env.MFA_ENC_KEY || env.JWT_SECRET;
+    if (!encKey) return err(500, "MFA_KEY_MISSING");
 
-  const email = String(u.user.email || "");
-  const label = encodeURIComponent(email || userId);
-  const iss = encodeURIComponent(issuer);
-  const uri = `otpauth://totp/${iss}:${label}?secret=${secret}&issuer=${iss}&algorithm=SHA1&digits=6&period=30`;
+    // 20 bytes -> base32 secret typically used for TOTP
+    const secret = randomBase32(20);
+    const encObj = await aesGcmEncrypt(secret, encKey);
+    const encStr = JSON.stringify(encObj);
 
-  // The secret is included so the client can render a QR code.
-  return ok({ uri, secret });
+    const ts = now();
+    await db
+      .prepare(
+        `INSERT INTO user_mfa (user_id, totp_secret_encrypted, mfa_enabled, created_at)
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           totp_secret_encrypted = excluded.totp_secret_encrypted,
+           mfa_enabled = 0`
+      )
+      .bind(u.user.sub, encStr, ts)
+      .run();
+
+    const issuer = env.TOTP_ISSUER || "Bondfire";
+    const label = u.user.email || u.user.sub;
+    const otpauth = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(
+      label
+    )}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+
+    return ok({ secret, otpauth });
+  } catch (e) {
+    console.error("mfa/setup error", e);
+    return err(500, "MFA_SETUP_FAILED", { detail: String(e?.message || e) });
+  }
 }
