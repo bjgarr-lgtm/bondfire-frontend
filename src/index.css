@@ -721,6 +721,22 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   line-height: 1.35;
 }
 
+.bf-public-subRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bf-public-subLinks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .bf-public-heroRight {
   display: flex;
   align-items: flex-start;
@@ -732,10 +748,31 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
 
 .bf-public-newsletterInline {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+.bf-public-newsletterRow {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.bf-public-newsletterFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bf-public-newsletterInput {
+  width: 240px;
+}
+
+.bf-public-newsletterBtn {
+  min-height: 88px; /* match two stacked inputs */
+  white-space: nowrap;
 }
 
 .bf-public-linksInline {
@@ -815,6 +852,14 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     font-size: 14px;
   }
 
+  .bf-public-subRow {
+    align-items: flex-start;
+  }
+
+  .bf-public-subLinks {
+    justify-content: flex-start;
+  }
+
   /* Put newsletter and website into a clean second row */
   .bf-public-heroRight {
     max-width: none;
@@ -824,6 +869,17 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
   .bf-public-newsletterInline {
     width: 100%;
     justify-content: flex-start;
+    align-items: flex-start;
+  }
+
+  .bf-public-newsletterRow {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bf-public-newsletterFields {
+    width: 100%;
   }
 
   /* Make the inline newsletter form usable on phones */
@@ -832,8 +888,16 @@ a.btn-red:hover, .topnav a:hover, .bf-link.btn-red:hover { filter:brightness(1.1
     min-width: 120px;
   }
 
+  .bf-public-newsletterInput {
+    width: 100%;
+  }
+
   .bf-public-newsletterInline .bf-btn {
     width: 100%;
+  }
+
+  .bf-public-newsletterBtn {
+    min-height: 40px;
   }
 
   /* “What we do” pills: 2 columns on mobile */

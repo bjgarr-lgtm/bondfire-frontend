@@ -400,13 +400,33 @@ export default function PublicPage(props) {
                 {pubCfg?.title || orgInfo.name || slug || "Public Page"}
               </h1>
 
-              {pubCfg?.about ? (
-                <p className="bf-public-sub">{pubCfg.about}</p>
-              ) : (
-                <p className="bf-public-sub" style={{ opacity: 0.75 }}>
-                  A public page for this org.
-                </p>
-              )}
+              <div className="bf-public-subRow">
+                {pubCfg?.about ? (
+                  <p className="bf-public-sub">{pubCfg.about}</p>
+                ) : (
+                  <p className="bf-public-sub" style={{ opacity: 0.75 }}>
+                    A public page for this org.
+                  </p>
+                )}
+
+                {headerLinks.length > 0 ? (
+                  <div className="bf-public-subLinks">
+                    {headerLinks.map((l, i) => (
+                      <a
+                        key={`${l.url}-${i}`}
+                        className="bf-btn bf-public-linkPill"
+                        href={l.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={l.url}
+                        style={{ textDecoration: "none" }}
+                      >
+                        {l.text} <span style={{ opacity: 0.8 }}>↗</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -415,43 +435,29 @@ export default function PublicPage(props) {
               <div className="bf-public-newsletterInline">
                 <div className="bf-public-newsletterLabel">newsletter signup</div>
 
-                <input
-                  className="bf-input bf-public-newsletterInput"
-                  value={nlName}
-                  onChange={(e) => setNlName(e.target.value)}
-                  placeholder="name"
-                />
+                <div className="bf-public-newsletterRow">
+                  <div className="bf-public-newsletterFields">
+                    <input
+                      className="bf-input bf-public-newsletterInput"
+                      value={nlName}
+                      onChange={(e) => setNlName(e.target.value)}
+                      placeholder="name"
+                    />
 
-                <input
-                  className="bf-input bf-public-newsletterInput"
-                  value={nlEmail}
-                  onChange={(e) => setNlEmail(e.target.value)}
-                  placeholder="email"
-                />
+                    <input
+                      className="bf-input bf-public-newsletterInput"
+                      value={nlEmail}
+                      onChange={(e) => setNlEmail(e.target.value)}
+                      placeholder="email"
+                    />
+                  </div>
 
-                <button className="bf-btn bf-btn-red bf-public-newsletterBtn" type="button" onClick={subscribe}>
-                  subscribe
-                </button>
+                  <button className="bf-btn bf-btn-red bf-public-newsletterBtn" type="button" onClick={subscribe}>
+                    subscribe
+                  </button>
+                </div>
 
                 {nlMsg ? <div className="bf-public-newsletterMsg">{nlMsg}</div> : null}
-              </div>
-            ) : null}
-
-            {headerLinks.length > 0 ? (
-              <div className="bf-public-linksInline">
-                {headerLinks.map((l, i) => (
-                  <a
-                    key={`${l.url}-${i}`}
-                    className="bf-btn bf-public-linkPill"
-                    href={l.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={l.url}
-                    style={{ textDecoration: "none" }}
-                  >
-                    {l.text} <span style={{ opacity: 0.8 }}>↗</span>
-                  </a>
-                ))}
               </div>
             ) : null}
           </div>
