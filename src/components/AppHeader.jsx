@@ -43,27 +43,7 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
 };
 
 function OrgNav({ variant = "desktop" }) {
-  <NavLink
-    to="/orgs"
-    className={({ isActive }) => `bf-appnav-link${isActive ? " is-active" : ""}`}
-    title="All orgs"
-  >
-    All Orgs
-  </NavLink>
-
   const orgId = useOrgIdFromPath();
-  if (!orgId) return null;
-
-  const base = `/org/${orgId}`;
-  const items = [
-    ["Dashboard", `${base}/overview`],
-    ["People", `${base}/people`],
-    ["Inventory", `${base}/inventory`],
-    ["Needs", `${base}/needs`],
-    ["Meetings", `${base}/meetings`],
-    ["Settings", `${base}/settings`],
-    ["Chat", `${base}/chat`],
-  ];
 
   const isDrawer = variant === "drawer";
 
@@ -90,6 +70,19 @@ function OrgNav({ variant = "desktop" }) {
       }
     : undefined;
 
+  const base = orgId ? `/org/${orgId}` : null;
+  const items = base
+    ? [
+        ["Dashboard", `${base}/overview`],
+        ["People", `${base}/people`],
+        ["Inventory", `${base}/inventory`],
+        ["Needs", `${base}/needs`],
+        ["Meetings", `${base}/meetings`],
+        ["Settings", `${base}/settings`],
+        ["Chat", `${base}/chat`],
+      ]
+    : [];
+
   return (
     <nav
       className={`bf-appnav${isDrawer ? " is-drawer" : ""}`}
@@ -97,6 +90,23 @@ function OrgNav({ variant = "desktop" }) {
       style={drawerNavStyle}
       data-bf-orgnav={isDrawer ? "drawer" : "desktop"}
     >
+      <NavLink
+        to="/orgs"
+        style={({ isActive }) =>
+          isDrawer
+            ? {
+                ...drawerLinkStyle,
+                background: isActive ? "rgba(255,0,0,0.20)" : drawerLinkStyle.background,
+                border: isActive ? "1px solid rgba(255,0,0,0.30)" : drawerLinkStyle.border,
+              }
+            : undefined
+        }
+        className={({ isActive }) => `bf-appnav-link${isActive ? " is-active" : ""}`}
+        title="All orgs"
+      >
+        All Orgs
+      </NavLink>
+
       {items.map(([label, to]) => (
         <NavLink
           key={to}
@@ -247,25 +257,14 @@ export default function AppHeader({ onLogout, showLogout }) {
 
           {showLogout ? (
             <>
-              {orgId ? (
-                <button
-                  className="bf-logout"
-                  type="button"
-                  onClick={goToOrgDash}
-                  title="All Orgs"
-                >
-                  All Orgs
-                </button>
-              ) : null}
-
-              <NavLink
-                to="/security"
-                className={() => "bf-logout"}
-                title="Security"
-                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              <button
+                className="bf-logout"
+                type="button"
+                onClick={goToOrgDash}
+                title="All Orgs"
               >
-                Security
-              </NavLink>
+                All Orgs
+              </button>
 
               <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
                 Logout
@@ -313,27 +312,6 @@ export default function AppHeader({ onLogout, showLogout }) {
           </div>
 
           <OrgNav variant="drawer" />
-
-          {showLogout ? (
-            <NavLink
-              to="/security"
-              onClick={() => setMobileOpen(false)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                color: "#fff",
-                fontWeight: 700,
-                textDecoration: "none",
-                marginTop: 10,
-              }}
-            >
-              Security
-            </NavLink>
-          ) : null}
 
           {showLogout ? (
             <button className="bf-drawer-logout" type="button" onClick={onLogout} style={{ marginTop: 14, width: "100%" }}>
