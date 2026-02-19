@@ -1,85 +1,82 @@
-import { bad, ok, readJSON, requireMethod } from "../../_lib/http.js";
+import { bad, ok, readJSON } from "../../_lib/http.js";
 import { getDb, requireUser } from "../../_lib/auth.js";
 import { aesGcmDecrypt, totpVerify } from "../../_lib/crypto.js";
 
 /**
  * POST /api/auth/mfa/disable
- * Body: { code: "123456" }
+ * Body: { code: "123456" }  (TOTP code)
  *
- * Disables TOTP MFA for the current user after verifying a valid TOTP code.
- * Clears recovery codes and any pending MFA login challenges for the user.
+ * Disables MFA for the current user after verifying a valid TOTP code.
+ * Also deletes recovery codes and pending MFA challenges.
  */
-export async function onRequest(context) {
+export async function onRequestPost({ request, env }) {
   try {
-    const { request, env } = context;
-    requireMethod(request, "POST");
+    const u = await requireUser({ env, request });
+    if (!u.ok) return u.resp;
+
+    const db = getDb(env);
+    if (!db) return bad(500, "DB_NOT_CONFIGURED");
 
     const body = await readJSON(request);
     const codeRaw = (body?.code ?? "").toString();
     const code = codeRaw.replace(/\s+/g, "");
-    if (!/^[0-9]{6}$/.test(code)) return bad("INVALID_MFA_CODE", 400);
+    if (!/^\d{6}$/.test(code)) return bad(400, "INVALID_MFA_CODE");
 
-    const user = await requireUser(context);
-    const db = getDb(env);
+    const userId = u.user?.sub || u.user?.id;
+    if (!userId) return bad(500, "USER_ID_MISSING");
 
     const row = await db
-      .prepare(
-        "SELECT totp_secret_encrypted, mfa_enabled FROM user_mfa WHERE user_id = ?"
-      )
-      .bind(user.id)
+      .prepare("SELECT totp_secret_encrypted, mfa_enabled FROM user_mfa WHERE user_id = ?")
+      .bind(userId)
       .first();
 
-    if (!row || !row.mfa_enabled) return bad("MFA_NOT_ENABLED", 400);
+    if (!row || !row.mfa_enabled) return bad(400, "MFA_NOT_ENABLED");
 
-    // Stored as JSON string (preferred) or already-parsed object/string from earlier versions
+    // Stored value might be a JSON string (recommended) or already-parsed object (older/broken states).
     let enc = row.totp_secret_encrypted;
-    if (!enc) return bad("MFA_SECRET_MISSING", 400);
+    if (!enc) return bad(400, "MFA_SECRET_MISSING");
 
-    // If it's a JSON string, parse it.
     if (typeof enc === "string") {
       try {
-        const parsed = JSON.parse(enc);
-        enc = parsed;
+        enc = JSON.parse(enc);
       } catch {
-        // It might be a legacy raw string; keep as-is
+        // If it's not JSON, it's corrupt.
+        return bad(400, "MFA_SECRET_CORRUPT");
       }
     }
 
     const encKey = env.MFA_ENC_KEY || env.JWT_SECRET;
-    if (!encKey) return bad("MFA_ENC_KEY_MISSING", 500);
+    if (!encKey) return bad(500, "MFA_KEY_MISSING");
 
-    let secret;
+    let secretB32;
     try {
-      secret = await aesGcmDecrypt(encKey, enc);
+      secretB32 = await aesGcmDecrypt(enc, encKey);
     } catch (e) {
-      return bad("MFA_SECRET_DECRYPT_FAILED", 400);
+      return bad(400, "MFA_SECRET_DECRYPT_FAILED");
     }
 
-    const okTotp = await totpVerify(secret, code, { window: 1 });
-    if (!okTotp) return bad("INVALID_MFA_CODE", 400);
+    const valid = await totpVerify(secretB32, code, { window: 1 });
+    if (!valid) return bad(400, "INVALID_MFA_CODE");
 
-    // Disable MFA and wipe recovery codes + pending challenges
-    const now = Date.now();
+    // Disable MFA and clear related rows.
     await db
-      .prepare(
-        "UPDATE user_mfa SET mfa_enabled = 0, totp_secret_encrypted = NULL WHERE user_id = ?"
-      )
-      .bind(user.id)
+      .prepare("UPDATE user_mfa SET mfa_enabled = 0, totp_secret_encrypted = NULL WHERE user_id = ?")
+      .bind(userId)
       .run();
 
     await db
       .prepare("DELETE FROM user_mfa_recovery_codes WHERE user_id = ?")
-      .bind(user.id)
+      .bind(userId)
       .run();
 
     await db
       .prepare("DELETE FROM login_mfa_challenges WHERE user_id = ?")
-      .bind(user.id)
+      .bind(userId)
       .run();
 
-    return ok({ ok: true, disabled_at: now });
+    return ok({ mfa_enabled: false });
   } catch (e) {
-    // Avoid leaking internals; return structured error
-    return bad("MFA_DISABLE_FAILED", 500);
+    // Avoid Cloudflare HTML 500 pages. Return structured error for debugging.
+    return bad(500, "MFA_DISABLE_FAILED", { message: e?.message || String(e) });
   }
 }
