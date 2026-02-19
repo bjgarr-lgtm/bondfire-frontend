@@ -245,9 +245,6 @@ export default function Security() {
       )}
 
       <h1 style={{ marginBottom: 8 }}>Security</h1>
-      <div className="helper" style={{ marginBottom: 10 }}>
-        The “state actor” threat model is expensive. Since you have no budget, we are doing the best practical version.
-      </div>
 
       {err && (
         <div style={{ background: "rgba(255,0,0,0.10)", border: "1px solid rgba(255,0,0,0.25)", padding: 10, borderRadius: 12, marginBottom: 10 }}>
