@@ -1,51 +1,98 @@
-import { ok, bad } from "../../_lib/http.js";
-import { requireUser } from "../../_lib/auth.js";
+import { ok, err, requireMethod, now, uuid, readJSON } from "../../_lib/http.js";
+import { getDb, requireUser } from "../../_lib/auth.js";
 import { aesGcmDecrypt, totpVerify, sha256Hex } from "../../_lib/crypto.js";
 
-function randomCode() {
-  // 12 chars: human-ish but still strong enough for backup codes.
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoid ambiguous chars
-  const raw = crypto.getRandomValues(new Uint8Array(12));
-  let out = "";
-  for (let i = 0; i < raw.length; i++) out += alphabet[raw[i] % alphabet.length];
-  return out;
+function makeRecoveryCode() {
+  // 10 bytes -> 20 hex chars, format XXXXX-XXXXX-XXXXX (15) too long
+  // We'll do 8+4: XXXX-XXXX-XXXX (12) for usability.
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`.toUpperCase();
 }
 
-export async function onRequestPost({ env, request }) {
-  const u = await requireUser({ env, request });
-  if (!u.ok) return u.resp;
+async function hashRecovery(code, pepper) {
+  // Pepper so leaked DB hashes are less useful.
+  return sha256Hex(`${code}|${pepper}`);
+}
 
-  const body = await request.json().catch(() => ({}));
-  const code = String(body.code || "").trim();
-  if (!code) return bad(400, "MISSING_CODE");
+export async function onRequest(context) {
+  const { request, env } = context;
+  const m = requireMethod(request, "POST");
+  if (m) return m;
 
-  const userId = String(u.user.sub);
-  const mfa = await env.BF_DB.prepare(
-    "SELECT totp_secret_encrypted FROM user_mfa WHERE user_id = ?"
-  ).bind(userId).first();
-  if (!mfa?.totp_secret_encrypted) return bad(400, "MFA_NOT_SETUP");
+  try {
+    const u = await requireUser({ env, request });
+    if (!u.ok) return u.resp;
 
-  const encKey = env.MFA_ENC_KEY || env.JWT_SECRET;
-  const secret = await aesGcmDecrypt(encKey, mfa.totp_secret_encrypted);
-  const okTotp = await totpVerify({ secretBase32: secret, code, window: 1, step: 30, digits: 6 });
-  if (!okTotp) return bad(401, "INVALID_MFA");
+    const db = getDb(env);
+    if (!db) return err(500, "NO_DB_BINDING");
 
-  await env.BF_DB.prepare(
-    "UPDATE user_mfa SET mfa_enabled = 1 WHERE user_id = ?"
-  ).bind(userId).run();
+    const body = await readJSON(request);
+    const code = String(body.code || body.totp || "").trim();
+    if (!code) return err(400, "MFA_CODE_REQUIRED");
 
-  // Generate and persist recovery codes (hashed). Return the plaintext once.
-  const codes = [];
-  for (let i = 0; i < 10; i++) codes.push(randomCode());
+    const row = await db
+      .prepare("SELECT totp_secret_encrypted, mfa_enabled FROM user_mfa WHERE user_id = ?")
+      .bind(u.user.sub)
+      .first();
 
-  const now = Date.now();
-  for (const c of codes) {
-    const id = crypto.randomUUID();
-    const h = await sha256Hex(c);
-    await env.BF_DB.prepare(
-      "INSERT INTO user_mfa_recovery_codes (id, user_id, code_hash, used, created_at) VALUES (?, ?, ?, 0, ?)"
-    ).bind(id, userId, h, now).run();
+    if (!row?.totp_secret_encrypted) return err(400, "MFA_NOT_SETUP");
+
+    const encKey = env.MFA_ENC_KEY || env.JWT_SECRET;
+    if (!encKey) return err(500, "MFA_KEY_MISSING");
+
+    // Support both stringified JSON (new) and plain object-ish (older).
+    let encObj = null;
+    try {
+      encObj = typeof row.totp_secret_encrypted === "string"
+        ? JSON.parse(row.totp_secret_encrypted)
+        : row.totp_secret_encrypted;
+    } catch {
+      return err(400, "MFA_SECRET_CORRUPT");
+    }
+
+    let secret;
+    try {
+      secret = await aesGcmDecrypt(encObj, encKey);
+    } catch (e) {
+      console.error("mfa/confirm decrypt failed", e);
+      return err(400, "MFA_SECRET_DECRYPT_FAILED");
+    }
+
+    const okTotp = await totpVerify(secret, code, { window: 1 });
+    if (!okTotp) return err(400, "INVALID_MFA_CODE");
+
+    // Enable MFA and create fresh recovery codes.
+    const ts = now();
+    const pepper = env.RECOVERY_PEPPER || env.JWT_SECRET || "pepper";
+
+    // wipe existing recovery codes then insert new
+    await db.prepare("DELETE FROM user_mfa_recovery_codes WHERE user_id = ?").bind(u.user.sub).run();
+
+    const recovery = [];
+    for (let i = 0; i < 10; i++) {
+      const rc = makeRecoveryCode();
+      recovery.push(rc);
+      const code_hash = await hashRecovery(rc, pepper);
+      await db
+        .prepare(
+          "INSERT INTO user_mfa_recovery_codes (id, user_id, code_hash, used, created_at) VALUES (?, ?, ?, 0, ?)"
+        )
+        .bind(uuid(), u.user.sub, code_hash, ts)
+        .run();
+    }
+
+    await db
+      .prepare(
+        "UPDATE user_mfa SET mfa_enabled = 1 WHERE user_id = ?"
+      )
+      .bind(u.user.sub)
+      .run();
+
+    return ok({ enabled: true, recovery_codes: recovery });
+  } catch (e) {
+    console.error("mfa/confirm error", e);
+    return err(500, "MFA_CONFIRM_FAILED", { detail: String(e?.message || e) });
   }
-
-  return ok({ recovery_codes: codes });
 }
