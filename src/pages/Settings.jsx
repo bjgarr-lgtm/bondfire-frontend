@@ -7,7 +7,6 @@ import Security from "./Security.jsx";
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-function getToken() { return ""; }
 
 function humanizeError(msg) {
   const s = String(msg || "").trim();
@@ -19,7 +18,8 @@ function humanizeError(msg) {
 
 
 async function authFetch(path, opts = {}) {
-  
+  const token = getToken();
+
   const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
@@ -38,7 +38,7 @@ async function authFetch(path, opts = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const doReq = async (u) => {
-    const res = await fetch(u, {
+    const res = await fetch(u, { credentials: "include", 
       ...opts,
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -494,15 +494,16 @@ React.useEffect(() => {
     setNlBusy(true);
 
     try {
-            const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
+      const token = getToken();
+      const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
 
       const headers = {};
       if (token) headers.Authorization = `Bearer ${token}`;
 
       // Same origin first (Pages Functions), then API_BASE
-      let res = await fetch(path, { method: "GET", headers });
+      let res = await fetch(path, { credentials: "include",  method: "GET", headers });
       if (!res.ok && API_BASE) {
-        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
+        res = await fetch(`${API_BASE}${path}`, { credentials: "include",  method: "GET", headers });
       }
 
       if (!res.ok) {

@@ -2,6 +2,11 @@ import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
 
+async function ensureMeetingsZkColumns(db) {
+  try { await db.prepare("ALTER TABLE meetings ADD COLUMN encrypted_notes TEXT").run(); } catch {}
+  try { await db.prepare("ALTER TABLE meetings ADD COLUMN zk_key_version INTEGER").run(); } catch {}
+}
+
 async function ensureMeetingsPublicColumn(db) {
   try {
     await db

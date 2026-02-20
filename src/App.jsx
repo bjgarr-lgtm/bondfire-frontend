@@ -1,5 +1,6 @@
 // src/App.jsx
 import React from "react";
+import { apiFetch } from "./lib/api.js";
 import {
   HashRouter,
   Routes,
@@ -56,45 +57,23 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ------------------------------ Auth helpers ------------------------------ */
-function RequireAuth({ children }) {
-  const nav = useNavigate();
-  const [checking, setChecking] = React.useState(true);
-  const [authed, setAuthed] = React.useState(false);
-
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/auth/me", { credentials: "include" });
-        if (!alive) return;
-        if (res.ok) {
-          setAuthed(true);
-        } else {
-          setAuthed(false);
-          nav("/signin", { replace: true });
-        }
-      } catch {
-        if (!alive) return;
-        setAuthed(false);
-        nav("/signin", { replace: true });
-      } finally {
-        if (alive) setChecking(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [nav]);
-
-  if (checking) return null;
-  if (!authed) return null;
-  return children;
+function isLoggedInFlag() {
+  return localStorage.getItem("bf_logged_in") === "1";
 }
 
+function RequireAuth({ children }) {
+  const demo = localStorage.getItem("demo_user");
+  if (!demo && !isLoggedInFlag()) return <Navigate to="/signin" replace />;
+  return children;
+}
 function logoutEverywhere() {
   try {
+    localStorage.removeItem("bf_logged_in");
     localStorage.removeItem("bf_auth_token");
     sessionStorage.removeItem("bf_auth_token");
     localStorage.removeItem("demo_user");
   } catch {}
+    try { apiFetch("/api/auth/logout", { method: "POST" }); } catch {}
   // optional: nuke any cached org/session bits you use
   window.location.hash = "#/signin";
   window.location.reload();

@@ -1,6 +1,7 @@
 // src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
+import { getCachedOrgKey, encryptWithOrgKey, decryptWithOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
   try {

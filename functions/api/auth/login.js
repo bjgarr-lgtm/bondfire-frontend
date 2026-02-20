@@ -1,9 +1,35 @@
-import { json, bad, now, uuid } from "../_lib/http.js";
-import { serializeCookie } from "../_lib/cookies.js";
-import { sha256Hex } from "../_lib/crypto.js";
+import { json, bad, cookie } from "../_lib/http.js";
 import { signJwt } from "../_lib/jwt.js";
+import { sha256Hex } from "../_lib/crypto.js";
 import { rateLimit } from "../_lib/rateLimit.js";
 
+function makeRefreshToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return `${crypto.randomUUID()}.${s}`;
+}
+
+async function setSessionCookies(env, user) {
+  const accessTtl = 60 * 15; // 15 minutes
+  const refreshTtl = 60 * 60 * 24 * 30; // 30 days
+
+  const at = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtl);
+
+  const rt = makeRefreshToken();
+  const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
+  const expiresAt = Date.now() + refreshTtl * 1000;
+
+  await env.BF_DB.prepare(
+    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
+  ).bind(crypto.randomUUID(), user.id, rtHash, expiresAt).run();
+
+  const headers = new Headers();
+  headers.append("set-cookie", cookie("bf_at", at, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: accessTtl }));
+  headers.append("set-cookie", cookie("bf_rt", rt, { httpOnly: true, sameSite: "Strict", path: "/api/auth", maxAge: refreshTtl }));
+  return { headers, accessToken: at };
+}
 function fromB64(s) {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
@@ -75,28 +101,9 @@ export async function onRequestPost({ env, request }) {
     });
   }
 
-  const accessTtlSec = 60 * 15;
-  const refreshTtlSec = 60 * 60 * 24 * 30;
-
-  const token = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtlSec);
-
-  const refreshRaw = uuid() + ":" + uuid();
-  const pepper = env.REFRESH_PEPPER || env.JWT_SECRET;
-  const tokenHash = await sha256Hex(refreshRaw + ":" + pepper);
-
-  const ip = request.headers.get("CF-Connecting-IP") || "";
-  const ua = request.headers.get("user-agent") || "";
-  const ipHash = ip ? await sha256Hex(ip + ":" + pepper) : "";
-
-  const db = env.BF_DB;
-  await db
-    .prepare("INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, revoked_at, replaced_by, user_agent, ip_hash) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)")
-    .bind(uuid(), user.id, tokenHash, now() + refreshTtlSec * 1000, now(), ua.slice(0, 256), ipHash)
-    .run();
-
-  const headers = new Headers();
-  headers.append("Set-Cookie", serializeCookie("bf_at", token, { httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: accessTtlSec }));
-  headers.append("Set-Cookie", serializeCookie("bf_rt", refreshRaw, { httpOnly: true, secure: true, sameSite: "Lax", path: "/api/auth", maxAge: refreshTtlSec }));
-
-  return json({ ok: true, user: { id: user.id, email: user.email, name: user.name } }, { headers });
+  const sess = await setSessionCookies(env, user);
+  return json(
+    { ok: true, user: { id: user.id, email: user.email, name: user.name } },
+    { headers: sess.headers }
+  );
 }

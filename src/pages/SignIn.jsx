@@ -1,5 +1,6 @@
 // src/pages/SignIn.jsx
 import React, { useState } from "react";
+import { apiJSON } from "../lib/api.js";
 import { useNavigate } from "react-router-dom";
 
 export default function SignIn() {
@@ -37,7 +38,6 @@ async function handleSubmit(e) {
 
     const res = await fetch(url, {
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -51,11 +51,13 @@ async function handleSubmit(e) {
       return;
     }
 
-    if (!res.ok || !data?.ok) {
+    if (!data?.ok) {
       throw new Error(
         data?.error || (mode === "register" ? "Register failed" : "Login failed")
       );
     }
+
+    sessionStorage.removeItem("bf_auth_token");
 
     // If register returns org, store it and go straight into that org
     if (mode === "register" && data?.org?.id) {
@@ -71,7 +73,7 @@ async function handleSubmit(e) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${null}`,
+          Authorization: `Bearer ${data.token}`,
         },
         body: JSON.stringify({ code: trimmedCode }),
       });
@@ -87,7 +89,7 @@ async function handleSubmit(e) {
 
     // Otherwise (login), load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${null}` },
+      headers: { Authorization: `Bearer ${data.token}` },
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {
@@ -107,24 +109,17 @@ async function handleMfaVerify(e) {
   setErr("");
   setBusy(true);
   try {
-    const res = await fetch("/api/auth/login/mfa", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        challenge_id: mfaStep?.challengeId,
-        code: mfaCode,
-        recovery_code: mfaRecovery,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data?.ok) {
-      throw new Error(data?.error || "MFA failed");
-    }
+    const data = await apiJSON("/api/auth/login/mfa", { method: "POST", body: {
+      challenge_id: mfaStep?.challenge_id || mfaStep?.challengeId,
+      code: mfaCode,
+      recovery_code: mfaRecovery,
+    }});
+
+    localStorage.setItem("bf_logged_in", "1");
 
     // Load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${null}` },
+      headers: { Authorization: `Bearer ${data.token}` },
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {

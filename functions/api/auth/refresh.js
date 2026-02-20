@@ -1,58 +1,60 @@
-import { json, bad, now, uuid } from "../_lib/http.js";
-import { parseCookies, serializeCookie, clearCookie } from "../_lib/cookies.js";
+import { json, bad, parseCookies, cookie, clearCookie } from "../_lib/http.js";
 import { sha256Hex } from "../_lib/crypto.js";
 import { signJwt } from "../_lib/jwt.js";
 
-export async function onRequestPost({ env, request }) {
-  const cookies = parseCookies(request.headers.get("cookie") || "");
-  const refreshRaw = cookies.bf_rt || "";
-  if (!refreshRaw) return bad(401, "NO_REFRESH");
+function makeRefreshToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return `${crypto.randomUUID()}.${s}`;
+}
 
-  const pepper = env.REFRESH_PEPPER || env.JWT_SECRET;
-  const tokenHash = await sha256Hex(refreshRaw + ":" + pepper);
+export async function onRequestPost({ env, request }) {
+  const cookies = parseCookies(request);
+  const rt = cookies.bf_rt;
+  if (!rt) return bad(401, "NO_REFRESH");
 
   const db = env.BF_DB;
+  if (!db) return bad(500, "NO_DB_BINDING");
+
+  const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
   const row = await db
-    .prepare("SELECT id, user_id, expires_at, revoked_at, replaced_by FROM refresh_tokens WHERE token_hash = ? LIMIT 1")
-    .bind(tokenHash)
+    .prepare("SELECT id, user_id, expires_at FROM refresh_tokens WHERE token_hash = ?")
+    .bind(rtHash)
     .first();
 
   if (!row) return bad(401, "INVALID_REFRESH");
-  if (row.revoked_at) return bad(401, "REVOKED_REFRESH");
-  if (row.replaced_by) return bad(401, "STALE_REFRESH");
-  if (row.expires_at && row.expires_at < now()) return bad(401, "EXPIRED_REFRESH");
+  if (row.expires_at && Number(row.expires_at) < Date.now()) {
+    try { await db.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run(); } catch {}
+    return bad(401, "EXPIRED_REFRESH");
+  }
 
-  // Rotate refresh token (simple delete+insert; add revoke/rotation columns later)
-  const newRefresh = uuid() + ":" + uuid();
-  const newHash = await sha256Hex(newRefresh + ":" + pepper);
+  // rotate: delete old, insert new
+  try { await db.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run(); } catch {}
 
-  const ip = request.headers.get("CF-Connecting-IP") || "";
-  const ua = request.headers.get("user-agent") || "";
-  const ipHash = ip ? await sha256Hex(ip + ":" + pepper) : "";
-
-  const refreshTtlSec = 60 * 60 * 24 * 30;
-  const newId = uuid();
-
-  await db
-    .prepare("INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, revoked_at, replaced_by, user_agent, ip_hash) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)")
-    .bind(newId, row.user_id, newHash, now() + refreshTtlSec * 1000, now(), ua.slice(0, 256), ipHash)
-    .run();
-
-  
-  // Issue new access token
   const user = await db
     .prepare("SELECT id, email, name FROM users WHERE id = ?")
     .bind(row.user_id)
     .first();
-
   if (!user) return bad(401, "INVALID_REFRESH");
 
-  const accessTtlSec = 60 * 15;
-  const token = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtlSec);
+  const accessTtl = 60 * 15;
+  const refreshTtl = 60 * 60 * 24 * 30;
+
+  const at = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtl);
+
+  const newRt = makeRefreshToken();
+  const newHash = await sha256Hex(`${env.JWT_SECRET}:${newRt}`);
+  const expiresAt = Date.now() + refreshTtl * 1000;
+
+  await db.prepare(
+    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
+  ).bind(crypto.randomUUID(), user.id, newHash, expiresAt).run();
 
   const headers = new Headers();
-  headers.append("Set-Cookie", serializeCookie("bf_at", token, { httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: accessTtlSec }));
-  headers.append("Set-Cookie", serializeCookie("bf_rt", newRefresh, { httpOnly: true, secure: true, sameSite: "Lax", path: "/api/auth", maxAge: refreshTtlSec }));
+  headers.append("set-cookie", cookie("bf_at", at, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: accessTtl }));
+  headers.append("set-cookie", cookie("bf_rt", newRt, { httpOnly: true, sameSite: "Strict", path: "/api/auth", maxAge: refreshTtl }));
 
   return json({ ok: true, user: { id: user.id, email: user.email, name: user.name } }, { headers });
 }

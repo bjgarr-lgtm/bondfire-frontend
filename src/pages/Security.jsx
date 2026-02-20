@@ -1,319 +1,190 @@
-// src/pages/Security.jsx
 import React from "react";
-
-function getToken() { return ""; }
-
-async function authFetch(path, opts = {}) {
-    const res = await fetch(path, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || j.ok === false) throw new Error(j.error || `HTTP ${res.status}`);
-  return j;
-}
-
-// Tiny IndexedDB helper.
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open("bf_security", 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains("keys")) db.createObjectStore("keys");
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function idbSet(key, value) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("keys", "readwrite");
-    tx.objectStore("keys").put(value, key);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function randomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const raw = crypto.getRandomValues(new Uint8Array(12));
-  let out = "";
-  for (let i = 0; i < raw.length; i++) out += alphabet[raw[i] % alphabet.length];
-  return out;
-}
+import { useParams } from "react-router-dom";
+import { api } from "../utils/api.js";
+import {
+  ensureDeviceKeypair,
+  randomOrgKey,
+  wrapForMember,
+  unwrapOrgKey,
+  cacheOrgKey,
+  getCachedOrgKey,
+} from "../lib/zk.js";
 
 export default function Security() {
-  const [me, setMe] = React.useState(null);
+  const { orgId } = useParams();
+
   const [msg, setMsg] = React.useState("");
-  const [err, setErr] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  const [setup, setSetup] = React.useState(null); // { uri, secret }
-  const [confirmCode, setConfirmCode] = React.useState("");
-  const [recoveryCodes, setRecoveryCodes] = React.useState(null);
+  const [mfaSecret, setMfaSecret] = React.useState("");
+  const [mfaQr, setMfaQr] = React.useState("");
+  const [mfaCode, setMfaCode] = React.useState("");
+  const [recoveryCodes, setRecoveryCodes] = React.useState([]);
   const [showRecovery, setShowRecovery] = React.useState(false);
-  const [disableCode, setDisableCode] = React.useState("");
 
-  // Persist “pending” recovery codes across reloads until the user explicitly dismisses.
-  React.useEffect(() => {
-    try {
-      const raw = localStorage.getItem("bf_pending_recovery_codes");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.codes) && parsed.codes.length) {
-        setRecoveryCodes(parsed.codes);
-        setShowRecovery(true);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const load = React.useCallback(async () => {
-    const r = await authFetch("/api/auth/me", { method: "GET" });
-    setMe(r.user);
-  }, []);
+  const [zkStatus, setZkStatus] = React.useState({ deviceKey: false, orgKey: false });
 
   React.useEffect(() => {
-    load().catch((e) => setErr(e?.message || "Failed to load"));
-  }, [load]);
+    (async () => {
+      const orgKey = getCachedOrgKey(orgId);
+      setZkStatus((s) => ({ ...s, orgKey: !!orgKey }));
+      try {
+        const dev = await ensureDeviceKeypair();
+        setZkStatus((s) => ({ ...s, deviceKey: !!dev?.pubJwk }));
+      } catch {}
+    })();
+  }, [orgId]);
 
-  async function generateAndSavePublicKey() {
-    setErr("");
+  async function startMfa() {
     setMsg("");
-    setBusy(true);
     try {
-      const keys = await crypto.subtle.generateKey(
-        { name: "ECDH", namedCurve: "P-256" },
-        true,
-        ["deriveKey", "deriveBits"]
-      );
-      const jwk = await crypto.subtle.exportKey("jwk", keys.publicKey);
-      await idbSet("user_keypair_v1", keys);
-      await authFetch("/api/auth/public-key", { method: "POST", body: { public_key: jwk } });
-      setMsg("Public key saved. Private key stored locally in IndexedDB.");
-      await load();
+      const d = await api("/api/auth/mfa/setup", { method: "POST", body: JSON.stringify({}) });
+      setMfaSecret(d.secret || "");
+      setMfaQr(d.otpauth_url || "");
+      setRecoveryCodes(d.recovery_codes || []);
+      setShowRecovery(true);
     } catch (e) {
-      setErr(e?.message || "Failed to generate key");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startMfaSetup() {
-    setErr("");
-    setMsg("");
-    setRecoveryCodes(null);
-    setShowRecovery(false);
-    try { localStorage.removeItem("bf_pending_recovery_codes"); } catch {}
-    setBusy(true);
-    try {
-      const r = await authFetch("/api/auth/mfa/setup", { method: "POST" });
-      setSetup({ uri: r.uri, secret: r.secret });
-      setMsg("Add this secret to your authenticator, then confirm with a 6-digit code.");
-    } catch (e) {
-      setErr(e?.message || "Failed to start MFA");
-    } finally {
-      setBusy(false);
+      setMsg(e.message || "failed");
     }
   }
 
   async function confirmMfa() {
-    setErr("");
     setMsg("");
-    setBusy(true);
     try {
-      const r = await authFetch("/api/auth/mfa/confirm", { method: "POST", body: { code: confirmCode } });
-      const codes = (r.recovery_codes && Array.isArray(r.recovery_codes) && r.recovery_codes.length)
-        ? r.recovery_codes
-        : [randomCode()];
-      setRecoveryCodes(codes);
+      const d = await api("/api/auth/mfa/confirm", {
+        method: "POST",
+        body: JSON.stringify({ code: mfaCode }),
+      });
+      setRecoveryCodes(d.recovery_codes || []);
       setShowRecovery(true);
-      try {
-        localStorage.setItem(
-          "bf_pending_recovery_codes",
-          JSON.stringify({ codes, created_at: Date.now() })
-        );
-      } catch {}
-      setSetup(null);
-      setConfirmCode("");
-      setMsg("MFA enabled. Save your recovery codes somewhere safe.");
-      await load();
+      setMsg("mfa enabled");
     } catch (e) {
-      setErr(e?.message || "Failed to confirm MFA");
-    } finally {
-      setBusy(false);
+      setMsg(e.message || "failed");
     }
   }
 
   async function disableMfa() {
-    setErr("");
     setMsg("");
-    setBusy(true);
     try {
-      await authFetch("/api/auth/mfa/disable", { method: "POST", body: { code: disableCode } });
-      setDisableCode("");
-      setMsg("MFA disabled.");
-      setRecoveryCodes(null);
-      setShowRecovery(false);
-      try { localStorage.removeItem("bf_pending_recovery_codes"); } catch {}
-      await load();
+      await api("/api/auth/mfa/disable", {
+        method: "POST",
+        body: JSON.stringify({ code: mfaCode }),
+      });
+      setMsg("mfa disabled");
     } catch (e) {
-      setErr(e?.message || "Failed to disable MFA");
-    } finally {
-      setBusy(false);
+      setMsg(e.message || "failed");
     }
   }
 
-  async function copyRecoveryCodes() {
-    if (!recoveryCodes || recoveryCodes.length === 0) return;
-    const text = recoveryCodes.join("\n");
+  async function enableZkForOrg() {
+    setMsg("");
     try {
-      await navigator.clipboard.writeText(text);
-      setMsg("Recovery codes copied to clipboard.");
-    } catch {
-      // Clipboard can fail in some contexts; user can still select the text.
-      setMsg("Select and copy the recovery codes manually.");
+      await ensureDeviceKeypair();
+
+      const members = await api(`/api/orgs/${orgId}/members`);
+      const list = Array.isArray(members.members) ? members.members : [];
+
+      const key = randomOrgKey();
+      const wrapped_keys = [];
+
+      for (const m of list) {
+        if (!m?.public_key) continue;
+        let pub;
+        try { pub = JSON.parse(m.public_key); } catch { continue; }
+        const wrapped_key = await wrapForMember(key, pub);
+        wrapped_keys.push({ user_id: m.user_id, wrapped_key });
+      }
+
+      if (!wrapped_keys.length) {
+        setMsg("no members have public keys registered yet");
+        return;
+      }
+
+      await api(`/api/orgs/${orgId}/crypto`, {
+        method: "POST",
+        body: JSON.stringify({ wrapped_keys, encrypted_org_metadata: null }),
+      });
+
+      cacheOrgKey(orgId, key);
+      setZkStatus((s) => ({ ...s, orgKey: true }));
+      setMsg("zk enabled for org on this device");
+    } catch (e) {
+      setMsg(e.message || "failed");
     }
   }
 
-  function dismissRecoveryCodes() {
-    setShowRecovery(false);
-    try { localStorage.removeItem("bf_pending_recovery_codes"); } catch {}
+  async function fetchOrgKey() {
+    setMsg("");
+    try {
+      await ensureDeviceKeypair();
+      const d = await api(`/api/orgs/${orgId}/crypto`, { method: "GET" });
+      if (!d?.wrapped_key) {
+        setMsg("no wrapped key for you on this org yet");
+        return;
+      }
+      const key = await unwrapOrgKey(d.wrapped_key);
+      cacheOrgKey(orgId, key);
+      setZkStatus((s) => ({ ...s, orgKey: true }));
+      setMsg("org key loaded on this device");
+    } catch (e) {
+      setMsg(e.message || "failed");
+    }
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "6vh auto", padding: 16 }}>
-      {showRecovery && recoveryCodes && recoveryCodes.length > 0 && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              width: "min(720px, 100%)",
-              borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(20,20,20,0.98)",
-              padding: 16,
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Save your recovery codes</h2>
-            <div className="helper" style={{ marginBottom: 10 }}>
-              These are shown once. Save them somewhere safe. If you lose your authenticator device, these are your way back in.
-            </div>
-            <pre
-              style={{
-                whiteSpace: "pre-wrap",
-                userSelect: "text",
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.04)",
-              }}
-            >
-              {recoveryCodes.join("\n")}
-            </pre>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-              <button className="btn-red" onClick={copyRecoveryCodes} disabled={busy}>Copy</button>
-              <button className="btn" onClick={dismissRecoveryCodes} disabled={busy}>I saved these</button>
-            </div>
-          </div>
-        </div>
-      )}
+    <div style={{ maxWidth: 920, margin: "0 auto", padding: 16 }}>
+      <h2>security</h2>
 
-      <h1 style={{ marginBottom: 8 }}>Security</h1>
-
-      {err && (
-        <div style={{ background: "rgba(255,0,0,0.10)", border: "1px solid rgba(255,0,0,0.25)", padding: 10, borderRadius: 12, marginBottom: 10 }}>
-          {err}
-        </div>
-      )}
-      {msg && (
-        <div style={{ background: "rgba(0,255,0,0.06)", border: "1px solid rgba(0,255,0,0.18)", padding: 10, borderRadius: 12, marginBottom: 10 }}>
-          {msg}
-        </div>
-      )}
-
-      <section style={{ padding: 14, borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)", marginBottom: 12 }}>
-        <h2 style={{ marginTop: 0 }}>Account keys</h2>
-        <div className="helper" style={{ marginBottom: 10 }}>
-          This registers a public key for future org key wrapping. Private key stays on this device.
-        </div>
-        <button className="btn-red" onClick={generateAndSavePublicKey} disabled={busy}>
-          {busy ? "Working…" : (me?.has_public_key ? "Regenerate public key" : "Generate public key")}
-        </button>
-        {me && (
-          <div className="helper" style={{ marginTop: 10 }}>
-            has_public_key: <b>{String(!!me.has_public_key)}</b>
-          </div>
-        )}
-      </section>
-
-      <section style={{ padding: 14, borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)" }}>
-        <h2 style={{ marginTop: 0 }}>Multi factor authentication</h2>
-        <div className="helper" style={{ marginBottom: 10 }}>
-          TOTP only for now.
+      <section style={{ marginTop: 16, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
+        <h3>mfa</h3>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={startMfa}>start mfa</button>
+          <button onClick={confirmMfa}>confirm</button>
+          <button onClick={disableMfa}>disable</button>
         </div>
 
-        <div className="helper" style={{ marginBottom: 10 }}>
-          mfa_enabled: <b>{String(!!me?.mfa_enabled)}</b>
+        <div style={{ marginTop: 8 }}>
+          <label>
+            6 digit code
+            <input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} style={{ marginLeft: 8, width: 120 }} />
+          </label>
         </div>
 
-        {!me?.mfa_enabled ? (
-          <>
-            <button className="btn-red" onClick={startMfaSetup} disabled={busy}>
-              {busy ? "Working…" : "Start MFA setup"}
-            </button>
-
-            {setup && (
-              <div style={{ marginTop: 12 }}>
-                <div className="helper">Secret:</div>
-                <pre style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>{setup.secret}</pre>
-                <div className="helper">otpauth URI:</div>
-                <pre style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>{setup.uri}</pre>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                  <input
-                    className="input"
-                    placeholder="6-digit code"
-                    value={confirmCode}
-                    onChange={(e) => setConfirmCode(e.target.value)}
-                  />
-                  <button className="btn-red" onClick={confirmMfa} disabled={busy}>Confirm</button>
-                </div>
+        {mfaSecret ? (
+          <div style={{ marginTop: 8 }}>
+            <div><b>secret</b> {mfaSecret}</div>
+            {mfaQr ? (
+              <div style={{ marginTop: 4 }}>
+                <a href={mfaQr} target="_blank" rel="noreferrer">open otp url</a>
               </div>
-            )}
-
-            {/* Recovery codes are shown in a modal that persists until dismissed. */}
-          </>
-        ) : (
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              className="input"
-              placeholder="Enter authenticator code"
-              value={disableCode}
-              onChange={(e) => setDisableCode(e.target.value)}
-            />
-            <button className="btn" onClick={disableMfa} disabled={busy}>Disable MFA</button>
+            ) : null}
           </div>
-        )}
+        ) : null}
+
+        {showRecovery && recoveryCodes.length ? (
+          <div style={{ marginTop: 8 }}>
+            <b>recovery codes</b>
+            <pre style={{ whiteSpace: "pre-wrap" }}>{recoveryCodes.join("\n")}</pre>
+          </div>
+        ) : null}
       </section>
+
+      <section style={{ marginTop: 16, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
+        <h3>zero knowledge storage (beta)</h3>
+        <div style={{ fontSize: 14, opacity: 0.9 }}>
+          device key: {zkStatus.deviceKey ? "ok" : "missing"} | org key cached: {zkStatus.orgKey ? "yes" : "no"}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button onClick={enableZkForOrg}>enable zk for this org (admin)</button>
+          <button onClick={fetchOrgKey}>load org key on this device</button>
+        </div>
+
+        <div style={{ fontSize: 13, marginTop: 8, opacity: 0.85 }}>
+          this is v1. it encrypts meeting notes and need descriptions client side when an org key exists.
+          the server only stores ciphertext blobs.
+        </div>
+      </section>
+
+      {msg ? <div style={{ marginTop: 12, color: "#f88" }}>{msg}</div> : null}
     </div>
   );
 }

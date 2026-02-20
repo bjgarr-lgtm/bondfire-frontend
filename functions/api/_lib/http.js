@@ -40,3 +40,34 @@ export function requireMethod(req, method) {
   }
   return null;
 }
+
+
+export function parseCookies(request) {
+  const header = request.headers.get("cookie") || "";
+  const out = {};
+  header.split(";").forEach((part) => {
+    const i = part.indexOf("=");
+    if (i === -1) return;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (!k) return;
+    out[k] = decodeURIComponent(v);
+  });
+  return out;
+}
+
+export function cookie(name, value, opts = {}) {
+  const parts = [];
+  parts.push(`${name}=${encodeURIComponent(value ?? "")}`);
+  if (opts.maxAge != null) parts.push(`Max-Age=${opts.maxAge}`);
+  if (opts.expires) parts.push(`Expires=${new Date(opts.expires).toUTCString()}`);
+  parts.push(`Path=${opts.path || "/"}`);
+  if (opts.httpOnly) parts.push("HttpOnly");
+  if (opts.secure !== false) parts.push("Secure");
+  parts.push(`SameSite=${opts.sameSite || "Lax"}`);
+  return parts.join("; ");
+}
+
+export function clearCookie(name, opts = {}) {
+  return cookie(name, "", { ...opts, maxAge: 0, expires: 0 });
+}

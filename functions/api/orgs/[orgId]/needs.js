@@ -53,6 +53,11 @@ async function safeLog(env, payload) {
   }
 }
 
+async function ensureNeedsZkColumns(db) {
+  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
+  try { await db.prepare("ALTER TABLE needs ADD COLUMN zk_key_version INTEGER").run(); } catch {}
+}
+
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
