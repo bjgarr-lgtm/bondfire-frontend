@@ -28,13 +28,10 @@ function useIsMobile(maxWidthPx = 720) {
   return isMobile;
 }
 
-function getToken() {
-  return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
-}
+function getToken() { return ""; }
 
 async function authFetch(path, opts = {}) {
-  const token = getToken();
-  const relative = path.startsWith("/") ? path : `/${path}`;
+    const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;

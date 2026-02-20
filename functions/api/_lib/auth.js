@@ -1,4 +1,5 @@
 import { bad } from "./http.js";
+import { parseCookies } from "./cookies.js";
 import { verifyJwt } from "./jwt.js";
 
 // Bindings can be named differently across environments.
@@ -8,11 +9,20 @@ export function getDb(env) {
 }
 
 export async function requireUser({ env, request }) {
+  // Prefer Authorization header, but fall back to httpOnly cookie-based sessions.
   const h = request.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/);
-  if (!m) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
+  let token = "";
+  const mh = h.match(/^Bearer\s+(.+)$/);
+  if (mh) token = mh[1];
 
-  const payload = await verifyJwt(env.JWT_SECRET, m[1]);
+  if (!token) {
+    const cookies = parseCookies(request.headers.get("cookie") || "");
+    token = cookies.bf_at || "";
+  }
+
+  if (!token) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
+
+  const payload = await verifyJwt(env.JWT_SECRET, token);
   if (!payload) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
 
   return { ok: true, user: payload };

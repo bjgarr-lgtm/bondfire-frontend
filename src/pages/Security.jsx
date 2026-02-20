@@ -1,17 +1,10 @@
 // src/pages/Security.jsx
 import React from "react";
 
-function getToken() {
-  return (
-    localStorage.getItem("bf_auth_token") ||
-    sessionStorage.getItem("bf_auth_token") ||
-    ""
-  );
-}
+function getToken() { return ""; }
 
 async function authFetch(path, opts = {}) {
-  const token = getToken();
-  const res = await fetch(path, {
+    const res = await fetch(path, {
     ...opts,
     headers: {
       "Content-Type": "application/json",

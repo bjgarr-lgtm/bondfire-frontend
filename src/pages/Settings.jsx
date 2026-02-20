@@ -7,13 +7,7 @@ import Security from "./Security.jsx";
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-function getToken() {
-  return (
-    localStorage.getItem("bf_auth_token") ||
-    sessionStorage.getItem("bf_auth_token") ||
-    ""
-  );
-}
+function getToken() { return ""; }
 
 function humanizeError(msg) {
   const s = String(msg || "").trim();
@@ -25,8 +19,7 @@ function humanizeError(msg) {
 
 
 async function authFetch(path, opts = {}) {
-  const token = getToken();
-
+  
   const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
@@ -501,8 +494,7 @@ React.useEffect(() => {
     setNlBusy(true);
 
     try {
-      const token = getToken();
-      const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
+            const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
 
       const headers = {};
       if (token) headers.Authorization = `Bearer ${token}`;

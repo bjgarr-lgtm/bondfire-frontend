@@ -56,17 +56,36 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ------------------------------ Auth helpers ------------------------------ */
-function getToken() {
-  return (
-    localStorage.getItem("bf_auth_token") ||
-    sessionStorage.getItem("bf_auth_token")
-  );
-}
-
 function RequireAuth({ children }) {
-  const token = getToken();
-  const demo = localStorage.getItem("demo_user");
-  if (!token && !demo) return <Navigate to="/signin" replace />;
+  const nav = useNavigate();
+  const [checking, setChecking] = React.useState(true);
+  const [authed, setAuthed] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!alive) return;
+        if (res.ok) {
+          setAuthed(true);
+        } else {
+          setAuthed(false);
+          nav("/signin", { replace: true });
+        }
+      } catch {
+        if (!alive) return;
+        setAuthed(false);
+        nav("/signin", { replace: true });
+      } finally {
+        if (alive) setChecking(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [nav]);
+
+  if (checking) return null;
+  if (!authed) return null;
   return children;
 }
 

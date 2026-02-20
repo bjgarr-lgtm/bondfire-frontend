@@ -37,6 +37,7 @@ async function handleSubmit(e) {
 
     const res = await fetch(url, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -50,14 +51,11 @@ async function handleSubmit(e) {
       return;
     }
 
-    if (!res.ok || !data?.ok || !data?.token) {
+    if (!res.ok || !data?.ok) {
       throw new Error(
         data?.error || (mode === "register" ? "Register failed" : "Login failed")
       );
     }
-
-    localStorage.setItem("bf_auth_token", data.token);
-    sessionStorage.removeItem("bf_auth_token");
 
     // If register returns org, store it and go straight into that org
     if (mode === "register" && data?.org?.id) {
@@ -73,7 +71,7 @@ async function handleSubmit(e) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${data.token}`,
+          Authorization: `Bearer ${null}`,
         },
         body: JSON.stringify({ code: trimmedCode }),
       });
@@ -89,7 +87,7 @@ async function handleSubmit(e) {
 
     // Otherwise (login), load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${data.token}` },
+      headers: { Authorization: `Bearer ${null}` },
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {
@@ -111,6 +109,7 @@ async function handleMfaVerify(e) {
   try {
     const res = await fetch("/api/auth/login/mfa", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         challenge_id: mfaStep?.challengeId,
@@ -119,16 +118,13 @@ async function handleMfaVerify(e) {
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data?.ok || !data?.token) {
+    if (!res.ok || !data?.ok) {
       throw new Error(data?.error || "MFA failed");
     }
 
-    localStorage.setItem("bf_auth_token", data.token);
-    sessionStorage.removeItem("bf_auth_token");
-
     // Load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${data.token}` },
+      headers: { Authorization: `Bearer ${null}` },
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {

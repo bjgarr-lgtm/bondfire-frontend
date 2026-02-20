@@ -17,16 +17,15 @@ export default function SignUp() {
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, name, password: pass, orgName }),
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok || !data?.token) {
+      if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Register failed");
       }
-
-      localStorage.setItem("bf_auth_token", data.token);
       localStorage.removeItem("demo_user");
 
       if (data?.org?.id) {
