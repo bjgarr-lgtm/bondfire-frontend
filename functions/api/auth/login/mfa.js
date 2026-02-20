@@ -1,40 +1,12 @@
-import { json, bad, readJSON, cookie } from "../../_lib/http.js";
-import { signJwt } from "../../_lib/jwt.js";
+import { json, bad } from "../../_lib/http.js";
 import { aesGcmDecrypt, totpVerify, sha256Hex } from "../../_lib/crypto.js";
 import { rateLimit } from "../../_lib/rateLimit.js";
+import { issueAccessToken, randomToken, cookieHeadersForAuth } from "../../_lib/session.js";
 
 function normalizeRecovery(code) {
   return String(code || "").trim().toUpperCase();
 }
 
-
-function makeRefreshToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += b.toString(16).padStart(2, "0");
-  return `${crypto.randomUUID()}.${s}`;
-}
-
-async function setSessionCookies(env, user) {
-  const accessTtl = 60 * 15;
-  const refreshTtl = 60 * 60 * 24 * 30;
-
-  const at = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtl);
-
-  const rt = makeRefreshToken();
-  const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
-  const expiresAt = Date.now() + refreshTtl * 1000;
-
-  await env.BF_DB.prepare(
-    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
-  ).bind(crypto.randomUUID(), user.id, rtHash, expiresAt).run();
-
-  const headers = new Headers();
-  headers.append("set-cookie", cookie("bf_at", at, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: accessTtl }));
-  headers.append("set-cookie", cookie("bf_rt", rt, { httpOnly: true, sameSite: "Strict", path: "/api/auth", maxAge: refreshTtl }));
-  return { headers };
-}
 async function hashRecovery(code, pepper) {
   // Must match mfa/confirm hashing scheme.
   return sha256Hex(`${code}|${pepper}`);
@@ -130,6 +102,18 @@ export async function onRequestPost({ env, request }) {
 
   if (!user) return bad(401, "INVALID_LOGIN");
 
-  const sess = await setSessionCookies(env, user);
-  return json({ ok: true, user: { id: user.id, email: user.email, name: user.name } }, { headers: sess.headers });
+  const accessToken = await issueAccessToken(env, user, 60 * 15);
+  const refreshToken = randomToken(32);
+  const refreshHash = await sha256Hex(refreshToken);
+  const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30;
+  await env.BF_DB.prepare(
+    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
+  ).bind(crypto.randomUUID(), user.id, refreshHash, expiresAt).run();
+
+  const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+  const setCookies = cookieHeadersForAuth({ accessToken, refreshToken, isProd });
+
+  const resp = json({ ok: true, user: { id: user.id, email: user.email, name: user.name } });
+  for (const c of setCookies) resp.headers.append("set-cookie", c);
+  return resp;
 }

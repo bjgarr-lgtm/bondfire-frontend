@@ -28,12 +28,7 @@ function useIsMobile(maxWidthPx = 720) {
   return isMobile;
 }
 
-function getToken() {
-  return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
-}
-
 async function authFetch(path, opts = {}) {
-  const token = getToken();
   const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
@@ -45,13 +40,13 @@ async function authFetch(path, opts = {}) {
     "Content-Type": "application/json",
     ...(opts.headers || {}),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   const doReq = async (u) => {
     const res = await fetch(u, {
       ...opts,
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
+      credentials: "include",
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${res.status}`);
@@ -129,7 +124,7 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
-      const r = await authFetch("/api/orgs/create", { credentials: "include", method: "POST", body: { name } });
+      const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
       setNewOrgName("");
       await load();
       if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
@@ -147,7 +142,7 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
-      const r = await authFetch("/api/invites/redeem", { credentials: "include", method: "POST", body: { code } });
+      const r = await authFetch("/api/invites/redeem", { method: "POST", body: { code } });
       setInviteCode("");
       await load();
       if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);

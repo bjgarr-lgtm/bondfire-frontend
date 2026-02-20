@@ -1,6 +1,5 @@
 import { json, bad, now, uuid } from "../_lib/http.js";
-import { signJwt } from "../_lib/jwt.js";
-import { sha256Hex } from "../_lib/crypto.js";
+import { issueAccessToken, randomToken, sha256Hex, cookieHeadersForAuth } from "../_lib/session.js";
 
 const PBKDF2_ITERS = 100000;
 
@@ -68,48 +67,29 @@ export async function onRequestPost({ env, request }) {
     }
 
 
-    const token = await signJwt(
-      env.JWT_SECRET,
-      { sub: userId, email, name: name || "" },
-      3600 * 24 * 7
-    );
+    const user = { id: userId, email, name: name || "" };
+    const accessToken = await issueAccessToken(env, user, 60 * 15);
+    const refreshToken = randomToken(32);
+    const refreshHash = await sha256Hex(refreshToken);
+    const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30;
 
-    return json({
+    await env.BF_DB.prepare(
+      "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, refreshHash, expiresAt).run();
+
+    const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+    const setCookies = cookieHeadersForAuth({ accessToken, refreshToken, isProd });
+
+    const resp = json({
       ok: true,
-      token,
-      user: { id: userId, email, name: name || "" },
+      user,
       org: { id: orgId, name: orgName, role: "owner" },
     });
+    for (const c of setCookies) resp.headers.append("set-cookie", c);
+    return resp;
   } catch (e) {
     console.error("REGISTER_THROW", e);
     const msg = e?.message ? String(e.message) : "REGISTER_FAILED";
     return bad(500, msg);
   }
-}function makeRefreshToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += b.toString(16).padStart(2, "0");
-  return `${crypto.randomUUID()}.${s}`;
 }
-
-async function setSessionCookies(env, user) {
-  const accessTtl = 60 * 15; // 15 minutes
-  const refreshTtl = 60 * 60 * 24 * 30; // 30 days
-
-  const at = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtl);
-
-  const rt = makeRefreshToken();
-  const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
-  const expiresAt = Date.now() + refreshTtl * 1000;
-
-  await env.BF_DB.prepare(
-    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
-  ).bind(crypto.randomUUID(), user.id, rtHash, expiresAt).run();
-
-  const headers = new Headers();
-  headers.append("set-cookie", cookie("bf_at", at, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: accessTtl }));
-  headers.append("set-cookie", cookie("bf_rt", rt, { httpOnly: true, sameSite: "Strict", path: "/api/auth", maxAge: refreshTtl }));
-  return { headers, accessToken: at };
-}
-

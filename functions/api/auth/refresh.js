@@ -1,60 +1,50 @@
-import { json, bad, parseCookies, cookie, clearCookie } from "../_lib/http.js";
-import { sha256Hex } from "../_lib/crypto.js";
-import { signJwt } from "../_lib/jwt.js";
-
-function makeRefreshToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += b.toString(16).padStart(2, "0");
-  return `${crypto.randomUUID()}.${s}`;
-}
+import { bad, ok, getCookie } from "../_lib/http.js";
+import { sha256Hex, randomToken, issueAccessToken, cookieHeadersForAuth, clearAuthCookieHeaders } from "../_lib/session.js";
 
 export async function onRequestPost({ env, request }) {
-  const cookies = parseCookies(request);
-  const rt = cookies.bf_rt;
+  if (!env?.BF_DB) return bad(500, "BF_DB_MISSING");
+  const rt = getCookie(request, "bf_rt");
   if (!rt) return bad(401, "NO_REFRESH");
 
-  const db = env.BF_DB;
-  if (!db) return bad(500, "NO_DB_BINDING");
+  const h = await sha256Hex(rt);
+  const row = await env.BF_DB.prepare(
+    "SELECT id, user_id, expires_at FROM refresh_tokens WHERE token_hash = ?"
+  ).bind(h).first();
 
-  const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
-  const row = await db
-    .prepare("SELECT id, user_id, expires_at FROM refresh_tokens WHERE token_hash = ?")
-    .bind(rtHash)
-    .first();
-
-  if (!row) return bad(401, "INVALID_REFRESH");
-  if (row.expires_at && Number(row.expires_at) < Date.now()) {
-    try { await db.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run(); } catch {}
-    return bad(401, "EXPIRED_REFRESH");
+  if (!row) {
+    const resp = bad(401, "INVALID_REFRESH");
+    const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+    for (const c of clearAuthCookieHeaders({ isProd })) resp.headers.append("set-cookie", c);
+    return resp;
+  }
+  if (Number(row.expires_at) < Date.now()) {
+    await env.BF_DB.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run();
+    const resp = bad(401, "REFRESH_EXPIRED");
+    const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+    for (const c of clearAuthCookieHeaders({ isProd })) resp.headers.append("set-cookie", c);
+    return resp;
   }
 
-  // rotate: delete old, insert new
-  try { await db.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run(); } catch {}
-
-  const user = await db
-    .prepare("SELECT id, email, name FROM users WHERE id = ?")
+  const user = await env.BF_DB.prepare("SELECT id, email, name FROM users WHERE id = ?")
     .bind(row.user_id)
     .first();
-  if (!user) return bad(401, "INVALID_REFRESH");
+  if (!user) return bad(401, "INVALID_USER");
 
-  const accessTtl = 60 * 15;
-  const refreshTtl = 60 * 60 * 24 * 30;
+  // Rotate refresh: delete old token and issue a new one.
+  await env.BF_DB.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(row.id).run();
 
-  const at = await signJwt(env.JWT_SECRET, { sub: user.id, email: user.email, name: user.name }, accessTtl);
-
-  const newRt = makeRefreshToken();
-  const newHash = await sha256Hex(`${env.JWT_SECRET}:${newRt}`);
-  const expiresAt = Date.now() + refreshTtl * 1000;
-
-  await db.prepare(
+  const newRt = randomToken(32);
+  const newHash = await sha256Hex(newRt);
+  const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30;
+  await env.BF_DB.prepare(
     "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
   ).bind(crypto.randomUUID(), user.id, newHash, expiresAt).run();
 
-  const headers = new Headers();
-  headers.append("set-cookie", cookie("bf_at", at, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: accessTtl }));
-  headers.append("set-cookie", cookie("bf_rt", newRt, { httpOnly: true, sameSite: "Strict", path: "/api/auth", maxAge: refreshTtl }));
+  const accessToken = await issueAccessToken(env, user, 60 * 15);
+  const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+  const setCookies = cookieHeadersForAuth({ accessToken, refreshToken: newRt, isProd });
 
-  return json({ ok: true, user: { id: user.id, email: user.email, name: user.name } }, { headers });
+  const resp = ok({ user: { id: user.id, email: user.email, name: user.name } });
+  for (const c of setCookies) resp.headers.append("set-cookie", c);
+  return resp;
 }

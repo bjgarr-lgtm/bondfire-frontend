@@ -1,6 +1,5 @@
 // src/pages/SignIn.jsx
 import React, { useState } from "react";
-import { apiJSON } from "../lib/api.js";
 import { useNavigate } from "react-router-dom";
 
 export default function SignIn() {
@@ -40,6 +39,7 @@ async function handleSubmit(e) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      credentials: "include",
     });
 
     const data = await res.json().catch(() => ({}));
@@ -51,13 +51,11 @@ async function handleSubmit(e) {
       return;
     }
 
-    if (!data?.ok) {
+    if (!res.ok || !data?.ok) {
       throw new Error(
         data?.error || (mode === "register" ? "Register failed" : "Login failed")
       );
     }
-
-    sessionStorage.removeItem("bf_auth_token");
 
     // If register returns org, store it and go straight into that org
     if (mode === "register" && data?.org?.id) {
@@ -73,9 +71,9 @@ async function handleSubmit(e) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${data.token}`,
         },
         body: JSON.stringify({ code: trimmedCode }),
+        credentials: "include",
       });
       const jData = await jRes.json().catch(() => ({}));
       if (!jRes.ok || !jData?.ok) {
@@ -89,7 +87,7 @@ async function handleSubmit(e) {
 
     // Otherwise (login), load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${data.token}` },
+      credentials: "include",
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {
@@ -109,17 +107,24 @@ async function handleMfaVerify(e) {
   setErr("");
   setBusy(true);
   try {
-    const data = await apiJSON("/api/auth/login/mfa", { method: "POST", body: {
-      challenge_id: mfaStep?.challenge_id || mfaStep?.challengeId,
-      code: mfaCode,
-      recovery_code: mfaRecovery,
-    }});
-
-    localStorage.setItem("bf_logged_in", "1");
+    const res = await fetch("/api/auth/login/mfa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        challenge_id: mfaStep?.challengeId,
+        code: mfaCode,
+        recovery_code: mfaRecovery,
+      }),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.error || "MFA failed");
+    }
 
     // Load org memberships
     const orgsRes = await fetch("/api/orgs", {
-      headers: { Authorization: `Bearer ${data.token}` },
+      credentials: "include",
     });
     const orgsData = await orgsRes.json().catch(() => ({}));
     if (orgsRes.ok && orgsData?.ok && Array.isArray(orgsData.orgs)) {

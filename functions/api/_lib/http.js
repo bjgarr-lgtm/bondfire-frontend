@@ -41,33 +41,42 @@ export function requireMethod(req, method) {
   return null;
 }
 
-
+// --- cookies ---
+// Minimal cookie utilities for Pages Functions (no external deps).
 export function parseCookies(request) {
-  const header = request.headers.get("cookie") || "";
+  const h = request?.headers?.get("cookie") || "";
   const out = {};
-  header.split(";").forEach((part) => {
-    const i = part.indexOf("=");
-    if (i === -1) return;
-    const k = part.slice(0, i).trim();
-    const v = part.slice(i + 1).trim();
-    if (!k) return;
-    out[k] = decodeURIComponent(v);
-  });
+  if (!h) return out;
+  const parts = h.split(";");
+  for (const p of parts) {
+    const idx = p.indexOf("=");
+    if (idx < 0) continue;
+    const k = p.slice(0, idx).trim();
+    const v = p.slice(idx + 1).trim();
+    if (!k) continue;
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
   return out;
 }
 
-export function cookie(name, value, opts = {}) {
-  const parts = [];
-  parts.push(`${name}=${encodeURIComponent(value ?? "")}`);
-  if (opts.maxAge != null) parts.push(`Max-Age=${opts.maxAge}`);
-  if (opts.expires) parts.push(`Expires=${new Date(opts.expires).toUTCString()}`);
-  parts.push(`Path=${opts.path || "/"}`);
-  if (opts.httpOnly) parts.push("HttpOnly");
-  if (opts.secure !== false) parts.push("Secure");
-  parts.push(`SameSite=${opts.sameSite || "Lax"}`);
-  return parts.join("; ");
+export function getCookie(request, name) {
+  const c = parseCookies(request);
+  return c[name] || "";
 }
 
-export function clearCookie(name, opts = {}) {
-  return cookie(name, "", { ...opts, maxAge: 0, expires: 0 });
+// Returns a value suitable for a single Set-Cookie header.
+export function cookieString(name, value, opts = {}) {
+  const enc = encodeURIComponent(String(value ?? ""));
+  let s = `${name}=${enc}`;
+  if (opts.maxAge != null) s += `; Max-Age=${Math.floor(opts.maxAge)}`;
+  if (opts.expires) s += `; Expires=${opts.expires.toUTCString()}`;
+  s += `; Path=${opts.path || "/"}`;
+  if (opts.httpOnly) s += "; HttpOnly";
+  if (opts.secure) s += "; Secure";
+  if (opts.sameSite) s += `; SameSite=${opts.sameSite}`;
+  return s;
 }

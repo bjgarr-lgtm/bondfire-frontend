@@ -7,7 +7,6 @@ import Security from "./Security.jsx";
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-
 function humanizeError(msg) {
   const s = String(msg || "").trim();
   if (!s) return "";
@@ -18,8 +17,6 @@ function humanizeError(msg) {
 
 
 async function authFetch(path, opts = {}) {
-  const token = getToken();
-
   const relative = path.startsWith("/") ? path : `/${path}`;
   const remote = path.startsWith("http")
     ? path
@@ -35,13 +32,13 @@ async function authFetch(path, opts = {}) {
     "Content-Type": "application/json",
     ...(opts.headers || {}),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   const doReq = async (u) => {
-    const res = await fetch(u, { credentials: "include", 
+    const res = await fetch(u, {
       ...opts,
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
+      credentials: "include",
     });
 
     let j = {};
@@ -501,9 +498,9 @@ React.useEffect(() => {
       if (token) headers.Authorization = `Bearer ${token}`;
 
       // Same origin first (Pages Functions), then API_BASE
-      let res = await fetch(path, { credentials: "include",  method: "GET", headers });
+      let res = await fetch(path, { method: "GET", headers });
       if (!res.ok && API_BASE) {
-        res = await fetch(`${API_BASE}${path}`, { credentials: "include",  method: "GET", headers });
+        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
       }
 
       if (!res.ok) {

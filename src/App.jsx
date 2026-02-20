@@ -1,6 +1,5 @@
 // src/App.jsx
 import React from "react";
-import { apiFetch } from "./lib/api.js";
 import {
   HashRouter,
   Routes,
@@ -57,24 +56,20 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ------------------------------ Auth helpers ------------------------------ */
-function isLoggedInFlag() {
-  return localStorage.getItem("bf_logged_in") === "1";
-}
-
-function RequireAuth({ children }) {
+function RequireAuth({ authed, loading, children }) {
+  if (loading) return null;
   const demo = localStorage.getItem("demo_user");
-  if (!demo && !isLoggedInFlag()) return <Navigate to="/signin" replace />;
+  if (!authed && !demo) return <Navigate to="/signin" replace />;
   return children;
 }
-function logoutEverywhere() {
+
+async function logoutEverywhere() {
   try {
-    localStorage.removeItem("bf_logged_in");
-    localStorage.removeItem("bf_auth_token");
-    sessionStorage.removeItem("bf_auth_token");
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+  } catch {}
+  try {
     localStorage.removeItem("demo_user");
   } catch {}
-    try { apiFetch("/api/auth/logout", { method: "POST" }); } catch {}
-  // optional: nuke any cached org/session bits you use
   window.location.hash = "#/signin";
   window.location.reload();
 }
@@ -84,10 +79,34 @@ function Shell() {
   const loc = useLocation();
   const path = loc.pathname || "/";
 
-  const hasAuth = !!getToken();
+  const [authLoading, setAuthLoading] = React.useState(true);
+  const [authed, setAuthed] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const me = await fetch("/api/auth/me", { credentials: "include" });
+        if (me.ok) {
+          if (alive) { setAuthed(true); setAuthLoading(false); }
+          return;
+        }
+        const r = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+        if (r.ok) {
+          const me2 = await fetch("/api/auth/me", { credentials: "include" });
+          if (alive) { setAuthed(!!me2.ok); setAuthLoading(false); }
+          return;
+        }
+        if (alive) { setAuthed(false); setAuthLoading(false); }
+      } catch {
+        if (alive) { setAuthed(false); setAuthLoading(false); }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const HomeRoute = () =>
-    hasAuth ? <Navigate to="/orgs" replace /> : <Navigate to="/signin" replace />;
+    authed ? <Navigate to="/orgs" replace /> : <Navigate to="/signin" replace />;
 
   // Hide the header on public routes (keeps the "landing" clean)
   const hideHeader = path === "/" || path.startsWith("/p/") || path === "/signin";
@@ -96,7 +115,7 @@ function Shell() {
     <>
       {!hideHeader && (
         <AppHeader
-          showLogout={hasAuth}
+          showLogout={authed}
           onLogout={logoutEverywhere}
         />
       )}
@@ -115,7 +134,7 @@ function Shell() {
         <Route
           path="/orgs"
           element={
-            <RequireAuth>
+            <RequireAuth authed={authed} loading={authLoading}>
               <OrgDash />
             </RequireAuth>
           }
@@ -125,7 +144,7 @@ function Shell() {
         <Route
           path="/security"
           element={
-            <RequireAuth>
+            <RequireAuth authed={authed} loading={authLoading}>
               <Security />
             </RequireAuth>
           }
@@ -135,7 +154,7 @@ function Shell() {
         <Route
           path="/org/:orgId/*"
           element={
-            <RequireAuth>
+            <RequireAuth authed={authed} loading={authLoading}>
               <InnerSanctum />
             </RequireAuth>
           }

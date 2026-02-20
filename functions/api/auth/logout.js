@@ -1,22 +1,15 @@
-import { ok, bad, parseCookies, clearCookie } from "../_lib/http.js";
-import { sha256Hex } from "../_lib/crypto.js";
+import { ok, getCookie } from "../_lib/http.js";
+import { sha256Hex, clearAuthCookieHeaders } from "../_lib/session.js";
 
 export async function onRequestPost({ env, request }) {
-  const db = env.BF_DB;
-  if (!db) return bad(500, "NO_DB_BINDING");
-
-  const cookies = parseCookies(request);
-  const rt = cookies.bf_rt;
-
-  if (rt) {
-    const rtHash = await sha256Hex(`${env.JWT_SECRET}:${rt}`);
-    try {
-      await db.prepare("DELETE FROM refresh_tokens WHERE token_hash = ?").bind(rtHash).run();
-    } catch {}
+  const rt = getCookie(request, "bf_rt");
+  if (rt && env?.BF_DB) {
+    const h = await sha256Hex(rt);
+    await env.BF_DB.prepare("DELETE FROM refresh_tokens WHERE token_hash = ?").bind(h).run();
   }
 
-  const headers = new Headers();
-  headers.append("set-cookie", clearCookie("bf_at", { path: "/" }));
-  headers.append("set-cookie", clearCookie("bf_rt", { path: "/api/auth" }));
-  return ok({}, { headers });
+  const isProd = (env?.ENV || env?.NODE_ENV || "").toLowerCase() === "production";
+  const resp = ok({});
+  for (const c of clearAuthCookieHeaders({ isProd })) resp.headers.append("set-cookie", c);
+  return resp;
 }

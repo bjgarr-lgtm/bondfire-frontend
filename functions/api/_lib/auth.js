@@ -1,4 +1,4 @@
-import { bad } from "./http.js";
+import { bad, getCookie } from "./http.js";
 import { verifyJwt } from "./jwt.js";
 
 // Bindings can be named differently across environments.
@@ -8,15 +8,10 @@ export function getDb(env) {
 }
 
 export async function requireUser({ env, request }) {
+  // Prefer Authorization header (API clients), then fall back to HttpOnly cookie (browser).
   const h = request.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/);
-  let token = m ? m[1] : null;
-
-  if (!token) {
-    const cookies = parseCookies(request);
-    token = cookies.bf_at || null;
-  }
-
+  const token = (m && m[1]) ? m[1] : (getCookie(request, "bf_at") || "");
   if (!token) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
 
   const payload = await verifyJwt(env.JWT_SECRET, token);
