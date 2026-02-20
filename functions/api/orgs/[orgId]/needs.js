@@ -1,6 +1,13 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
+import { getDb } from "../../_lib/auth.js";
+
+async function ensureZkCols(db) {
+  // Prefer migrations, but don't brick if someone forgot to run them.
+  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
+  try { await db.prepare("ALTER TABLE needs ADD COLUMN key_version INTEGER").run(); } catch {}
+}
 
 function asString(v) {
   if (v == null) return "";
@@ -63,11 +70,16 @@ export async function onRequestGet({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
+  const db = getDb(env);
+  await ensureZkCols(db);
+
   const r = await env.BF_DB.prepare(
     `SELECT
        id,
        title,
        description,
+       encrypted_description,
+       key_version,
        status,
        priority,
        CASE
@@ -100,6 +112,8 @@ export async function onRequestPost({ env, request, params }) {
   if (!title) return bad(400, "Title is required");
 
   const description = asString(body.description).trim();
+  const encrypted_description = body?.encrypted_description ? asString(body.encrypted_description) : null;
+  const key_version = body?.key_version != null ? asInt(body.key_version, null) : null;
   const status = asString(body.status).trim() || "open";
 
   // Always an int, never null, because DB column is NOT NULL
@@ -110,11 +124,26 @@ export async function onRequestPost({ env, request, params }) {
   const id = uuid();
   const t = now();
 
+  const db = getDb(env);
+  await ensureZkCols(db);
+
   await env.BF_DB.prepare(
-    `INSERT INTO needs (id, org_id, title, description, status, priority, is_public, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO needs (id, org_id, title, description, encrypted_description, key_version, status, priority, is_public, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, orgId, title, description, status, priority, is_public, t, t)
+    .bind(
+      id,
+      orgId,
+      title,
+      encrypted_description ? "" : description,
+      encrypted_description,
+      key_version,
+      status,
+      priority,
+      is_public,
+      t,
+      t
+    )
     .run();
 
   await safeLog(env, {
@@ -139,8 +168,11 @@ export async function onRequestPut({ env, request, params }) {
   const id = asString(body.id).trim();
   if (!id) return bad(400, "id is required");
 
+  const db = getDb(env);
+  await ensureZkCols(db);
+
   const existing = await env.BF_DB.prepare(
-    `SELECT id, title, description, status, priority, is_public
+    `SELECT id, title, description, encrypted_description, key_version, status, priority, is_public
      FROM needs
      WHERE org_id = ? AND id = ?`
   )
@@ -155,6 +187,16 @@ export async function onRequestPut({ env, request, params }) {
     body.description === undefined
       ? existing.description
       : asString(body.description).trim();
+
+  const nextEncryptedDescription =
+    body.encrypted_description === undefined
+      ? existing.encrypted_description
+      : body.encrypted_description
+      ? asString(body.encrypted_description)
+      : null;
+
+  const nextKeyVersion =
+    body.key_version === undefined ? existing.key_version : asInt(body.key_version, existing.key_version);
   const nextStatus =
     body.status === undefined ? existing.status : asString(body.status).trim();
 
@@ -178,12 +220,14 @@ export async function onRequestPut({ env, request, params }) {
 
   await env.BF_DB.prepare(
     `UPDATE needs
-     SET title = ?, description = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
+     SET title = ?, description = ?, encrypted_description = ?, key_version = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
      WHERE org_id = ? AND id = ?`
   )
     .bind(
       nextTitle,
-      nextDescription,
+      nextEncryptedDescription ? "" : nextDescription,
+      nextEncryptedDescription,
+      nextKeyVersion,
       nextStatus,
       nextPriority,
       nextPublic,

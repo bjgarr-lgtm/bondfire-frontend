@@ -4,7 +4,7 @@ import { logActivity } from "../../_lib/activity.js";
 
 async function ensureMeetingsZkColumns(db) {
   try { await db.prepare("ALTER TABLE meetings ADD COLUMN encrypted_notes TEXT").run(); } catch {}
-  try { await db.prepare("ALTER TABLE meetings ADD COLUMN zk_key_version INTEGER").run(); } catch {}
+  try { await db.prepare("ALTER TABLE meetings ADD COLUMN key_version INTEGER").run(); } catch {}
 }
 
 async function ensureMeetingsPublicColumn(db) {
@@ -27,9 +27,10 @@ export async function onRequestGet({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   await ensureMeetingsPublicColumn(env.BF_DB);
+  await ensureMeetingsZkColumns(env.BF_DB);
 
   const res = await env.BF_DB.prepare(
-    `SELECT id, title, starts_at, ends_at, location, agenda, notes, is_public, created_at, updated_at
+    `SELECT id, title, starts_at, ends_at, location, agenda, notes, encrypted_notes, key_version, is_public, created_at, updated_at
      FROM meetings
      WHERE org_id = ?
      ORDER BY starts_at DESC, created_at DESC`
@@ -55,11 +56,15 @@ export async function onRequestPost({ env, request, params }) {
   const endsAt = Number.isFinite(Number(body.ends_at)) ? Number(body.ends_at) : startsAt;
 
   await ensureMeetingsPublicColumn(env.BF_DB);
+  await ensureMeetingsZkColumns(env.BF_DB);
+
+  const encryptedNotes = body.encrypted_notes ? String(body.encrypted_notes) : null;
+  const keyVersion = body.key_version == null ? null : Number(body.key_version);
 
   await env.BF_DB.prepare(
     `INSERT INTO meetings (
-        id, org_id, title, starts_at, ends_at, location, agenda, notes, is_public, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        id, org_id, title, starts_at, ends_at, location, agenda, notes, encrypted_notes, key_version, is_public, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
   )
     .bind(
       id,
@@ -69,7 +74,9 @@ export async function onRequestPost({ env, request, params }) {
       endsAt,
       String(body.location || ""),
       String(body.agenda || ""),
-      String(body.notes || ""),
+      encryptedNotes ? "" : String(body.notes || ""),
+      encryptedNotes,
+      Number.isFinite(keyVersion) ? keyVersion : null,
       body.is_public ? 1 : 0,
       t,
       t
@@ -100,6 +107,10 @@ export async function onRequestPut({ env, request, params }) {
   if (!id) return bad(400, "MISSING_ID");
 
   await ensureMeetingsPublicColumn(env.BF_DB);
+  await ensureMeetingsZkColumns(env.BF_DB);
+  const encryptedNotes =
+    body.encrypted_notes === undefined ? undefined : (body.encrypted_notes ? String(body.encrypted_notes) : null);
+  const keyVersion = body.key_version === undefined ? undefined : Number(body.key_version);
 
   const startsAt =
     body.starts_at === undefined || body.starts_at === null
@@ -123,6 +134,8 @@ export async function onRequestPut({ env, request, params }) {
          location = COALESCE(?, location),
          agenda = COALESCE(?, agenda),
          notes = COALESCE(?, notes),
+         encrypted_notes = COALESCE(?, encrypted_notes),
+         key_version = COALESCE(?, key_version),
          is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
@@ -133,7 +146,9 @@ export async function onRequestPut({ env, request, params }) {
       endsAt,
       body.location ?? null,
       body.agenda ?? null,
-      body.notes ?? null,
+      encryptedNotes ? "" : (body.notes ?? null),
+      encryptedNotes === undefined ? null : encryptedNotes,
+      keyVersion === undefined || !Number.isFinite(keyVersion) ? null : keyVersion,
       body.is_public === undefined ? null : (body.is_public ? 1 : 0),
       now(),
       id,

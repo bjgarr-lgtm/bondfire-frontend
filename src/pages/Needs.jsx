@@ -1,6 +1,7 @@
 // src/pages/Needs.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
   try {
@@ -52,6 +53,8 @@ export default function Needs() {
   const orgId = getOrgId();
   const isMobile = useIsMobile(720);
 
+  const [orgKeyVersion, setOrgKeyVersion] = useState(1);
+
   const [needs, setNeeds] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
@@ -71,8 +74,35 @@ export default function Needs() {
     setLoading(true);
     setErr("");
     try {
+      // best-effort key version (used when sending ciphertext)
+      try {
+        const c = await api(`/api/orgs/${encodeURIComponent(orgId)}/crypto`);
+        if (c?.key_version) setOrgKeyVersion(Number(c.key_version) || 1);
+      } catch {}
+
       const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-      setNeeds(Array.isArray(data.needs) ? data.needs : []);
+      const rows = Array.isArray(data.needs) ? data.needs : [];
+
+      const orgKey = getCachedOrgKey(orgId);
+      if (!orgKey) {
+        setNeeds(rows);
+        return;
+      }
+
+      const decrypted = [];
+      for (const n of rows) {
+        if (n?.encrypted_description) {
+          try {
+            const desc = await decryptWithOrgKey(orgKey, n.encrypted_description);
+            decrypted.push({ ...n, description: String(desc || "") });
+          } catch {
+            decrypted.push({ ...n, description: "[encrypted]" });
+          }
+        } else {
+          decrypted.push(n);
+        }
+      }
+      setNeeds(decrypted);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -98,10 +128,22 @@ export default function Needs() {
 
   async function putNeed(id, patch) {
     if (!orgId || !id) return;
+
+    const orgKey = getCachedOrgKey(orgId);
+    const finalPatch = { ...patch };
+    if (orgKey && patch?.description !== undefined) {
+      try {
+        finalPatch.encrypted_description = await encryptWithOrgKey(orgKey, String(patch.description || ""));
+        finalPatch.key_version = orgKeyVersion;
+        finalPatch.description = "";
+      } catch {
+        // if encryption fails, fall back to plaintext
+      }
+    }
     await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...patch }),
+      body: JSON.stringify({ id, ...finalPatch }),
     });
     refreshNeeds().catch(console.error);
   }
@@ -124,6 +166,8 @@ export default function Needs() {
     const title = String(form.title || "").trim();
     if (!title) return;
 
+    const orgKey = getCachedOrgKey(orgId);
+
     const payload = {
       title,
       description: String(form.description || "").trim(),
@@ -131,6 +175,16 @@ export default function Needs() {
       status: String(form.status || "open").trim() || "open",
       is_public: !!form.is_public,
     };
+
+    if (orgKey && payload.description) {
+      try {
+        payload.encrypted_description = await encryptWithOrgKey(orgKey, payload.description);
+        payload.key_version = orgKeyVersion;
+        payload.description = "";
+      } catch {
+        // ignore
+      }
+    }
 
     const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "POST",
