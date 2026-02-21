@@ -1,28 +1,43 @@
+// src/utils/api.js
+// Central API helper.
+//
+// Bondfire uses cookie-based sessions (HttpOnly tokens) so the browser must
+// include cookies on requests. For unsafe methods we also send a CSRF header
+// that matches the non-HttpOnly bf_csrf cookie (double-submit pattern).
+
+function getCookie(name) {
+  if (typeof document === "undefined") return "";
+  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+function isUnsafeMethod(method) {
+  const m = (method || "GET").toUpperCase();
+  return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
+}
+
 export async function api(path, opts = {}) {
   const headers = new Headers(opts.headers || {});
-
-  // CSRF double-submit (cookie + header). Only for state-changing requests.
-  const m = document.cookie.match(/(?:^|;\s*)bf_csrf=([^;]+)/);
-  const csrf = m ? decodeURIComponent(m[1]) : "";
   const method = (opts.method || "GET").toUpperCase();
-  if (csrf && !["GET", "HEAD", "OPTIONS"].includes(method)) {
-    headers.set("x-csrf", csrf);
-  }
 
+  // Default JSON content-type when body is a JSON string.
   if (!headers.has("content-type") && opts.body && typeof opts.body === "string") {
     headers.set("content-type", "application/json; charset=utf-8");
   }
 
-  const doFetch = () => fetch(path, { ...opts, headers, credentials: "include" });
-
-  let res = await doFetch();
-  // If access token expired, attempt one silent refresh.
-  if (res.status === 401) {
-    const r = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" }).catch(() => null);
-    if (r && r.ok) {
-      res = await doFetch();
-    }
+  // CSRF: only for unsafe methods.
+  if (isUnsafeMethod(method) && !headers.has("x-csrf")) {
+    const csrf = getCookie("bf_csrf");
+    if (csrf) headers.set("x-csrf", csrf);
   }
+
+  const res = await fetch(path, {
+    ...opts,
+    method,
+    headers,
+    credentials: "include",
+  });
+
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok || data?.ok === false) {

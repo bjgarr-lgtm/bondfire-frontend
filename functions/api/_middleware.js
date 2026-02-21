@@ -1,14 +1,33 @@
 function corsHeadersFor(request) {
+  // Cookie-based auth requires credentials-friendly CORS.
+  // For same-origin requests this doesn't matter, but for safety we echo Origin.
   const origin = request.headers.get("Origin") || "";
-  // Cookie auth requires a concrete origin, not '*'. We reflect Origin.
-  // If you later add an allowlist, enforce it here.
   return {
     "Access-Control-Allow-Origin": origin || "*",
-    "Vary": "Origin",
+    "Vary": origin ? "Origin" : "",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "authorization, content-type",
+    "Access-Control-Allow-Headers": "authorization, content-type, x-csrf",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   };
+}
+
+function readCookie(request, name) {
+  const raw = request.headers.get("Cookie") || "";
+  const parts = raw.split(";").map((s) => s.trim());
+  for (const p of parts) {
+    if (!p) continue;
+    const idx = p.indexOf("=");
+    if (idx === -1) continue;
+    const k = p.slice(0, idx);
+    const v = p.slice(idx + 1);
+    if (k === name) return decodeURIComponent(v);
+  }
+  return "";
+}
+
+function isUnsafe(method) {
+  const m = (method || "GET").toUpperCase();
+  return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
 }
 
 const SECURITY_HEADERS = {
@@ -27,49 +46,34 @@ const SECURITY_HEADERS = {
 };
 
 export async function onRequest({ request, next }) {
-  // Preflight for cross-origin Authorization header requests
+  const CORS_HEADERS = corsHeadersFor(request);
+
+  // Preflight for cross-origin requests
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeadersFor(request) });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  // CSRF protection for cookie-based auth.
-  // Double-submit: SPA reads bf_csrf cookie and echoes it as X-CSRF.
-  const url = new URL(request.url);
-  const method = request.method.toUpperCase();
-  const csrfExempt =
-    method === "GET" ||
-    method === "HEAD" ||
-    url.pathname.startsWith("/api/auth/login") ||
-    url.pathname.startsWith("/api/auth/register") ||
-    url.pathname.startsWith("/api/auth/refresh") ||
-    url.pathname.startsWith("/api/auth/logout");
-
-  if (!csrfExempt) {
-    const cookie = request.headers.get("cookie") || "";
-    const m = cookie.match(/(?:^|;\s*)bf_csrf=([^;]+)/);
-    let csrfCookie = "";
-    if (m) {
-      try {
-        csrfCookie = decodeURIComponent(m[1]);
-      } catch {
-        csrfCookie = m[1];
-      }
-    }
-    const csrfHeader = request.headers.get("x-csrf") || "";
+  // CSRF: double-submit cookie pattern.
+  // Only enforce on unsafe methods.
+  if (isUnsafe(request.method)) {
+    const csrfCookie = readCookie(request, "bf_csrf");
+    const csrfHeader = request.headers.get("X-CSRF") || request.headers.get("x-csrf") || "";
     if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+      const headers = new Headers(CORS_HEADERS);
+      for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
       return new Response(JSON.stringify({ ok: false, error: "CSRF" }), {
         status: 403,
-        headers: {
-          "content-type": "application/json",
-          ...corsHeadersFor(request),
-        },
+        headers,
       });
     }
   }
 
   const resp = await next();
   const headers = new Headers(resp.headers);
-  for (const [k, v] of Object.entries(corsHeadersFor(request))) headers.set(k, v);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) {
+    if (v === "") continue;
+    headers.set(k, v);
+  }
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
     if (!headers.has(k)) headers.set(k, v);
   }
