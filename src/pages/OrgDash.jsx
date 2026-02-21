@@ -3,6 +3,12 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../utils/api";
 
+/* ---------- API helper ---------- */
+// OrgDash used to do its own Bearer-token fetches.
+// We now route everything through src/utils/api.js so it works with:
+// - legacy Bearer tokens (localStorage/sessionStorage)
+// - cookie sessions + CSRF
+
 function useIsMobile(maxWidthPx = 720) {
   const [isMobile, setIsMobile] = React.useState(() => {
     if (typeof window === "undefined") return false;
@@ -26,6 +32,17 @@ function useIsMobile(maxWidthPx = 720) {
   return isMobile;
 }
 
+async function authFetch(path, opts = {}) {
+  const method = String(opts.method || "GET").toUpperCase();
+  const headers = { ...(opts.headers || {}) };
+  const hasBody = opts.body !== undefined && opts.body !== null;
+  const body = hasBody ? JSON.stringify(opts.body) : undefined;
+  if (hasBody && !headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  return api(path, { method, headers, body });
+}
+
 export default function OrgDash() {
   const nav = useNavigate();
   const isMobile = useIsMobile(720);
@@ -36,21 +53,6 @@ export default function OrgDash() {
 
   const [newOrgName, setNewOrgName] = React.useState("");
   const [inviteCode, setInviteCode] = React.useState("");
-
-  const load = React.useCallback(async () => {
-    setMsg("");
-    try {
-      const r = await api("/api/orgs", { method: "GET" });
-      setOrgs(Array.isArray(r.orgs) ? r.orgs : []);
-    } catch (e) {
-      setMsg(e?.message || "Failed to load orgs");
-    }
-  }, []);
-
-  React.useEffect(() => {
-    load();
-  }, [load]);
-
   const deleteOrg = async (org) => {
     const id = org?.id;
     if (!id) return;
@@ -62,7 +64,7 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
-      await api(`/api/orgs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await authFetch(`/api/orgs/${encodeURIComponent(id)}`, { method: "DELETE" });
       await load();
       setMsg(`Deleted "${name}".`);
     } catch (e) {
@@ -72,35 +74,41 @@ export default function OrgDash() {
     }
   };
 
+  const load = React.useCallback(async () => {
+    setMsg("");
+    try {
+      const r = await authFetch("/api/orgs", { method: "GET" });
+      setOrgs(Array.isArray(r.orgs) ? r.orgs : []);
+    } catch (e) {
+      setMsg(e.message || "Failed to load orgs");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
   const createOrg = async (e) => {
     e?.preventDefault();
     const name = (newOrgName || "").trim();
     if (!name) return;
-
     setBusy(true);
     setMsg("");
     try {
-      const r = await api("/api/orgs/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-
+      const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
       setNewOrgName("");
-
-      // Optimistically update list so you don't see "No orgs" while redirecting.
+      // Optimistically add to list so you don't see "No orgs" right after creating.
       if (r?.org?.id) {
         setOrgs((prev) => {
-          const next = Array.isArray(prev) ? prev.slice() : [];
-          if (!next.find((o) => o?.id === r.org.id)) next.unshift(r.org);
-          return next;
+          const exists = prev.some((o) => o.id === r.org.id);
+          return exists ? prev : [{ ...r.org, role: r.org.role || "owner" }, ...prev];
         });
-        nav(`/org/${encodeURIComponent(r.org.id)}`);
       } else {
         await load();
       }
+      if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
     } catch (e2) {
-      setMsg(e2?.message || "Failed to create org");
+      setMsg(e2.message || "Failed to create org");
     } finally {
       setBusy(false);
     }
@@ -110,23 +118,16 @@ export default function OrgDash() {
     e?.preventDefault();
     const code = (inviteCode || "").trim().toUpperCase();
     if (!code) return;
-
     setBusy(true);
     setMsg("");
     try {
-      const r = await api("/api/invites/redeem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
+      const r = await authFetch("/api/invites/redeem", { method: "POST", body: { code } });
       setInviteCode("");
       await load();
-
       if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
       else setMsg("Joined.");
     } catch (e2) {
-      setMsg(e2?.message || "Failed to join");
+      setMsg(e2.message || "Failed to join");
     } finally {
       setBusy(false);
     }
@@ -192,15 +193,13 @@ export default function OrgDash() {
         </div>
 
         {msg && (
-          <div className={msg.toLowerCase().includes("fail") || msg.toLowerCase().includes("http_") ? "error" : "helper"} style={{ marginTop: 10 }}>
+          <div className={msg.toLowerCase().includes("fail") ? "error" : "helper"} style={{ marginTop: 10 }}>
             {msg}
           </div>
         )}
 
         {orgs.length === 0 ? (
-          <div className="helper" style={{ marginTop: 12 }}>
-            No orgs yet.
-          </div>
+          <div className="helper" style={{ marginTop: 12 }}>No orgs yet.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {orgs.map((o) => (
@@ -242,6 +241,7 @@ export default function OrgDash() {
                     Delete
                   </button>
                 </div>
+
               </div>
             ))}
           </div>

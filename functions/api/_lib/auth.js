@@ -1,4 +1,4 @@
-import { bad, getCookie } from "./http.js";
+import { bad } from "./http.js";
 import { verifyJwt } from "./jwt.js";
 
 // Bindings can be named differently across environments.
@@ -8,10 +8,19 @@ export function getDb(env) {
 }
 
 export async function requireUser({ env, request }) {
-  // Prefer Authorization header (API clients), then fall back to HttpOnly cookie (browser).
   const h = request.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/);
-  const token = (m && m[1]) ? m[1] : (getCookie(request, "bf_at") || "");
+  // Support both Bearer auth AND cookie sessions (httpOnly).
+  // This allows a gradual migration away from localStorage tokens.
+  const cookieHeader = request.headers.get("cookie") || "";
+  const cookies = {};
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (!k) continue;
+    cookies[k] = decodeURIComponent(rest.join("=") || "");
+  }
+
+  const token = (m && m[1]) || cookies.bf_at || cookies.bf_auth_token || cookies.bf_token || "";
   if (!token) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
 
   const payload = await verifyJwt(env.JWT_SECRET, token);
