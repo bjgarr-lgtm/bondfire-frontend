@@ -1,11 +1,7 @@
-// functions/api/_middleware.js
-// Global API middleware: CORS + security headers + cookie-based CSRF protection.
-
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
-  "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
   // CSP tuned for this app (React inline styles are used heavily).
   // If you later remove inline styles, drop 'unsafe-inline'.
   "Content-Security-Policy":
@@ -13,119 +9,73 @@ const SECURITY_HEADERS = {
     "script-src 'self'; style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: https:; font-src 'self' data:; " +
     "connect-src 'self' https: wss:;",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
 };
 
-const CSRF_COOKIE = "bf_csrf";
+function corsHeadersFor(request) {
+  // Cookie auth requires non-* ACAO + credentials.
+  const origin = request.headers.get("Origin");
+  const h = new Headers();
+  if (origin) {
+    h.set("Access-Control-Allow-Origin", origin);
+    h.set("Vary", "Origin");
+    h.set("Access-Control-Allow-Credentials", "true");
+  } else {
+    // Same-origin requests (no Origin header)
+    h.set("Access-Control-Allow-Origin", "*");
+  }
 
-function parseCookies(cookieHeader = "") {
-  const out = {};
-  cookieHeader.split(/;\s*/).forEach((kv) => {
-    if (!kv) return;
-    const i = kv.indexOf("=");
-    if (i < 0) return;
-    const k = kv.slice(0, i).trim();
-    const v = kv.slice(i + 1).trim();
-    out[k] = decodeURIComponent(v);
-  });
-  return out;
-}
-
-function base64Url(bytes) {
-  // bytes: Uint8Array
-  let str = "";
-  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function mintCsrf() {
-  const b = new Uint8Array(32);
-  crypto.getRandomValues(b);
-  return base64Url(b);
-}
-
-function setCookie(headers, name, value, attrs = "") {
-  // Append Set-Cookie without clobbering existing.
-  const line = `${name}=${encodeURIComponent(value)}; ${attrs}`.trim();
-  headers.append("Set-Cookie", line);
-}
-
-function json(status, obj, extraHeaders = {}) {
-  const h = new Headers({ "content-type": "application/json; charset=utf-8" });
-  for (const [k, v] of Object.entries(extraHeaders)) h.set(k, v);
-  return new Response(JSON.stringify(obj), { status, headers: h });
-}
-
-function isUnsafe(method) {
-  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
-}
-
-function isCsrfExempt(pathname) {
-  // Bootstrap endpoints cannot require CSRF because the cookie may not exist yet.
-  // Keep this list tight.
-  return (
-    pathname === "/api/auth/login" ||
-    pathname === "/api/auth/register" ||
-    pathname === "/api/auth/login/mfa" ||
-    pathname === "/api/auth/refresh" ||
-    pathname === "/api/auth/logout" ||
-    pathname === "/api/auth/logout_all"
+  h.set(
+    "Access-Control-Allow-Headers",
+    "authorization, content-type, x-csrf"
   );
+  h.set(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+  );
+  // Cache preflights a bit.
+  h.set("Access-Control-Max-Age", "86400");
+  return h;
+}
+
+function isApiJson(request) {
+  const accept = request.headers.get("Accept") || "";
+  const url = new URL(request.url);
+  // Heuristic: if it's under /api OR accepts JSON, treat as JSON.
+  return url.pathname.startsWith("/api/") || accept.includes("application/json");
 }
 
 export async function onRequest({ request, next }) {
-  const url = new URL(request.url);
-  const origin = request.headers.get("Origin") || "";
+  const cors = corsHeadersFor(request);
 
-  // CORS: allow same-origin + explicit Origin with credentials.
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Vary": origin ? "Origin" : undefined,
-    "Access-Control-Allow-Credentials": origin ? "true" : undefined,
-    "Access-Control-Allow-Headers": "authorization, content-type, x-csrf",
-    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  };
-
+  // Preflight
   if (request.method === "OPTIONS") {
-    const h = new Headers();
-    for (const [k, v] of Object.entries(corsHeaders)) if (v) h.set(k, v);
-    return new Response(null, { status: 204, headers: h });
+    return new Response(null, { status: 204, headers: cors });
   }
 
-  const cookies = parseCookies(request.headers.get("Cookie") || "");
-  const hasCsrf = !!cookies[CSRF_COOKIE];
+  let resp;
+  try {
+    resp = await next();
+  } catch (err) {
+    // Prevent Cloudflare 1101 "Worker threw exception" HTML pages.
+    console.error("Unhandled exception in Pages Function:", err);
+    const headers = new Headers(cors);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
 
-  // Enforce CSRF on unsafe requests (except exempt endpoints).
-  if (isUnsafe(request.method) && !isCsrfExempt(url.pathname)) {
-    const csrfCookie = cookies[CSRF_COOKIE] || "";
-    const csrfHeader = request.headers.get("X-CSRF") || request.headers.get("x-csrf") || "";
-    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-      // Also mint a cookie so the next attempt can succeed without a full reload.
-      const h = new Headers();
-      for (const [k, v] of Object.entries(corsHeaders)) if (v) h.set(k, v);
-      for (const [k, v] of Object.entries(SECURITY_HEADERS)) h.set(k, v);
-      if (!hasCsrf) {
-        const token = mintCsrf();
-        setCookie(h, CSRF_COOKIE, token, "Path=/; SameSite=Lax; Secure");
-      }
-      return json(403, { ok: false, error: "CSRF" }, Object.fromEntries(h.entries()));
-    }
+    const body = isApiJson(request)
+      ? JSON.stringify({ error: "INTERNAL", message: "Worker exception" })
+      : "Internal error";
+
+    headers.set("Content-Type", isApiJson(request) ? "application/json" : "text/plain; charset=utf-8");
+    return new Response(body, { status: 500, headers });
   }
 
-  const resp = await next();
   const headers = new Headers(resp.headers);
-
-  for (const [k, v] of Object.entries(corsHeaders)) {
-    if (!v) continue;
-    headers.set(k, v);
-  }
+  // Apply CORS
+  for (const [k, v] of cors.entries()) headers.set(k, v);
+  // Apply security headers
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
     if (!headers.has(k)) headers.set(k, v);
-  }
-
-  // Ensure CSRF cookie exists for authenticated flows.
-  if (!hasCsrf) {
-    const token = mintCsrf();
-    setCookie(headers, CSRF_COOKIE, token, "Path=/; SameSite=Lax; Secure");
   }
 
   return new Response(resp.body, {
