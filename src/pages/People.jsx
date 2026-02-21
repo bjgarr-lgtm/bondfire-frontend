@@ -1,6 +1,7 @@
 // src/pages/People.jsx
 import React, { useMemo, useEffect, useState } from "react";
 import { api } from "../utils/api.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
   try {
@@ -42,6 +43,8 @@ function uniqSorted(arr) {
 
 export default function People() {
   const orgId = getOrgId();
+
+  const [orgKeyVersion, setOrgKeyVersion] = useState(1);
   const isMobile = useIsMobile(720);
 
   const [people, setPeople] = useState([]);

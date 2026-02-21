@@ -37,6 +37,7 @@ export async function onRequest(ctx) {
              u.id AS user_id,
              u.email AS email,
              u.name AS name,
+             u.public_key AS public_key,
              m.role AS role,
              m.created_at AS created_at
            FROM org_memberships m
@@ -58,7 +59,10 @@ export async function onRequest(ctx) {
       return ok({
         members: (rows.results || []).map((r) => ({
           userId: r.user_id,
+          user_id: r.user_id,
           email: r.email || "",
+          publicKey: r.public_key || null,
+          public_key: r.public_key || null,
           name: r.name || "",
           role: r.role || "member",
           createdAt: r.created_at || null,

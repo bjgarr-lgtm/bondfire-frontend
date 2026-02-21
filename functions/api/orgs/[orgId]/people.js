@@ -8,7 +8,7 @@ export async function onRequestGet({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   const res = await env.BF_DB.prepare(
-    "SELECT id, name, role, phone, skills, notes, created_at, updated_at FROM people WHERE org_id = ? ORDER BY created_at DESC"
+    "SELECT id, name, role, phone, skills, notes, encrypted_notes, key_version, created_at, updated_at FROM people WHERE org_id = ? ORDER BY created_at DESC"
   ).bind(orgId).all();
 
   return json({ ok: true, people: res.results || [] });
@@ -27,8 +27,8 @@ export async function onRequestPost({ env, request, params }) {
   const t = now();
 
   await env.BF_DB.prepare(
-    `INSERT INTO people (id, org_id, name, role, phone, skills, notes, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO people (id, org_id, name, role, phone, skills, notes, encrypted_notes, key_version, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     id,
     orgId,
@@ -37,6 +37,8 @@ export async function onRequestPost({ env, request, params }) {
     String(body.phone || ""),
     String(body.skills || ""),
     String(body.notes || ""),
+    body.encrypted_notes ?? null,
+    (Number.isFinite(Number(body.key_version)) ? Number(body.key_version) : null),
     t,
     t
   ).run();
@@ -71,6 +73,8 @@ export async function onRequestPut({ env, request, params }) {
          phone = COALESCE(?, phone),
          skills = COALESCE(?, skills),
          notes = COALESCE(?, notes),
+         encrypted_notes = COALESCE(?, encrypted_notes),
+         key_version = COALESCE(?, key_version),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
   ).bind(
@@ -79,6 +83,8 @@ export async function onRequestPut({ env, request, params }) {
     body.phone ?? null,
     body.skills ?? null,
     body.notes ?? null,
+    body.encrypted_notes ?? null,
+    (Number.isFinite(Number(body.key_version)) ? Number(body.key_version) : null),
     now(),
     id,
     orgId

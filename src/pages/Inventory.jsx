@@ -1,6 +1,7 @@
 // src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
   try {
@@ -19,6 +20,8 @@ function uniqSorted(arr) {
 
 export default function Inventory() {
   const orgId = getOrgId();
+
+  const [orgKeyVersion, setOrgKeyVersion] = useState(1);
 
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
@@ -45,8 +48,35 @@ export default function Inventory() {
     setLoading(true);
     setErr("");
     try {
+      // best-effort key version (used when sending ciphertext)
+      try {
+        const c = await api(`/api/orgs/${encodeURIComponent(orgId)}/crypto`);
+        if (c?.key_version) setOrgKeyVersion(Number(c.key_version) || 1);
+      } catch {}
+
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-      setItems(Array.isArray(d.inventory) ? d.inventory : []);
+      const rows = Array.isArray(d.inventory) ? d.inventory : [];
+
+      const orgKey = getCachedOrgKey(orgId);
+      if (!orgKey) {
+        setItems(rows);
+        return;
+      }
+
+      const decrypted = [];
+      for (const it of rows) {
+        if (it?.encrypted_notes) {
+          try {
+            const n = await decryptWithOrgKey(orgKey, it.encrypted_notes);
+            decrypted.push({ ...it, notes: String(n || "") });
+          } catch {
+            decrypted.push({ ...it, notes: "[encrypted]" });
+          }
+        } else {
+          decrypted.push(it);
+        }
+      }
+      setItems(decrypted);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -124,7 +154,9 @@ export default function Inventory() {
         unit,
         category,
         location,
-        notes,
+        notes: (getCachedOrgKey(orgId) ? "" : notes),
+        encrypted_notes: (getCachedOrgKey(orgId) && notes ? await encryptWithOrgKey(getCachedOrgKey(orgId), notes) : null),
+        key_version: (getCachedOrgKey(orgId) && notes ? orgKeyVersion : null),
         is_public,
       }),
     });

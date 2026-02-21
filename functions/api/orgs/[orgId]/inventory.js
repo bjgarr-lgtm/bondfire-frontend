@@ -4,7 +4,7 @@ import { logActivity } from "../../_lib/activity.js";
 
 // Inventory items for an org.
 // Columns expected:
-// id, org_id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
+// id, org_id, name, qty, unit, category, location, notes, encrypted_notes, key_version, is_public, created_at, updated_at
 
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
@@ -12,7 +12,7 @@ export async function onRequestGet({ env, request, params }) {
   if (!a.ok) return a.resp;
 
   const res = await env.BF_DB.prepare(
-    `SELECT id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
+    `SELECT id, name, qty, unit, category, location, notes, encrypted_notes, key_version, is_public, created_at, updated_at
      FROM inventory
      WHERE org_id = ?
      ORDER BY created_at DESC`
@@ -38,8 +38,8 @@ export async function onRequestPost({ env, request, params }) {
 
   await env.BF_DB.prepare(
     `INSERT INTO inventory (
-        id, org_id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        id, org_id, name, qty, unit, category, location, notes, encrypted_notes, key_version, is_public, created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
   )
     .bind(
       id,
@@ -50,6 +50,8 @@ export async function onRequestPost({ env, request, params }) {
       String(body.category || ""),
       String(body.location || ""),
       String(body.notes || ""),
+      body.encrypted_notes ?? null,
+      (Number.isFinite(Number(body.key_version)) ? Number(body.key_version) : null),
       body.is_public ? 1 : 0,
       t,
       t
@@ -97,6 +99,8 @@ export async function onRequestPut({ env, request, params }) {
          category = COALESCE(?, category),
          location = COALESCE(?, location),
          notes = COALESCE(?, notes),
+         encrypted_notes = COALESCE(?, encrypted_notes),
+         key_version = COALESCE(?, key_version),
          is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
