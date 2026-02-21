@@ -1,39 +1,38 @@
 // src/utils/api.js
-// Central API helper.
-//
-// Bondfire uses cookie-based sessions (HttpOnly tokens) so the browser must
-// include cookies on requests. For unsafe methods we also send a CSRF header
-// that matches the non-HttpOnly bf_csrf cookie (double-submit pattern).
+
+// Cookie-based auth + CSRF.
+// Access/refresh tokens live in httpOnly cookies.
+// For unsafe requests, we send X-CSRF that matches the bf_csrf cookie.
 
 function getCookie(name) {
   if (typeof document === "undefined") return "";
-  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-function isUnsafeMethod(method) {
-  const m = (method || "GET").toUpperCase();
-  return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
+export function getAuthToken() {
+  // Legacy compatibility: token-based auth is deprecated.
+  return "";
 }
 
 export async function api(path, opts = {}) {
   const headers = new Headers(opts.headers || {});
-  const method = (opts.method || "GET").toUpperCase();
 
-  // Default JSON content-type when body is a JSON string.
+  // JSON helper
   if (!headers.has("content-type") && opts.body && typeof opts.body === "string") {
     headers.set("content-type", "application/json; charset=utf-8");
   }
 
-  // CSRF: only for unsafe methods.
-  if (isUnsafeMethod(method) && !headers.has("x-csrf")) {
+  // CSRF for unsafe methods
+  const method = (opts.method || "GET").toUpperCase();
+  const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+  if (unsafe && !headers.has("x-csrf") && !headers.has("X-CSRF")) {
     const csrf = getCookie("bf_csrf");
-    if (csrf) headers.set("x-csrf", csrf);
+    if (csrf) headers.set("X-CSRF", csrf);
   }
 
   const res = await fetch(path, {
     ...opts,
-    method,
     headers,
     credentials: "include",
   });
