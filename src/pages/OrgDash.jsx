@@ -1,13 +1,9 @@
 // src/pages/OrgDash.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../utils/api";
 
 /* ---------- API helper ---------- */
-// OrgDash used to do its own Bearer-token fetches.
-// We now route everything through src/utils/api.js so it works with:
-// - legacy Bearer tokens (localStorage/sessionStorage)
-// - cookie sessions + CSRF
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
 function useIsMobile(maxWidthPx = 720) {
   const [isMobile, setIsMobile] = React.useState(() => {
@@ -32,15 +28,72 @@ function useIsMobile(maxWidthPx = 720) {
   return isMobile;
 }
 
+function getToken() {
+  // Back-compat: older builds stored a JWT in storage.
+  // Newer cookie-session builds won't have this, and that's OK.
+  return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
+}
+
+function readCookie(name) {
+  if (typeof document === "undefined") return "";
+  const safe = name.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+  const m = document.cookie.match(new RegExp(`(?:^|; )${safe}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 async function authFetch(path, opts = {}) {
+  const token = getToken();
+  const relative = path.startsWith("/") ? path : `/${path}`;
+  const remote = path.startsWith("http")
+    ? path
+    : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(opts.headers || {}),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Cookie-session builds: CSRF double-submit cookie.
+  // For unsafe methods, send X-CSRF from bf_csrf cookie if present.
   const method = String(opts.method || "GET").toUpperCase();
-  const headers = { ...(opts.headers || {}) };
-  const hasBody = opts.body !== undefined && opts.body !== null;
-  const body = hasBody ? JSON.stringify(opts.body) : undefined;
-  if (hasBody && !headers["Content-Type"] && !headers["content-type"]) {
-    headers["Content-Type"] = "application/json";
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+    const csrf = readCookie("bf_csrf");
+    if (csrf && !headers["X-CSRF"] && !headers["x-csrf"]) headers["X-CSRF"] = csrf;
   }
-  return api(path, { method, headers, body });
+
+  const doReq = async (u) => {
+    const res = await fetch(u, {
+      ...opts,
+      // IMPORTANT: cookie-session auth requires credentials.
+      credentials: "include",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${res.status}`);
+    return j;
+  };
+
+  if (isInviteEndpoint && API_BASE && remote !== relative) {
+    try {
+      return await doReq(relative);
+    } catch {
+      return await doReq(remote);
+    }
+  }
+
+  try {
+    return await doReq(remote);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
+      return await doReq(relative);
+    }
+    throw e;
+  }
 }
 
 export default function OrgDash() {
@@ -97,16 +150,18 @@ export default function OrgDash() {
     try {
       const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
       setNewOrgName("");
-      // Optimistically add to list so you don't see "No orgs" right after creating.
+      // Update list immediately. Do NOT auto-enter the org.
       if (r?.org?.id) {
         setOrgs((prev) => {
-          const exists = prev.some((o) => o.id === r.org.id);
-          return exists ? prev : [{ ...r.org, role: r.org.role || "owner" }, ...prev];
+          const exists = prev.some((o) => o?.id === r.org.id);
+          return exists ? prev : [r.org, ...prev];
         });
+        setMsg(`Created "${r.org.name || r.org.id}".`);
       } else {
-        await load();
+        setMsg("Created.");
       }
-      if (r?.org?.id) nav(`/org/${encodeURIComponent(r.org.id)}`);
+      // Refresh from server as a follow-up (if auth is healthy, it will confirm membership).
+      await load();
     } catch (e2) {
       setMsg(e2.message || "Failed to create org");
     } finally {
