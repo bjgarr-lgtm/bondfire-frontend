@@ -82,6 +82,9 @@ function Shell() {
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authed, setAuthed] = React.useState(false);
 
+  // Re-check auth on initial load AND whenever the route changes.
+  // Without this, a user can successfully log in (cookies set) but still be
+  // treated as unauthenticated until a full page reload.
   React.useEffect(() => {
     let alive = true;
     (async () => {
@@ -103,7 +106,7 @@ function Shell() {
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [path]);
 
   const HomeRoute = () =>
     authed ? <Navigate to="/orgs" replace /> : <Navigate to="/signin" replace />;
