@@ -87,6 +87,10 @@ function Shell() {
   // treated as unauthenticated until a full page reload.
   React.useEffect(() => {
     let alive = true;
+    // IMPORTANT: when the path changes, we must re-enter a loading state.
+    // Otherwise RequireAuth can immediately redirect based on stale `authed=false`
+    // before the cookie-based `/api/auth/me` check completes, causing a login loop.
+    setAuthLoading(true);
     (async () => {
       try {
         const me = await fetch("/api/auth/me", { credentials: "include" });
