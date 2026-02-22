@@ -53,8 +53,6 @@ export default function Needs() {
   const orgId = getOrgId();
   const isMobile = useIsMobile(720);
 
-  const [orgKeyVersion, setOrgKeyVersion] = useState(1);
-
   const [needs, setNeeds] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,55 +72,28 @@ export default function Needs() {
     setLoading(true);
     setErr("");
     try {
-      // best-effort key version (used when sending ciphertext)
-      try {
-        const c = await api(`/api/orgs/${encodeURIComponent(orgId)}/crypto`);
-        if (c?.key_version) setOrgKeyVersion(Number(c.key_version) || 1);
-      } catch {}
-
       const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-      const rows = Array.isArray(data.needs) ? data.needs : [];
-
-      const orgKey = getCachedOrgKey(orgId);
-      if (!orgKey) {
-        setNeeds(rows);
-        return;
-      }
-
-      const decrypted = [];
-      for (const n of rows) {
-        if (n?.encrypted_blob) {
-          try {
-            const blobJson = await decryptWithOrgKey(orgKey, n.encrypted_blob);
-            const blob = blobJson ? JSON.parse(String(blobJson)) : {};
-            decrypted.push({
-              ...n,
-              title: blob.title ?? n.title,
-              description: blob.description ?? n.description,
-              urgency: blob.urgency ?? n.urgency,
-              status: blob.status ?? n.status,
-              __zk: true,
-            });
-            continue;
-          } catch {
-            decrypted.push({ ...n, title: n.title || "[encrypted]", description: "[encrypted]", __zk: true });
-            continue;
-          }
-        }
-
-        if (n?.encrypted_description) {
-          try {
-            const desc = await decryptWithOrgKey(orgKey, n.encrypted_description);
-            decrypted.push({ ...n, description: String(desc || ""), __zk: true });
-          } catch {
-            decrypted.push({ ...n, description: "[encrypted]", __zk: true });
-          }
-          continue;
-        }
-
-        decrypted.push(n);
-      }
-      setNeeds(decrypted);
+			const raw = Array.isArray(data.needs) ? data.needs : [];
+			const orgKey = getCachedOrgKey(orgId);
+			if (orgKey) {
+				const out = [];
+				for (const n of raw) {
+					if (n?.encrypted_blob && !n?.is_public) {
+						try {
+							const dec = JSON.parse(await decryptWithOrgKey(orgKey, n.encrypted_blob));
+							out.push({ ...n, ...dec });
+							continue;
+						} catch {
+							out.push({ ...n, title: "(encrypted)", description: "", urgency: "" });
+							continue;
+						}
+					}
+					out.push(n);
+				}
+				setNeeds(out);
+			} else {
+				setNeeds(raw);
+			}
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -148,45 +119,26 @@ export default function Needs() {
 
   async function putNeed(id, patch) {
     if (!orgId || !id) return;
+		const orgKey = getCachedOrgKey(orgId);
+		let payload = { id, ...patch };
+		if (orgKey) {
+			const existing = needs.find((x) => x.id === id) || {};
+			const isPublic = patch.is_public ?? existing.is_public;
+			if (!isPublic) {
+				const next = {
+					title: patch.title ?? existing.title,
+					description: patch.description ?? existing.description,
+					urgency: patch.urgency ?? existing.urgency,
+				};
+				const enc = await encryptWithOrgKey(orgKey, JSON.stringify(next));
+				payload = { id, ...patch, title: "__encrypted__", description: "", urgency: "", encrypted_blob: enc };
+			}
+		}
 
-    const orgKey = getCachedOrgKey(orgId);
-    let finalPatch = { ...patch };
-
-    // ZK full-record encryption for private needs.
-    if (orgKey && (patch.is_public === undefined || !patch.is_public)) {
-      try {
-        const blob = {
-          title: patch.title,
-          description: patch.description,
-          urgency: patch.urgency,
-          status: patch.status,
-        };
-        finalPatch = {
-          title: "",
-          description: "",
-          urgency: "",
-          status: patch.status,
-          encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(blob)),
-          key_version: orgKeyVersion,
-          is_public: 0,
-        };
-      } catch {
-        // fall back to legacy notes-only encryption below
-      }
-    }
-
-    // Back-compat: notes-only encryption.
-    if (!finalPatch.encrypted_blob && orgKey && patch?.description !== undefined) {
-      try {
-        finalPatch.encrypted_description = await encryptWithOrgKey(orgKey, String(patch.description || ""));
-        finalPatch.key_version = orgKeyVersion;
-        finalPatch.description = "";
-      } catch {}
-    }
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
+		await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...finalPatch }),
+			body: JSON.stringify(payload),
     });
     refreshNeeds().catch(console.error);
   }
@@ -209,9 +161,7 @@ export default function Needs() {
     const title = String(form.title || "").trim();
     if (!title) return;
 
-    const orgKey = getCachedOrgKey(orgId);
-
-    const payload = {
+	    const payload = {
       title,
       description: String(form.description || "").trim(),
       urgency: String(form.urgency || "").trim(),
@@ -219,28 +169,18 @@ export default function Needs() {
       is_public: !!form.is_public,
     };
 
-    if (orgKey && !payload.is_public) {
-      try {
-        const blob = {
-          title: payload.title,
-          description: payload.description,
-          urgency: payload.urgency,
-          status: payload.status,
-        };
-        payload.encrypted_blob = await encryptWithOrgKey(orgKey, JSON.stringify(blob));
-        payload.key_version = orgKeyVersion;
-        payload.title = "";
-        payload.description = "";
-        payload.urgency = "";
-      } catch {}
-    } else if (orgKey && payload.description) {
-      // legacy notes-only encryption
-      try {
-        payload.encrypted_description = await encryptWithOrgKey(orgKey, payload.description);
-        payload.key_version = orgKeyVersion;
-        payload.description = "";
-      } catch {}
-    }
+	    // Encrypt non-public need content when an org key exists on this device.
+	    const orgKey = getCachedOrgKey(orgId);
+	    if (orgKey && !payload.is_public) {
+	      const enc = await encryptWithOrgKey(
+	        orgKey,
+	        JSON.stringify({ title: payload.title, description: payload.description, urgency: payload.urgency })
+	      );
+	      payload.title = "__encrypted__";
+	      payload.description = "";
+	      payload.urgency = "";
+	      payload.encrypted_blob = enc;
+	    }
 
     const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "POST",

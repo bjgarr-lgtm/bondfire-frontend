@@ -2,13 +2,20 @@ import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
 
+async function ensurePeopleZkColumns(db) {
+	try { await db.prepare("ALTER TABLE people ADD COLUMN encrypted_notes TEXT").run(); } catch {}
+	try { await db.prepare("ALTER TABLE people ADD COLUMN encrypted_blob TEXT").run(); } catch {}
+	try { await db.prepare("ALTER TABLE people ADD COLUMN key_version INTEGER").run(); } catch {}
+}
+
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
+	await ensurePeopleZkColumns(env.BF_DB);
 
   const res = await env.BF_DB.prepare(
-    "SELECT id, name, role, phone, skills, notes, encrypted_notes, key_version, created_at, updated_at FROM people WHERE org_id = ? ORDER BY created_at DESC"
+		"SELECT id, name, role, phone, skills, notes, encrypted_notes, encrypted_blob, key_version, created_at, updated_at FROM people WHERE org_id = ? ORDER BY created_at DESC"
   ).bind(orgId).all();
 
   return json({ ok: true, people: res.results || [] });
@@ -18,6 +25,7 @@ export async function onRequestPost({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
+	await ensurePeopleZkColumns(env.BF_DB);
 
   const body = await request.json().catch(() => ({}));
   const name = String(body.name || "").trim();
@@ -26,9 +34,17 @@ export async function onRequestPost({ env, request, params }) {
   const id = uuid();
   const t = now();
 
+	let keyVersion = null;
+	if (body.encrypted_blob) {
+		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
+			.bind(orgId)
+			.first();
+		keyVersion = k?.key_version || 1;
+	}
+
   await env.BF_DB.prepare(
-    `INSERT INTO people (id, org_id, name, role, phone, skills, notes, encrypted_notes, key_version, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+		`INSERT INTO people (id, org_id, name, role, phone, skills, notes, encrypted_notes, encrypted_blob, key_version, created_at, updated_at)
+	     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     id,
     orgId,
@@ -38,7 +54,8 @@ export async function onRequestPost({ env, request, params }) {
     String(body.skills || ""),
     String(body.notes || ""),
     body.encrypted_notes ?? null,
-    (Number.isFinite(Number(body.key_version)) ? Number(body.key_version) : null),
+		body.encrypted_blob ?? null,
+		keyVersion,
     t,
     t
   ).run();
@@ -61,10 +78,19 @@ export async function onRequestPut({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
+	await ensurePeopleZkColumns(env.BF_DB);
 
   const body = await request.json().catch(() => ({}));
   const id = String(body.id || "");
   if (!id) return bad(400, "MISSING_ID");
+
+	let keyVersion = null;
+	if (body.encrypted_blob) {
+		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
+			.bind(orgId)
+			.first();
+		keyVersion = k?.key_version || 1;
+	}
 
   await env.BF_DB.prepare(
     `UPDATE people
@@ -74,7 +100,8 @@ export async function onRequestPut({ env, request, params }) {
          skills = COALESCE(?, skills),
          notes = COALESCE(?, notes),
          encrypted_notes = COALESCE(?, encrypted_notes),
-         key_version = COALESCE(?, key_version),
+	         encrypted_blob = COALESCE(?, encrypted_blob),
+	         key_version = COALESCE(?, key_version),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
   ).bind(
@@ -84,7 +111,8 @@ export async function onRequestPut({ env, request, params }) {
     body.skills ?? null,
     body.notes ?? null,
     body.encrypted_notes ?? null,
-    (Number.isFinite(Number(body.key_version)) ? Number(body.key_version) : null),
+		body.encrypted_blob ?? null,
+		keyVersion,
     now(),
     id,
     orgId

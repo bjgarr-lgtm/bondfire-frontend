@@ -153,6 +153,16 @@ export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
   return new TextDecoder().decode(pt);
 }
 
+// Convenience helpers for encrypting structured records.
+export async function encryptJsonWithOrgKey(orgKeyBytes, obj) {
+  return encryptWithOrgKey(orgKeyBytes, JSON.stringify(obj));
+}
+
+export async function decryptJsonWithOrgKey(orgKeyBytes, blobStr) {
+  const s = await decryptWithOrgKey(orgKeyBytes, blobStr);
+  return JSON.parse(s);
+}
+
 export function cacheOrgKey(orgId, keyBytes) {
   localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(keyBytes));
 }

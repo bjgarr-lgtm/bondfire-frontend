@@ -1,14 +1,6 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
-import { getDb } from "../../_lib/auth.js";
-
-async function ensureZkCols(db) {
-  // Prefer migrations, but don't brick if someone forgot to run them.
-  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
-  try { await db.prepare("ALTER TABLE needs ADD COLUMN key_version INTEGER").run(); } catch {}
-  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_blob TEXT").run(); } catch {}
-}
 
 function asString(v) {
   if (v == null) return "";
@@ -62,26 +54,22 @@ async function safeLog(env, payload) {
 }
 
 async function ensureNeedsZkColumns(db) {
-  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
-  try { await db.prepare("ALTER TABLE needs ADD COLUMN zk_key_version INTEGER").run(); } catch {}
+	try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
+	try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_blob TEXT").run(); } catch {}
+	try { await db.prepare("ALTER TABLE needs ADD COLUMN key_version INTEGER").run(); } catch {}
 }
 
 export async function onRequestGet({ env, request, params }) {
+	await ensureNeedsZkColumns(env.BF_DB);
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
-
-  const db = getDb(env);
-  await ensureZkCols(db);
 
   const r = await env.BF_DB.prepare(
     `SELECT
        id,
        title,
        description,
-       encrypted_description,
-       encrypted_blob,
-       key_version,
        status,
        priority,
        CASE
@@ -90,7 +78,10 @@ export async function onRequestGet({ env, request, params }) {
          WHEN priority = 1 THEN 'low'
          ELSE ''
        END AS urgency,
-       is_public,
+	     is_public,
+	     encrypted_description,
+	     encrypted_blob,
+	     key_version,
        created_at,
        updated_at
      FROM needs
@@ -104,19 +95,17 @@ export async function onRequestGet({ env, request, params }) {
 }
 
 export async function onRequestPost({ env, request, params }) {
+	await ensureNeedsZkColumns(env.BF_DB);
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
 
   const body = await request.json().catch(() => ({}));
 
-  const title = asString(body.title).trim();
-  if (!title) return bad(400, "Title is required");
+	const title = asString(body.title).trim();
+	if (!title) return bad(400, "Title is required");
 
-  const description = asString(body.description).trim();
-  const encrypted_description = body?.encrypted_description ? asString(body.encrypted_description) : null;
-  const encrypted_blob = body?.encrypted_blob ? asString(body.encrypted_blob) : null;
-  const key_version = body?.key_version != null ? asInt(body.key_version, null) : null;
+	const description = asString(body.description).trim();
   const status = asString(body.status).trim() || "open";
 
   // Always an int, never null, because DB column is NOT NULL
@@ -127,28 +116,33 @@ export async function onRequestPost({ env, request, params }) {
   const id = uuid();
   const t = now();
 
-  const db = getDb(env);
-  await ensureZkCols(db);
+	let keyVersion = null;
+	if (body.encrypted_blob) {
+		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
+			.bind(orgId)
+			.first();
+		keyVersion = k?.key_version || 1;
+	}
 
-  await env.BF_DB.prepare(
-    `INSERT INTO needs (id, org_id, title, description, encrypted_description, encrypted_blob, key_version, status, priority, is_public, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      orgId,
-      encrypted_blob ? "" : title,
-      (encrypted_blob || encrypted_description) ? "" : description,
-      encrypted_description,
-      encrypted_blob,
-      key_version,
-      status,
-      priority,
-      is_public,
-      t,
-      t
-    )
-    .run();
+	await env.BF_DB.prepare(
+	  `INSERT INTO needs (id, org_id, title, description, status, priority, is_public, encrypted_description, encrypted_blob, key_version, created_at, updated_at)
+	   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	)
+	  .bind(
+		id,
+		orgId,
+		title,
+		description,
+		status,
+		priority,
+		is_public,
+		body.encrypted_description ?? null,
+		body.encrypted_blob ?? null,
+		keyVersion,
+		t,
+		t
+	  )
+	  .run();
 
   await safeLog(env, {
     orgId,
@@ -164,6 +158,7 @@ export async function onRequestPost({ env, request, params }) {
 }
 
 export async function onRequestPut({ env, request, params }) {
+	await ensureNeedsZkColumns(env.BF_DB);
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
@@ -172,14 +167,11 @@ export async function onRequestPut({ env, request, params }) {
   const id = asString(body.id).trim();
   if (!id) return bad(400, "id is required");
 
-  const db = getDb(env);
-  await ensureZkCols(db);
-
-  const existing = await env.BF_DB.prepare(
-    `SELECT id, title, description, encrypted_description, key_version, status, priority, is_public
-     FROM needs
-     WHERE org_id = ? AND id = ?`
-  )
+	const existing = await env.BF_DB.prepare(
+	  `SELECT id, title, description, status, priority, is_public, encrypted_description, encrypted_blob, key_version
+	   FROM needs
+	   WHERE org_id = ? AND id = ?`
+	)
     .bind(orgId, id)
     .first();
 
@@ -191,23 +183,6 @@ export async function onRequestPut({ env, request, params }) {
     body.description === undefined
       ? existing.description
       : asString(body.description).trim();
-
-  const nextEncryptedDescription =
-    body.encrypted_description === undefined
-      ? existing.encrypted_description
-      : body.encrypted_description
-      ? asString(body.encrypted_description)
-      : null;
-
-  const nextKeyVersion =
-    body.key_version === undefined ? existing.key_version : asInt(body.key_version, existing.key_version);
-
-  const nextEncryptedBlob =
-    body.encrypted_blob === undefined
-      ? existing.encrypted_blob
-      : body.encrypted_blob
-      ? asString(body.encrypted_blob)
-      : null;
   const nextStatus =
     body.status === undefined ? existing.status : asString(body.status).trim();
 
@@ -229,25 +204,41 @@ export async function onRequestPut({ env, request, params }) {
 
   const t = now();
 
-  await env.BF_DB.prepare(
-    `UPDATE needs
-     SET title = ?, description = ?, encrypted_description = ?, encrypted_blob = ?, key_version = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
-     WHERE org_id = ? AND id = ?`
-  )
-    .bind(
-      nextEncryptedBlob ? "" : nextTitle,
-      (nextEncryptedBlob || nextEncryptedDescription) ? "" : nextDescription,
-      nextEncryptedDescription,
-      nextEncryptedBlob,
-      nextKeyVersion,
-      nextStatus,
-      nextPriority,
-      nextPublic,
-      t,
-      orgId,
-      id
-    )
-    .run();
+	let keyVersion = null;
+	if (body.encrypted_blob) {
+		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
+			.bind(orgId)
+			.first();
+		keyVersion = k?.key_version || 1;
+	}
+
+	await env.BF_DB.prepare(
+	  `UPDATE needs
+	   SET title = ?,
+	       description = ?,
+	       status = ?,
+	       priority = ?,
+	       is_public = ?,
+	       encrypted_description = COALESCE(?, encrypted_description),
+	       encrypted_blob = COALESCE(?, encrypted_blob),
+	       key_version = COALESCE(?, key_version),
+	       updated_at = ?
+	   WHERE org_id = ? AND id = ?`
+	)
+	  .bind(
+	    nextTitle,
+	    nextDescription,
+	    nextStatus,
+	    nextPriority,
+	    nextPublic,
+	    body.encrypted_description ?? null,
+	    body.encrypted_blob ?? null,
+	    keyVersion,
+	    t,
+	    orgId,
+	    id
+	  )
+	  .run();
 
   await safeLog(env, {
     orgId,

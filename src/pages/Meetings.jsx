@@ -97,8 +97,6 @@ export default function Meetings() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  const [orgKeyVersion, setOrgKeyVersion] = useState(1);
-
   // Controlled add form so it clears reliably
   const [form, setForm] = useState({
     title: "",
@@ -114,36 +112,29 @@ export default function Meetings() {
     setLoading(true);
     setErr("");
     try {
-      // best-effort key version (used when sending ciphertext)
-      try {
-        const c = await api(`/api/orgs/${encodeURIComponent(orgId)}/crypto`);
-        if (c?.key_version) setOrgKeyVersion(Number(c.key_version) || 1);
-      } catch {}
+	      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
+	      const raw = Array.isArray(data.meetings) ? data.meetings : [];
 
-      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
-
-      const rows = Array.isArray(data.meetings) ? data.meetings : [];
-      const orgKey = getCachedOrgKey(orgId);
-      if (!orgKey) {
-        setItems(rows);
-        return;
-      }
-
-      const out = [];
-      for (const m of rows) {
-        if (m?.encrypted_notes) {
-          try {
-            const decoded = await decryptWithOrgKey(orgKey, m.encrypted_notes);
-            const payload = JSON.parse(String(decoded || "{}"));
-            out.push({ ...m, agenda: String(payload.agenda || ""), notes: String(payload.notes || "") });
-          } catch {
-            out.push({ ...m, agenda: "[encrypted]", notes: "" });
-          }
-        } else {
-          out.push(m);
-        }
-      }
-      setItems(out);
+	      const orgKey = getCachedOrgKey(orgId);
+	      if (orgKey) {
+	        const out = [];
+	        for (const m of raw) {
+	          if (m?.encrypted_blob && !m?.is_public) {
+	            try {
+	              const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
+	              out.push({ ...m, ...dec });
+	              continue;
+	            } catch {
+	              out.push({ ...m, title: "(encrypted)", location: "", agenda: "" });
+	              continue;
+	            }
+	          }
+	          out.push(m);
+	        }
+	        setItems(out);
+	      } else {
+	        setItems(raw);
+	      }
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -231,23 +222,28 @@ export default function Meetings() {
     const agenda = String(form.agenda || "").trim();
     const is_public = !!form.is_public;
 
-    const payload = { title, starts_at, ends_at, location, agenda, is_public };
-    const orgKey = getCachedOrgKey(orgId);
+	    const orgKey = getCachedOrgKey(orgId);
+	    let payload = { title, starts_at, ends_at, location, agenda, is_public };
+	    if (orgKey && !is_public) {
+	      const enc = await encryptWithOrgKey(
+	        orgKey,
+	        JSON.stringify({ title, location, agenda, starts_at, ends_at })
+	      );
+	      payload = {
+	        title: "__encrypted__",
+	        location: "",
+	        agenda: "",
+	        starts_at,
+	        ends_at,
+	        is_public,
+	        encrypted_blob: enc,
+	      };
+	    }
 
-    if (orgKey && agenda) {
-      try {
-        payload.encrypted_notes = await encryptWithOrgKey(orgKey, JSON.stringify({ agenda, notes: "" }));
-        payload.key_version = orgKeyVersion;
-        payload.agenda = "";
-      } catch {
-        // fall back to plaintext
-      }
-    }
-
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+	    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+	      body: JSON.stringify(payload),
     });
 
     if (res?.id) {

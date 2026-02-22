@@ -65,8 +65,29 @@ export default function People() {
     setLoading(true);
     setErr("");
     try {
-      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-      setPeople(Array.isArray(data.people) ? data.people : []);
+			const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+			const raw = Array.isArray(data.people) ? data.people : [];
+
+			const orgKey = getCachedOrgKey(orgId);
+			if (orgKey) {
+				const out = [];
+				for (const p of raw) {
+					if (p?.encrypted_blob) {
+						try {
+							const dec = JSON.parse(await decryptWithOrgKey(orgKey, p.encrypted_blob));
+							out.push({ ...p, ...dec });
+							continue;
+						} catch {
+							out.push({ ...p, name: "(encrypted)", role: "", phone: "", skills: "" });
+							continue;
+						}
+					}
+					out.push(p);
+				}
+				setPeople(out);
+			} else {
+				setPeople(raw);
+			}
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -105,10 +126,24 @@ export default function People() {
 
   async function putPerson(id, patch) {
     if (!orgId || !id) return;
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+
+		const orgKey = getCachedOrgKey(orgId);
+		let payload = { id, ...patch };
+		if (orgKey) {
+			const next = {
+				name: String(patch?.name || "").trim(),
+				role: String(patch?.role || "").trim(),
+				phone: String(patch?.phone || "").trim(),
+				skills: String(patch?.skills || "").trim(),
+			};
+			const enc = await encryptWithOrgKey(orgKey, JSON.stringify(next));
+			payload = { id, name: "__encrypted__", role: "", phone: "", skills: "", encrypted_blob: enc };
+		}
+
+		await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...patch }),
+			body: JSON.stringify(payload),
     });
     refresh().catch(console.error);
   }
@@ -135,10 +170,17 @@ export default function People() {
     const phone = String(form.phone || "").trim();
     const skills = String(form.skills || "").trim();
 
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
+		const orgKey = getCachedOrgKey(orgId);
+		let payload = { name, role, phone, skills };
+		if (orgKey) {
+			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, role, phone, skills }));
+			payload = { name: "__encrypted__", role: "", phone: "", skills: "", encrypted_blob: enc };
+		}
+
+		const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, role, phone, skills }),
+			body: JSON.stringify(payload),
     });
 
     if (data?.id) {
