@@ -91,16 +91,36 @@ export default function Needs() {
 
       const decrypted = [];
       for (const n of rows) {
+        if (n?.encrypted_blob) {
+          try {
+            const blobJson = await decryptWithOrgKey(orgKey, n.encrypted_blob);
+            const blob = blobJson ? JSON.parse(String(blobJson)) : {};
+            decrypted.push({
+              ...n,
+              title: blob.title ?? n.title,
+              description: blob.description ?? n.description,
+              urgency: blob.urgency ?? n.urgency,
+              status: blob.status ?? n.status,
+              __zk: true,
+            });
+            continue;
+          } catch {
+            decrypted.push({ ...n, title: n.title || "[encrypted]", description: "[encrypted]", __zk: true });
+            continue;
+          }
+        }
+
         if (n?.encrypted_description) {
           try {
             const desc = await decryptWithOrgKey(orgKey, n.encrypted_description);
-            decrypted.push({ ...n, description: String(desc || "") });
+            decrypted.push({ ...n, description: String(desc || ""), __zk: true });
           } catch {
-            decrypted.push({ ...n, description: "[encrypted]" });
+            decrypted.push({ ...n, description: "[encrypted]", __zk: true });
           }
-        } else {
-          decrypted.push(n);
+          continue;
         }
+
+        decrypted.push(n);
       }
       setNeeds(decrypted);
     } catch (e) {
@@ -130,15 +150,38 @@ export default function Needs() {
     if (!orgId || !id) return;
 
     const orgKey = getCachedOrgKey(orgId);
-    const finalPatch = { ...patch };
-    if (orgKey && patch?.description !== undefined) {
+    let finalPatch = { ...patch };
+
+    // ZK full-record encryption for private needs.
+    if (orgKey && (patch.is_public === undefined || !patch.is_public)) {
+      try {
+        const blob = {
+          title: patch.title,
+          description: patch.description,
+          urgency: patch.urgency,
+          status: patch.status,
+        };
+        finalPatch = {
+          title: "",
+          description: "",
+          urgency: "",
+          status: patch.status,
+          encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(blob)),
+          key_version: orgKeyVersion,
+          is_public: 0,
+        };
+      } catch {
+        // fall back to legacy notes-only encryption below
+      }
+    }
+
+    // Back-compat: notes-only encryption.
+    if (!finalPatch.encrypted_blob && orgKey && patch?.description !== undefined) {
       try {
         finalPatch.encrypted_description = await encryptWithOrgKey(orgKey, String(patch.description || ""));
         finalPatch.key_version = orgKeyVersion;
         finalPatch.description = "";
-      } catch {
-        // if encryption fails, fall back to plaintext
-      }
+      } catch {}
     }
     await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
       method: "PUT",
@@ -176,14 +219,27 @@ export default function Needs() {
       is_public: !!form.is_public,
     };
 
-    if (orgKey && payload.description) {
+    if (orgKey && !payload.is_public) {
+      try {
+        const blob = {
+          title: payload.title,
+          description: payload.description,
+          urgency: payload.urgency,
+          status: payload.status,
+        };
+        payload.encrypted_blob = await encryptWithOrgKey(orgKey, JSON.stringify(blob));
+        payload.key_version = orgKeyVersion;
+        payload.title = "";
+        payload.description = "";
+        payload.urgency = "";
+      } catch {}
+    } else if (orgKey && payload.description) {
+      // legacy notes-only encryption
       try {
         payload.encrypted_description = await encryptWithOrgKey(orgKey, payload.description);
         payload.key_version = orgKeyVersion;
         payload.description = "";
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {

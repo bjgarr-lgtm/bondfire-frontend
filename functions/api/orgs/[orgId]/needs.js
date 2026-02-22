@@ -7,6 +7,7 @@ async function ensureZkCols(db) {
   // Prefer migrations, but don't brick if someone forgot to run them.
   try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_description TEXT").run(); } catch {}
   try { await db.prepare("ALTER TABLE needs ADD COLUMN key_version INTEGER").run(); } catch {}
+  try { await db.prepare("ALTER TABLE needs ADD COLUMN encrypted_blob TEXT").run(); } catch {}
 }
 
 function asString(v) {
@@ -79,6 +80,7 @@ export async function onRequestGet({ env, request, params }) {
        title,
        description,
        encrypted_description,
+       encrypted_blob,
        key_version,
        status,
        priority,
@@ -113,6 +115,7 @@ export async function onRequestPost({ env, request, params }) {
 
   const description = asString(body.description).trim();
   const encrypted_description = body?.encrypted_description ? asString(body.encrypted_description) : null;
+  const encrypted_blob = body?.encrypted_blob ? asString(body.encrypted_blob) : null;
   const key_version = body?.key_version != null ? asInt(body.key_version, null) : null;
   const status = asString(body.status).trim() || "open";
 
@@ -128,15 +131,16 @@ export async function onRequestPost({ env, request, params }) {
   await ensureZkCols(db);
 
   await env.BF_DB.prepare(
-    `INSERT INTO needs (id, org_id, title, description, encrypted_description, key_version, status, priority, is_public, created_at, updated_at)
+    `INSERT INTO needs (id, org_id, title, description, encrypted_description, encrypted_blob, key_version, status, priority, is_public, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
       orgId,
-      title,
-      encrypted_description ? "" : description,
+      encrypted_blob ? "" : title,
+      (encrypted_blob || encrypted_description) ? "" : description,
       encrypted_description,
+      encrypted_blob,
       key_version,
       status,
       priority,
@@ -197,6 +201,13 @@ export async function onRequestPut({ env, request, params }) {
 
   const nextKeyVersion =
     body.key_version === undefined ? existing.key_version : asInt(body.key_version, existing.key_version);
+
+  const nextEncryptedBlob =
+    body.encrypted_blob === undefined
+      ? existing.encrypted_blob
+      : body.encrypted_blob
+      ? asString(body.encrypted_blob)
+      : null;
   const nextStatus =
     body.status === undefined ? existing.status : asString(body.status).trim();
 
@@ -220,13 +231,14 @@ export async function onRequestPut({ env, request, params }) {
 
   await env.BF_DB.prepare(
     `UPDATE needs
-     SET title = ?, description = ?, encrypted_description = ?, key_version = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
+     SET title = ?, description = ?, encrypted_description = ?, encrypted_blob = ?, key_version = ?, status = ?, priority = ?, is_public = ?, updated_at = ?
      WHERE org_id = ? AND id = ?`
   )
     .bind(
-      nextTitle,
-      nextEncryptedDescription ? "" : nextDescription,
+      nextEncryptedBlob ? "" : nextTitle,
+      (nextEncryptedBlob || nextEncryptedDescription) ? "" : nextDescription,
       nextEncryptedDescription,
+      nextEncryptedBlob,
       nextKeyVersion,
       nextStatus,
       nextPriority,

@@ -65,16 +65,40 @@ export default function Inventory() {
 
       const decrypted = [];
       for (const it of rows) {
+        // Prefer full-record blob encryption.
+        if (it?.encrypted_blob) {
+          try {
+            const blobJson = await decryptWithOrgKey(orgKey, it.encrypted_blob);
+            const blob = blobJson ? JSON.parse(String(blobJson)) : {};
+            decrypted.push({
+              ...it,
+              name: blob.name ?? it.name,
+              qty: (typeof blob.qty !== "undefined" ? blob.qty : it.qty),
+              unit: blob.unit ?? it.unit,
+              category: blob.category ?? it.category,
+              location: blob.location ?? it.location,
+              notes: blob.notes ?? it.notes,
+              __zk: true,
+            });
+            continue;
+          } catch {
+            decrypted.push({ ...it, name: it.name || "[encrypted]", notes: "[encrypted]", __zk: true });
+            continue;
+          }
+        }
+
+        // Back-compat: notes-only encryption.
         if (it?.encrypted_notes) {
           try {
             const n = await decryptWithOrgKey(orgKey, it.encrypted_notes);
-            decrypted.push({ ...it, notes: String(n || "") });
+            decrypted.push({ ...it, notes: String(n || ""), __zk: true });
           } catch {
-            decrypted.push({ ...it, notes: "[encrypted]" });
+            decrypted.push({ ...it, notes: "[encrypted]", __zk: true });
           }
-        } else {
-          decrypted.push(it);
+          continue;
         }
+
+        decrypted.push(it);
       }
       setItems(decrypted);
     } catch (e) {
@@ -102,10 +126,38 @@ export default function Inventory() {
 
   async function putItem(id, patch) {
     if (!orgId || !id) return;
+    const orgKey = getCachedOrgKey(orgId);
+
+    // If ZK is active and this item is not public, encrypt the full record blob.
+    // (Public items must keep plaintext fields to be displayable on the public page.)
+    let payload = { id, ...patch };
+    if (orgKey && !patch.is_public) {
+      const blob = {
+        name: patch.name,
+        qty: patch.qty,
+        unit: patch.unit,
+        category: patch.category,
+        location: patch.location,
+        notes: patch.notes,
+      };
+      payload = {
+        id,
+        name: "",
+        qty: null,
+        unit: "",
+        category: "",
+        location: "",
+        notes: "",
+        encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(blob)),
+        key_version: orgKeyVersion,
+        is_public: 0,
+      };
+    }
+
     await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...patch }),
+      body: JSON.stringify(payload),
     });
     refresh().catch(console.error);
   }
@@ -145,20 +197,42 @@ export default function Inventory() {
     const notes = String(form.notes || "").trim();
     const is_public = !!form.is_public;
 
-    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const orgKey = getCachedOrgKey(orgId);
+
+    // If ZK is active and this item is not public: encrypt EVERYTHING into encrypted_blob.
+    // (Public items keep plaintext so the public page can render them.)
+    let payload;
+    if (orgKey && !is_public) {
+      const blob = { name, qty, unit, category, location, notes };
+      payload = {
+        name: "",
+        qty: null,
+        unit: "",
+        category: "",
+        location: "",
+        notes: "",
+        encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(blob)),
+        key_version: orgKeyVersion,
+        is_public: 0,
+      };
+    } else {
+      payload = {
         name,
         qty,
         unit,
         category,
         location,
-        notes: (getCachedOrgKey(orgId) ? "" : notes),
-        encrypted_notes: (getCachedOrgKey(orgId) && notes ? await encryptWithOrgKey(getCachedOrgKey(orgId), notes) : null),
-        key_version: (getCachedOrgKey(orgId) && notes ? orgKeyVersion : null),
+        notes,
+        encrypted_notes: null,
+        key_version: null,
         is_public,
-      }),
+      };
+    }
+
+    const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
     if (data?.id) {
@@ -172,6 +246,7 @@ export default function Inventory() {
           location,
           notes,
           is_public: is_public ? 1 : 0,
+          __zk: !!(orgKey && !is_public),
         },
         ...prev,
       ]);
