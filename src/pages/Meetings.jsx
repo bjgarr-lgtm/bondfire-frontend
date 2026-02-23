@@ -1,416 +1,262 @@
 // src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
-import { getCachedOrgKey, encryptWithOrgKey, decryptWithOrgKey } from "../lib/zk.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
-  try {
-    const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
-    return m && m[1] ? decodeURIComponent(m[1]) : null;
-  } catch {
-    return null;
-  }
+	try {
+		const m = (window.location.hash || "").match(/#\/org\/([^/]+)/);
+		return m && m[1] ? decodeURIComponent(m[1]) : null;
+	} catch {
+		return null;
+	}
 }
 
 function fromInputDT(value) {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
+	if (!value) return null;
+	const ms = Date.parse(value);
+	return Number.isFinite(ms) ? ms : null;
 }
 
 function formatDT(ms) {
-  if (!ms) return "";
-  const d = new Date(Number(ms));
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+	if (!ms) return "";
+	const d = new Date(Number(ms));
+	return d.toLocaleString(undefined, {
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+	});
 }
 
-function CalendarIcon({ size = 16 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  );
-}
-
-function DateTimeField({ name, value, onChange }) {
-  const ref = React.useRef(null);
-
-  const openPicker = () => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof el.showPicker === "function") {
-      el.showPicker();
-      return;
-    }
-    el.focus();
-    el.click();
-  };
-
-  return (
-    <div className="dt-wrap">
-      <input
-        ref={ref}
-        className="input dt-input"
-        type="datetime-local"
-        name={name}
-        value={value}
-        onChange={onChange}
-      />
-      <button
-        type="button"
-        className="dt-btn"
-        onClick={openPicker}
-        aria-label="Pick date and time"
-        title="Pick date and time"
-      >
-        <CalendarIcon />
-      </button>
-    </div>
-  );
+function safeStr(v) {
+	return String(v ?? "");
 }
 
 export default function Meetings() {
-  const orgId = getOrgId();
+	const orgId = getOrgId();
 
-  const [items, setItems] = useState([]);
-  const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+	const [items, setItems] = useState([]);
+	const [q, setQ] = useState("");
+	const [loading, setLoading] = useState(false);
+	const [err, setErr] = useState("");
+	const [busyZk, setBusyZk] = useState(false);
+	const [zkMsg, setZkMsg] = useState("");
 
-  // Controlled add form so it clears reliably
-  const [form, setForm] = useState({
-    title: "",
-    starts_at: "",
-    ends_at: "",
-    location: "",
-    agenda: "",
-    is_public: false,
-  });
+	// Controlled add form so it clears reliably
+	const [form, setForm] = useState({
+		title: "",
+		starts_at: "",
+		ends_at: "",
+		location: "",
+		agenda: "",
+		is_public: false,
+	});
 
-  async function refresh() {
-    if (!orgId) return;
-    setLoading(true);
-    setErr("");
-    try {
-	      const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
-	      const raw = Array.isArray(data.meetings) ? data.meetings : [];
+	async function refresh() {
+		if (!orgId) return;
+		setLoading(true);
+		setErr("");
+		try {
+			const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
+			const raw = Array.isArray(data.meetings) ? data.meetings : [];
 
-	      const orgKey = getCachedOrgKey(orgId);
-	      if (orgKey) {
-	        const out = [];
-	        for (const m of raw) {
-	          if (m?.encrypted_blob && !m?.is_public) {
-	            try {
-	              const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
-	              out.push({ ...m, ...dec });
-	              continue;
-	            } catch {
-	              out.push({ ...m, title: "(encrypted)", location: "", agenda: "" });
-	              continue;
-	            }
-	          }
-	          out.push(m);
-	        }
-	        setItems(out);
-	      } else {
-	        setItems(raw);
-	      }
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
+			const orgKey = getCachedOrgKey(orgId);
+			if (orgKey) {
+				const out = [];
+				for (const m of raw) {
+					if (m?.encrypted_blob) {
+						try {
+							const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
+							out.push({ ...m, ...dec });
+							continue;
+						} catch {
+							out.push({ ...m, title: "(encrypted)", location: "", agenda: "" });
+							continue;
+						}
+					}
+					out.push(m);
+				}
+				setItems(out);
+			} else {
+				setItems(raw);
+			}
+		} catch (e) {
+			console.error(e);
+			setErr(e?.message || String(e));
+		} finally {
+			setLoading(false);
+		}
+	}
 
-  useEffect(() => {
-    refresh().catch(console.error);
-  }, [orgId]);
+	useEffect(() => {
+		refresh().catch(console.error);
+	}, [orgId]);
 
-  const filtered = useMemo(() => {
-    const needle = String(q || "").toLowerCase();
+	const filtered = useMemo(() => {
+		const needle = q.toLowerCase();
+		return items.filter((m) =>
+			[safeStr(m.title), safeStr(m.location), safeStr(m.agenda)]
+				.join(" ")
+				.toLowerCase()
+				.includes(needle)
+		);
+	}, [items, q]);
 
-    return (items || []).map((m) => {
-      const starts = m?.starts_at ? Number(m.starts_at) : null;
+	async function onAdd(e) {
+		e.preventDefault();
+		if (!orgId) return;
+		setErr("");
 
-      return {
-        ...m,
-        // What your table renders
-        date: starts ? new Date(starts).toLocaleDateString() : "",
-        time: (() => {
-          const s = m?.starts_at ? Number(m.starts_at) : null;
-          const e = m?.ends_at ? Number(m.ends_at) : null;
+		const title = safeStr(form.title).trim();
+		if (!title) return;
 
-          const fmt = (ms) =>
-            new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+		const starts_at = fromInputDT(form.starts_at);
+		const ends_at = fromInputDT(form.ends_at);
+		const location = safeStr(form.location).trim();
+		const agenda = safeStr(form.agenda).trim();
+		const is_public = !!form.is_public;
 
-          if (s && e) return `${fmt(s)}–${fmt(e)}`;
-          if (s) return fmt(s);
-          return "";
-        })(),
+		const orgKey = getCachedOrgKey(orgId);
+		let payload = { title, starts_at, ends_at, location, agenda, is_public };
+		if (orgKey && !is_public) {
+			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ title, location, agenda }));
+			payload = {
+				title: "__encrypted__",
+				location: "",
+				agenda: "",
+				starts_at,
+				ends_at,
+				is_public,
+				encrypted_blob: enc,
+			};
+		}
 
-        notes: m?.agenda || "",
-      };
-    }).filter((m) =>
-      `${m.title || ""} ${m.location || ""} ${m.agenda || ""}`
-        .toLowerCase()
-        .includes(needle)
-    );
-  }, [items, q]);
+		await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		});
 
+		setForm({ title: "", starts_at: "", ends_at: "", location: "", agenda: "", is_public: false });
+		setTimeout(() => refresh().catch(console.error), 300);
+	}
 
-  async function delMeeting(id) {
-    if (!orgId || !id) return;
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-    refresh().catch(console.error);
-  }
+	async function encryptExisting() {
+		if (!orgId) return;
+		setZkMsg("");
+		setErr("");
+		const orgKey = getCachedOrgKey(orgId);
+		if (!orgKey) {
+			setErr("ZK is enabled, but this device does not have the org key loaded yet.");
+			return;
+		}
+		setBusyZk(true);
+		try {
+			const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`);
+			const raw = Array.isArray(data.meetings) ? data.meetings : [];
+			let changed = 0;
+			for (const m of raw) {
+				if (!m?.id) continue;
+				if (m?.encrypted_blob) continue;
+				if (!!m.is_public) continue;
+				if (String(m.title || "") === "__encrypted__") continue;
+				const next = {
+					title: safeStr(m.title).trim(),
+					location: safeStr(m.location).trim(),
+					agenda: safeStr(m.agenda).trim(),
+				};
+				const enc = await encryptWithOrgKey(orgKey, JSON.stringify(next));
+				await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+					method: "PUT",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						id: m.id,
+						title: "__encrypted__",
+						location: "",
+						agenda: "",
+						starts_at: m.starts_at ?? null,
+						ends_at: m.ends_at ?? null,
+						is_public: 0,
+						encrypted_blob: enc,
+					}),
+				});
+				changed++;
+			}
+			setZkMsg(changed ? `Encrypted ${changed} existing meeting records on the server.` : "Nothing to encrypt. (Everything already looks encrypted or public.)");
+			await refresh();
+		} catch (e) {
+			console.error(e);
+			setErr(e?.message || String(e));
+		} finally {
+			setBusyZk(false);
+		}
+	}
 
-  async function togglePublic(meetingId, checked) {
-    if (!orgId || !meetingId) return;
+	return (
+		<div>
+			<div className="card" style={{ margin: 16, padding: 16 }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+					<h2 className="section-title" style={{ margin: 0, flex: 1, minWidth: 160 }}>
+						Meetings
+					</h2>
+					<button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+						{loading ? "Loading" : "Refresh"}
+					</button>
+					<button className="btn" onClick={() => encryptExisting().catch(console.error)} disabled={busyZk || loading}>
+						{busyZk ? "Encrypting" : "Encrypt Existing"}
+					</button>
+				</div>
 
-    // Optimistic UI update
-    setItems((prev) =>
-      prev.map((m) => (m.id === meetingId ? { ...m, is_public: checked ? 1 : 0 } : m))
-    );
+				{zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
 
-    try {
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: meetingId, is_public: checked }),
-      });
-    } catch (e) {
-      console.error(e);
-      refresh().catch(console.error);
-    }
-  }
+				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search meetings" style={{ marginTop: 12 }} />
+				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
-  async function onAdd(e) {
-    e.preventDefault();
-    if (!orgId) return;
+				<div style={{ marginTop: 12, overflowX: "auto" }}>
+					<table className="table" style={{ width: "100%" }}>
+						<thead>
+							<tr>
+								<th>Title</th>
+								<th>Starts</th>
+								<th>Ends</th>
+								<th>Location</th>
+								<th>Public</th>
+							</tr>
+						</thead>
+						<tbody>
+							{filtered.map((m) => (
+								<tr key={m.id}>
+									<td style={{ fontWeight: 700 }}>{m.title || "(untitled)"}</td>
+									<td>{formatDT(m.starts_at)}</td>
+									<td>{formatDT(m.ends_at)}</td>
+									<td>{m.location || ""}</td>
+									<td>{m.is_public ? "Yes" : "No"}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			</div>
 
-    setErr("");
-
-    const title = String(form.title || "").trim();
-    if (!title) return;
-
-    const starts_at = fromInputDT(form.starts_at);
-    const ends_at = fromInputDT(form.ends_at);
-    const location = String(form.location || "").trim();
-    const agenda = String(form.agenda || "").trim();
-    const is_public = !!form.is_public;
-
-	    const orgKey = getCachedOrgKey(orgId);
-	    let payload = { title, starts_at, ends_at, location, agenda, is_public };
-	    if (orgKey && !is_public) {
-	      const enc = await encryptWithOrgKey(
-	        orgKey,
-	        JSON.stringify({ title, location, agenda, starts_at, ends_at })
-	      );
-	      payload = {
-	        title: "__encrypted__",
-	        location: "",
-	        agenda: "",
-	        starts_at,
-	        ends_at,
-	        is_public,
-	        encrypted_blob: enc,
-	      };
-	    }
-
-	    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-	      body: JSON.stringify(payload),
-    });
-
-    if (res?.id) {
-      setItems((prev) => [
-        { id: res.id, title, starts_at, ends_at, location, agenda, is_public: is_public ? 1 : 0 },
-        ...prev,
-      ]);
-    }
-
-    // Clear add form immediately
-    setForm({ title: "", starts_at: "", ends_at: "", location: "", agenda: "", is_public: false });
-
-    setTimeout(() => {
-      refresh().catch(console.error);
-    }, 500);
-  }
-
-  return (
-    <div>
-      <div className="card" style={{ margin: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>
-            Meetings
-          </h2>
-          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
-            {loading ? "Loading" : "Refresh"}
-          </button>
-        </div>
-
-        <input
-          className="input"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search meetings"
-          style={{ marginTop: 12 }}
-        />
-
-        {err && (
-          <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
-            {err}
-          </div>
-        )}
-
-        
-{/* Read only list */}
-<div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto", paddingRight: 16 }}>
-  <table className="table" style={{ minWidth: 940, tableLayout: "fixed" }}>
-    <thead>
-      <tr>
-        <th style={{ width: 220 }}>Title</th>
-        <th style={{ width: 140 }}>Date</th>
-        <th style={{ width: 120 }}>Time</th>
-        <th>Notes</th>
-        <th style={{ width: 90 }} />
-      </tr>
-    </thead>
-    <tbody>
-      {filtered.map((m) => (
-        <tr key={m.id}>
-          <td>{m.title || ""}</td>
-          <td>{m.date || ""}</td>
-          <td>{m.time || ""}</td>
-          <td style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{m.notes || ""}</td>
-          <td>
-            <button className="btn" onClick={() => delMeeting(m.id)} style={{ padding: "6px 10px" }}>
-              Delete
-            </button>
-          </td>
-        </tr>
-      ))}
-      {filtered.length === 0 && (
-        <tr>
-          <td colSpan={5} style={{ opacity: 0.7 }}>
-            No meetings yet.
-          </td>
-        </tr>
-      )}
-    </tbody>
-  </table>
-</div>
-
-{/* Mobile cards */}
-<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
-  {filtered.map((m) => (
-    <div key={m.id} className="bf-rowcard">
-      <div className="bf-rowcard-top">
-        <div className="bf-rowcard-title">{m.title || "Untitled meeting"}</div>
-        <button className="btn" onClick={() => delMeeting(m.id)} style={{ padding: "8px 10px" }}>
-          Delete
-        </button>
-      </div>
-
-      <div className="bf-two">
-        <div className="bf-field">
-          <div className="bf-field-label">date</div>
-          <div>{m.date || " "}</div>
-        </div>
-        <div className="bf-field">
-          <div className="bf-field-label">time</div>
-          <div>{m.time || " "}</div>
-        </div>
-      </div>
-
-      {m.notes ? (
-        <div className="bf-field">
-          <div className="bf-field-label">notes</div>
-          <div style={{ whiteSpace: "pre-wrap" }}>{m.notes}</div>
-        </div>
-      ) : null}
-    </div>
-  ))}
-
-  {filtered.length === 0 ? (
-    <div style={{ opacity: 0.7 }}>No meetings yet.</div>
-  ) : null}
-</div>
-
-      <form onSubmit={onAdd} className="grid" style={{ gap: 10, marginTop: 12 }}>
-          <input
-            className="input"
-            name="title"
-            placeholder="Title"
-            required
-            value={form.title}
-            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-          />
-
-          <DateTimeField
-            name="starts_at"
-            value={form.starts_at}
-            onChange={(e) => setForm((p) => ({ ...p, starts_at: e.target.value }))}
-          />
-
-          <DateTimeField
-            name="ends_at"
-            value={form.ends_at}
-            onChange={(e) => setForm((p) => ({ ...p, ends_at: e.target.value }))}
-          />
-
-          <input
-            className="input"
-            name="location"
-            placeholder="Location"
-            value={form.location}
-            onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
-          />
-
-          <input
-            className="input"
-            name="agenda"
-            placeholder="Agenda (short)"
-            value={form.agenda}
-            onChange={(e) => setForm((p) => ({ ...p, agenda: e.target.value }))}
-          />
-
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={!!form.is_public}
-              onChange={(e) => setForm((p) => ({ ...p, is_public: e.target.checked }))}
-            />
-            Public
-          </label>
-
-          <button className="btn">Add Meeting</button>
-        </form>
-      </div>
-    </div>
-  );
+			<div className="card" style={{ margin: 16, padding: 16 }}>
+				<h3 style={{ marginTop: 0 }}>Add Meeting</h3>
+				<form onSubmit={onAdd} style={{ display: "grid", gap: 10 }}>
+					<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+						<input className="input" placeholder="Title" value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />
+						<input className="input" type="datetime-local" value={form.starts_at} onChange={(e) => setForm((p) => ({ ...p, starts_at: e.target.value }))} />
+						<input className="input" type="datetime-local" value={form.ends_at} onChange={(e) => setForm((p) => ({ ...p, ends_at: e.target.value }))} />
+						<input className="input" placeholder="Location" value={form.location} onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))} />
+					</div>
+					<textarea className="input" rows={3} placeholder="Agenda" value={form.agenda} onChange={(e) => setForm((p) => ({ ...p, agenda: e.target.value }))} />
+					<label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+						<input type="checkbox" checked={form.is_public} onChange={(e) => setForm((p) => ({ ...p, is_public: e.target.checked }))} />
+						<span className="helper">Public</span>
+					</label>
+					<button className="btn-red" type="submit">Create</button>
+				</form>
+			</div>
+		</div>
+	);
 }
