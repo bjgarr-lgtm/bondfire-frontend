@@ -1,6 +1,18 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
+async function getOrgCryptoKeyVersion(db, orgId) {
+	// org_crypto historically used either key_version or version.
+	try {
+		const r = await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first();
+		return Number(r?.key_version) || 1;
+	} catch (e) {
+		const msg = String(e?.message || "");
+		if (!msg.includes("no such column: key_version")) throw e;
+		const r = await db.prepare("SELECT version AS key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first();
+		return Number(r?.key_version) || 1;
+	}
+}
 
 // Inventory items for an org.
 // Columns expected:
@@ -58,7 +70,7 @@ export async function onRequestPost({ env, request, params }) {
       String(body.notes || ""),
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
-		(body.encrypted_blob ? ((await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
+		(body.encrypted_blob ? ((await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
       body.is_public ? 1 : 0,
       t,
       t
@@ -122,7 +134,7 @@ export async function onRequestPut({ env, request, params }) {
       body.notes ?? null,
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
-		(body.encrypted_blob ? ((await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
+		(body.encrypted_blob ? ((await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
       isPublic,
       now(),
       id,

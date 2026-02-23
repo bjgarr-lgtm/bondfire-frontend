@@ -1,6 +1,18 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
+async function getOrgCryptoKeyVersion(db, orgId) {
+	// org_crypto historically used either key_version or version.
+	try {
+		const r = await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first();
+		return Number(r?.key_version) || 1;
+	} catch (e) {
+		const msg = String(e?.message || "");
+		if (!msg.includes("no such column: key_version")) throw e;
+		const r = await db.prepare("SELECT version AS key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first();
+		return Number(r?.key_version) || 1;
+	}
+}
 
 async function ensurePeopleZkColumns(db) {
 	try { await db.prepare("ALTER TABLE people ADD COLUMN encrypted_notes TEXT").run(); } catch {}
@@ -36,10 +48,7 @@ export async function onRequestPost({ env, request, params }) {
 
 	let keyVersion = null;
 	if (body.encrypted_blob) {
-		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
-			.bind(orgId)
-			.first();
-		keyVersion = k?.key_version || 1;
+		keyVersion = await getOrgCryptoKeyVersion(db, orgId);
 	}
 
   await env.BF_DB.prepare(
@@ -86,10 +95,7 @@ export async function onRequestPut({ env, request, params }) {
 
 	let keyVersion = null;
 	if (body.encrypted_blob) {
-		const k = await env.BF_DB.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?")
-			.bind(orgId)
-			.first();
-		keyVersion = k?.key_version || 1;
+		keyVersion = await getOrgCryptoKeyVersion(db, orgId);
 	}
 
   await env.BF_DB.prepare(
