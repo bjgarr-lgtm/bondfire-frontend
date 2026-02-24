@@ -780,7 +780,6 @@ React.useEffect(() => {
       {tab === "security" && (
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Security</h2>
-          <p className="helper">Account security is global, but lives here so you can actually find it.</p>
           <Security />
         </div>
       )}
