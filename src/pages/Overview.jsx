@@ -408,11 +408,11 @@ export default function Overview() {
               No pledges yet.
             </div>
           ) : Array.isArray(pledges) && pledges.length > 0 ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {pledges.slice(0, 5).map((p) => (
+            <ul>
+              {pledges.slice(0,5).map((p) => (
                 <li key={p.id}>
-                  {p.title || p.name || "Pledge"}
-                  {typeof p.qty === "number" ? ` (${p.qty}${p.unit ? ` ${p.unit}` : ""})` : ""}
+                  <strong>{p.person_name || p.name || "Someone"}</strong>
+                  {p.need_title ? ` → ${p.need_title}` : ""}
                 </li>
               ))}
             </ul>
