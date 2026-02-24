@@ -69,35 +69,40 @@ export async function onRequestGet({ env, request, params }) {
 
   const nextMeeting = await safeFirst(
     env,
-    "SELECT id, title, starts_at FROM meetings WHERE org_id = ? AND starts_at IS NOT NULL AND starts_at >= ? ORDER BY starts_at ASC LIMIT 1",
+    // Include encrypted_blob so clients with the org key can decrypt title/notes client-side.
+    "SELECT id, title, starts_at, encrypted_blob, key_version FROM meetings WHERE org_id = ? AND starts_at IS NOT NULL AND starts_at >= ? ORDER BY starts_at ASC LIMIT 1",
     [orgId, nowMs],
     null
   );
 
   const people = await safeAll(
     env,
-    "SELECT id, name, email FROM people WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    // Include encrypted_blob so the dashboard can decrypt names/phones/etc on-device.
+    "SELECT id, name, role, phone, skills, notes, encrypted_blob, key_version FROM people WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
   const needs = await safeAll(
     env,
-    "SELECT id, title, status FROM needs WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    // Include encrypted fields so the dashboard can show plaintext in-app after client-side decrypt.
+    "SELECT id, title, status, priority, urgency, encrypted_blob, encrypted_description, key_version FROM needs WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
   const inventory = await safeAll(
     env,
-    "SELECT id, name, qty, unit FROM inventory WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    // Include encrypted fields so the dashboard can show plaintext in-app after client-side decrypt.
+    "SELECT id, name, qty, unit, encrypted_blob, encrypted_notes, key_version FROM inventory WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
   const activity = await safeAll(
     env,
-    "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 25",
+    // meta_json may carry structured info in newer rows.
+    "SELECT id, kind, message, actor_user_id, created_at, meta_json FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 25",
     [orgId],
     []
   );

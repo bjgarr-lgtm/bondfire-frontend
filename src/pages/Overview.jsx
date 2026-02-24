@@ -66,12 +66,44 @@ function prettyMessage(a) {
   const entId = String(a?.entity_id || "").trim();
   if (title) return entId ? `${title} (${shortId(entId)})` : title;
 
-  const raw = String(a?.message || "").trim();
+  let raw = String(a?.message || "").trim();
   if (!raw) return "";
+
+  // Most of our activity messages historically include a redundant prefix,
+  // because kind already tells the story. Strip it so the feed isn't nonsense.
+  // Examples:
+  //   "inventory added: __encrypted__" => "(encrypted item)"
+  //   "person updated: Sam" => "Sam"
+  raw = raw.replace(/^(inventory|person|people|need|needs|meeting|meetings)\s+(added|created|updated|deleted|removed)\s*:\s*/i, "");
+  raw = raw.replace(/^(inventory|person|people|need|needs|meeting|meetings)\s*:\s*/i, "");
+
+  // If the title is ZK-scrubbed, don't show the literal marker.
+  raw = raw.replace(/__encrypted__/gi, "").trim();
+  if (!raw) raw = "(encrypted item)";
 
   const uuidRe =
     /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
   return raw.replace(uuidRe, (m) => shortId(m));
+}
+
+async function tryDecryptRow(orgKey, row) {
+  if (!orgKey) return row;
+  if (!row || !row.encrypted_blob) return row;
+  try {
+    const dec = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
+    return { ...row, ...dec };
+  } catch {
+    return row;
+  }
+}
+
+async function decryptRows(orgId, rows) {
+  const orgKey = getCachedOrgKey(orgId);
+  if (!orgKey) return Array.isArray(rows) ? rows : [];
+  const arr = Array.isArray(rows) ? rows : [];
+  const out = [];
+  for (const r of arr) out.push(await tryDecryptRow(orgKey, r));
+  return out;
 }
 
 function groupActivity(activity) {
@@ -113,31 +145,6 @@ function fmtDT(ms) {
   }
 }
 
-// Try to decrypt one record that uses encrypted_blob
-async function tryDecryptRow(orgKey, row) {
-  if (!orgKey) return row;
-  if (!row || !row.encrypted_blob) return row;
-
-  try {
-    const dec = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
-    return { ...row, ...dec };
-  } catch {
-    return row;
-  }
-}
-
-async function decryptRows(orgId, rows) {
-  const orgKey = getCachedOrgKey(orgId);
-  if (!orgKey) return rows;
-
-  const arr = Array.isArray(rows) ? rows : [];
-  const out = [];
-  for (const r of arr) {
-    out.push(await tryDecryptRow(orgKey, r));
-  }
-  return out;
-}
-
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -166,13 +173,11 @@ export default function Overview() {
     try {
       const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
 
-      // Decrypt what the dashboard endpoint returns (if it includes encrypted_blob).
-      // This keeps the dashboard readable without weakening ZK.
+      // Dashboard should be readable in-app. If org key is loaded, decrypt the previews.
       const d = { ...d0 };
       d.people = await decryptRows(orgId, d0?.people);
       d.inventory = await decryptRows(orgId, d0?.inventory);
       d.needs = await decryptRows(orgId, d0?.needs);
-
       if (d0?.nextMeeting) {
         const orgKey = getCachedOrgKey(orgId);
         d.nextMeeting = await tryDecryptRow(orgKey, d0.nextMeeting);
@@ -186,10 +191,9 @@ export default function Overview() {
       if (hasPeoplePreview) {
         setPeoplePreview(d.people);
       } else if (countPeople > 0) {
-        const p0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-        const pList = Array.isArray(p0?.people) ? p0.people.slice(0, 5) : [];
-        const pDec = await decryptRows(orgId, pList);
-        setPeoplePreview(pDec);
+        const p = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+        const slice = Array.isArray(p?.people) ? p.people.slice(0, 5) : [];
+        setPeoplePreview(await decryptRows(orgId, slice));
       } else {
         setPeoplePreview([]);
       }
@@ -263,6 +267,7 @@ export default function Overview() {
             {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
           </div>
 
+          {/* Only show the empty-state if count is truly zero */}
           {(counts.people || 0) === 0 ? (
             <div className="helper" style={{ marginTop: 10 }}>
               No people yet.
@@ -275,6 +280,7 @@ export default function Overview() {
             </ul>
           ) : null}
         </div>
+
 
         {/* Inventory */}
         <div className="card" style={{ padding: 16 }}>
