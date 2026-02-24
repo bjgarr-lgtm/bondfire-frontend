@@ -2,7 +2,7 @@ import { json, bad, readJSON, requireMethod } from "../_lib/http.js";
 import { getDb, requireUser } from "../_lib/auth.js";
 
 export async function onRequestGet({ env, request }) {
-  const auth = await requireUser(env, request);
+  const auth = await requireUser({ env, request });
   if (!auth.ok) return auth.resp;
   const db = getDb(env);
   const row = await db.prepare("SELECT public_key FROM users WHERE id = ?").bind(auth.userId).first();
@@ -10,7 +10,7 @@ export async function onRequestGet({ env, request }) {
 }
 
 export async function onRequestPost({ env, request }) {
-  const auth = await requireUser(env, request);
+  const auth = await requireUser({ env, request });
   if (!auth.ok) return auth.resp;
   requireMethod(request, "POST");
   const body = await readJSON(request);
