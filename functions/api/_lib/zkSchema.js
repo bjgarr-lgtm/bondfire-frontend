@@ -47,6 +47,42 @@ export async function ensureZkSchema(env) {
     }
   }
 
+  // --- org-scoped PII encryption support ---
+  // Additive columns to store encrypted copies for org-context display.
+  try {
+    const mCols = await tableInfo(db, 'org_memberships');
+    const mNames = new Set(mCols.map((c) => c.name));
+    if (!mNames.has('encrypted_blob')) {
+      try {
+        await db.prepare('ALTER TABLE org_memberships ADD COLUMN encrypted_blob TEXT').run();
+      } catch (_) {}
+    }
+    if (!mNames.has('key_version')) {
+      try {
+        await db.prepare('ALTER TABLE org_memberships ADD COLUMN key_version INTEGER').run();
+      } catch (_) {}
+    }
+  } catch (_) {
+    // org_memberships may not exist in some environments.
+  }
+
+  try {
+    const nCols = await tableInfo(db, 'newsletter_subscribers');
+    const nNames = new Set(nCols.map((c) => c.name));
+    if (!nNames.has('encrypted_blob')) {
+      try {
+        await db.prepare('ALTER TABLE newsletter_subscribers ADD COLUMN encrypted_blob TEXT').run();
+      } catch (_) {}
+    }
+    if (!nNames.has('key_version')) {
+      try {
+        await db.prepare('ALTER TABLE newsletter_subscribers ADD COLUMN key_version INTEGER').run();
+      } catch (_) {}
+    }
+  } catch (_) {
+    // newsletter_subscribers may not exist in some environments.
+  }
+
   return { db };
 }
 
@@ -80,6 +116,5 @@ export async function orgKeyWrappedCapabilities(db) {
   return {
     hasKeyVersion: names.has('key_version'),
     hasWrappedAt: names.has('wrapped_at'),
-    hasKid: names.has('kid'),
   };
 }

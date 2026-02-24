@@ -3,6 +3,7 @@ import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
+import { getCachedOrgKey, decryptJsonWithOrgKey, encryptJsonWithOrgKey } from "../lib/zk.js";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -254,6 +255,7 @@ export default function Settings() {
   const [membersMsg, setMembersMsg] = React.useState("");
   const [membersAllowed, setMembersAllowed] = React.useState(false);
   const [membersBusy, setMembersBusy] = React.useState(false);
+  const [membersZk, setMembersZk] = React.useState({}); // user_id -> { name, email }
 
   const loadMembers = React.useCallback(async () => {
     if (!orgId) return;
@@ -262,8 +264,28 @@ export default function Settings() {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
         method: "GET",
       });
-      setMembers(Array.isArray(r.members) ? r.members : []);
+      const list = Array.isArray(r.members) ? r.members : [];
+      setMembers(list);
       setMembersAllowed(true);
+
+      // If members have encrypted contact cards, decrypt them client-side.
+      const orgKey = getCachedOrgKey(orgId);
+      if (orgKey) {
+        const out = {};
+        for (const m of list) {
+          const blob = m?.encrypted_blob;
+          const uid = String(m?.user_id || m?.userId || "");
+          if (!uid || !blob) continue;
+          try {
+            out[uid] = await decryptJsonWithOrgKey(orgKey, String(blob));
+          } catch (_) {
+            // ignore decrypt failures for now; UI will fall back to masked/plain values.
+          }
+        }
+        setMembersZk(out);
+      } else {
+        setMembersZk({});
+      }
     } catch (e) {
       const msg = String(e?.message || "");
       if (msg.includes("INSUFFICIENT_ROLE") || msg.includes("NOT_A_MEMBER")) {
@@ -277,6 +299,51 @@ export default function Settings() {
       }
     }
   }, [orgId]);
+
+  const encryptMembersExisting = async () => {
+    if (!orgId) return;
+    const orgKey = getCachedOrgKey(orgId);
+    if (!orgKey) {
+      setMembersMsg("Org key not loaded on this device.");
+      return;
+    }
+    setMembersBusy(true);
+    setMembersMsg("");
+    try {
+      const updates = [];
+      for (const m of members) {
+        const uid = String(m?.user_id || m?.userId || "");
+        if (!uid) continue;
+        if (m?.encrypted_blob) continue;
+
+        // NOTE: users.email is not ZK (it's needed for login). This encrypts the org-context
+        // member list display so we don't have to ship emails in plaintext in org settings.
+        const payload = {
+          name: String(m?.name || ""),
+          email: String(m?.email || ""),
+        };
+        const enc = await encryptJsonWithOrgKey(orgKey, payload);
+        updates.push({ user_id: uid, encrypted_blob: enc, key_version: Number(m?.key_version || 1) || 1 });
+      }
+
+      if (updates.length === 0) {
+        setMembersMsg("Nothing to encrypt.");
+        return;
+      }
+
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "POST",
+        body: { updates },
+      });
+      setMembersMsg("Encrypted member list.");
+      setTimeout(() => setMembersMsg(""), 1200);
+      await loadMembers();
+    } catch (e) {
+      setMembersMsg(e?.message || "Failed to encrypt members");
+    } finally {
+      setMembersBusy(false);
+    }
+  };
 
   const setMemberRole = async (userId, nextRole, currentRole, email) => {
     if (!orgId) return;
@@ -484,6 +551,7 @@ React.useEffect(() => {
   const [nlMsg, setNlMsg] = React.useState("");
   const [nlBusy, setNlBusy] = React.useState(false);
   const [subscribers, setSubscribers] = React.useState([]);
+  const [subscribersZk, setSubscribersZk] = React.useState({}); // id -> { name, email }
   const exportSubscribersCsv = async () => {
     if (!orgId) return;
 
@@ -533,7 +601,53 @@ React.useEffect(() => {
       setNlMsg("Exported.");
       setTimeout(() => setNlMsg(""), 1200);
     } catch (e) {
-      setNlMsg(e?.message || "Export failed");
+      const msg = String(e?.message || "Export failed");
+      if (msg.includes("ZK_CSV_EXPORT_DISABLED")) {
+        // Client-side export from decrypted rows.
+        try {
+          const orgKey = getCachedOrgKey(orgId);
+          if (!orgKey) throw new Error("Org key not loaded on this device.");
+
+          const rows = [];
+          for (const s of subscribers) {
+            const id = String(s?.id || "");
+            const dec = subscribersZk[id] || null;
+            const email = dec?.email || String(s?.email || "");
+            const name = dec?.name || String(s?.name || "");
+            const joined = s?.created_at ? new Date(Number(s.created_at)).toISOString() : "";
+            rows.push({ email, name, joined });
+          }
+
+          const escapeCsv = (v) => {
+            const str = String(v ?? "");
+            if (str.includes("\n") || str.includes("\r") || str.includes(",") || str.includes('"')) {
+              return '"' + str.replaceAll('"', '""') + '"';
+            }
+            return str;
+          };
+
+          const header = ["email", "name", "joined"].join(",");
+          const lines = rows.map((r) => [escapeCsv(r.email), escapeCsv(r.name), escapeCsv(r.joined)].join(","));
+          const csv = [header, ...lines].join("\n");
+
+          const blob = new Blob([csv], { type: "text/csv; charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `subscribers-${orgId}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          setNlMsg("Exported.");
+          setTimeout(() => setNlMsg(""), 1200);
+          return;
+        } catch (e2) {
+          setNlMsg(String(e2?.message || "Export failed"));
+          return;
+        }
+      }
+      setNlMsg(msg);
     } finally {
       setNlBusy(false);
     }
@@ -566,14 +680,69 @@ React.useEffect(() => {
         `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`,
         { method: "GET" }
       );
-      setSubscribers(Array.isArray(r.subscribers) ? r.subscribers : []);
+      const list = Array.isArray(r.subscribers) ? r.subscribers : [];
+      setSubscribers(list);
+
+      const orgKey = getCachedOrgKey(orgId);
+      if (orgKey) {
+        const out = {};
+        for (const s of list) {
+          const id = String(s?.id || "");
+          const blob = s?.encrypted_blob;
+          if (!id || !blob) continue;
+          try {
+            out[id] = await decryptJsonWithOrgKey(orgKey, String(blob));
+          } catch (_) {}
+        }
+        setSubscribersZk(out);
+      } else {
+        setSubscribersZk({});
+      }
     } catch (e) {
       setSubscribers([]);
+      setSubscribersZk({});
       setNlMsg(e.message || "Failed to load subscribers");
     } finally {
       setNlBusy(false);
     }
   }, [orgId]);
+
+  const encryptSubscribersExisting = async () => {
+    if (!orgId) return;
+    const orgKey = getCachedOrgKey(orgId);
+    if (!orgKey) {
+      setNlMsg("Org key not loaded on this device.");
+      return;
+    }
+    setNlMsg("");
+    setNlBusy(true);
+    try {
+      const updates = [];
+      for (const s of subscribers) {
+        if (s?.encrypted_blob) continue;
+        const id = String(s?.id || "");
+        if (!id) continue;
+        const payload = { email: String(s?.email || ""), name: String(s?.name || "") };
+        const enc = await encryptJsonWithOrgKey(orgKey, payload);
+        updates.push({ id, encrypted_blob: enc, key_version: Number(s?.key_version || 1) || 1 });
+      }
+      if (updates.length === 0) {
+        setNlMsg("Nothing to encrypt.");
+        return;
+      }
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`, {
+        method: "POST",
+        body: { updates },
+      });
+      setNlMsg("Encrypted subscriber list.");
+      setTimeout(() => setNlMsg(""), 1200);
+      await loadSubscribers();
+    } catch (e) {
+      setNlMsg(e?.message || "Failed to encrypt subscribers");
+    } finally {
+      setNlBusy(false);
+    }
+  };
 
   const saveNewsletter = async () => {
     if (!orgId) return;
@@ -780,6 +949,7 @@ React.useEffect(() => {
       {tab === "security" && (
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Security</h2>
+          <p className="helper">Account security is global, but lives here so you can actually find it.</p>
           <Security />
         </div>
       )}
@@ -906,6 +1076,15 @@ React.useEffect(() => {
                 <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
                   {membersBusy ? "Refreshing…" : "Refresh"}
                 </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => encryptMembersExisting().catch(console.error)}
+                  disabled={membersBusy}
+                  title="Encrypt member contact info for org settings display"
+                >
+                  Encrypt existing
+                </button>
                 {membersMsg ? (
                   <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
                     {membersMsg}
@@ -931,14 +1110,23 @@ React.useEffect(() => {
                             {members.map((m) => (
                               <tr key={m.userId}>
                                 <td>
-                                  <code>{m.email || m.userId}</code>
+                                  <code>
+                                    {membersZk[String(m.user_id || m.userId)]?.email || m.email || m.userId}
+                                  </code>
                                 </td>
-                                <td>{m.name || ""}</td>
+                                <td>{membersZk[String(m.user_id || m.userId)]?.name || m.name || ""}</td>
                                 <td>
                                   <select
                                     className="input"
                                     value={m.role || "member"}
-                                    onChange={(e) => setMemberRole(m.userId, e.target.value, m.role, m.email)}
+                                    onChange={(e) =>
+                                      setMemberRole(
+                                        m.userId,
+                                        e.target.value,
+                                        m.role,
+                                        membersZk[String(m.user_id || m.userId)]?.email || m.email
+                                      )
+                                    }
                                     disabled={membersBusy}
                                   >
                                     <option value="viewer">viewer</option>
@@ -951,7 +1139,17 @@ React.useEffect(() => {
                                   {m.role === "owner" ? (
                                     <span className="helper">owner</span>
                                   ) : (
-                                    <button className="btn" type="button" onClick={() => removeMember(m.userId, m.email)} disabled={membersBusy}>
+                                    <button
+                                      className="btn"
+                                      type="button"
+                                      onClick={() =>
+                                        removeMember(
+                                          m.userId,
+                                          membersZk[String(m.user_id || m.userId)]?.email || m.email
+                                        )
+                                      }
+                                      disabled={membersBusy}
+                                    >
                                       Remove
                                     </button>
                                   )}
@@ -964,11 +1162,22 @@ React.useEffect(() => {
                           {members.map((m) => (
                             <div key={m.userId || m.email} className="bf-rowcard">
                               <div className="bf-rowcard-top">
-                                <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
+                                <div className="bf-rowcard-title">
+                                  {membersZk[String(m.user_id || m.userId)]?.name ||
+                                    membersZk[String(m.user_id || m.userId)]?.email ||
+                                    m.name ||
+                                    m.email ||
+                                    "member"}
+                                </div>
                                 <button
                                   className="btn"
                                   type="button"
-                                  onClick={() => removeMember(m.userId, m.email)}
+                                  onClick={() =>
+                                    removeMember(
+                                      m.userId,
+                                      membersZk[String(m.user_id || m.userId)]?.email || m.email
+                                    )
+                                  }
                                   disabled={membersBusy || m.role === "owner"}
                                 >
                                   Remove
@@ -978,11 +1187,13 @@ React.useEffect(() => {
                               <div className="bf-two">
                                 <div className="bf-field">
                                   <div className="bf-field-label">name</div>
-                                  <div>{m.name || ""}</div>
+                                  <div>{membersZk[String(m.user_id || m.userId)]?.name || m.name || ""}</div>
                                 </div>
                                 <div className="bf-field">
                                   <div className="bf-field-label">email</div>
-                                  <div style={{ overflowWrap: "anywhere" }}>{m.email || ""}</div>
+                                  <div style={{ overflowWrap: "anywhere" }}>
+                                    {membersZk[String(m.user_id || m.userId)]?.email || m.email || ""}
+                                  </div>
                                 </div>
                               </div>
 
@@ -1149,6 +1360,16 @@ React.useEffect(() => {
                 Refresh subscribers
               </button>
 
+              <button
+                className="btn"
+                type="button"
+                onClick={() => encryptSubscribersExisting().catch(console.error)}
+                disabled={nlBusy}
+                title="Encrypt existing subscriber records client-side using the org key"
+              >
+                Encrypt existing
+              </button>
+
               <button className="btn" type="button" onClick={() => exportSubscribersCsv().catch(console.error)} disabled={nlBusy}>
                 Export CSV
               </button>
@@ -1178,9 +1399,9 @@ React.useEffect(() => {
                         {subscribers.slice(0, 200).map((s) => (
                           <tr key={s.id || s.email}>
                             <td>
-                              <code>{s.email}</code>
+                              <code>{subscribersZk[String(s.id || "")]?.email || s.email}</code>
                             </td>
-                            <td>{s.name || ""}</td>
+                            <td>{subscribersZk[String(s.id || "")]?.name || s.name || ""}</td>
                             <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
                           </tr>
                         ))}
@@ -1190,17 +1411,27 @@ React.useEffect(() => {
                     {subscribers.slice(0, 200).map((s) => (
                       <div key={s.id || s.email} className="bf-rowcard">
                         <div className="bf-rowcard-top">
-                          <div className="bf-rowcard-title">{s.name || s.email || "subscriber"}</div>
+                          <div className="bf-rowcard-title">
+                            {subscribersZk[String(s.id || "")]?.name ||
+                              subscribersZk[String(s.id || "")]?.email ||
+                              s.name ||
+                              s.email ||
+                              "subscriber"}
+                          </div>
                         </div>
 
                         <div className="bf-two">
                           <div className="bf-field">
                             <div className="bf-field-label">name</div>
-                            <div style={{ overflowWrap: "anywhere" }}>{s.name || ""}</div>
+                            <div style={{ overflowWrap: "anywhere" }}>
+                              {subscribersZk[String(s.id || "")]?.name || s.name || ""}
+                            </div>
                           </div>
                           <div className="bf-field">
                             <div className="bf-field-label">email</div>
-                            <div style={{ overflowWrap: "anywhere" }}>{s.email || ""}</div>
+                            <div style={{ overflowWrap: "anywhere" }}>
+                              {subscribersZk[String(s.id || "")]?.email || s.email || ""}
+                            </div>
                           </div>
                         </div>
 
