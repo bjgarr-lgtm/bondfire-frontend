@@ -48,7 +48,7 @@ export async function onRequestPost({ env, request, params }) {
 
 	let keyVersion = null;
 	if (body.encrypted_blob) {
-		keyVersion = await getOrgCryptoKeyVersion(db, orgId);
+		keyVersion = await getOrgCryptoKeyVersion(env.BF_DB, orgId);
 	}
 
   await env.BF_DB.prepare(
@@ -95,7 +95,7 @@ export async function onRequestPut({ env, request, params }) {
 
 	let keyVersion = null;
 	if (body.encrypted_blob) {
-		keyVersion = await getOrgCryptoKeyVersion(db, orgId);
+		keyVersion = await getOrgCryptoKeyVersion(env.BF_DB, orgId);
 	}
 
   await env.BF_DB.prepare(
