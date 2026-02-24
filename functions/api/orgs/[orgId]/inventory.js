@@ -52,6 +52,9 @@ export async function onRequestPost({ env, request, params }) {
   const t = now();
   const qty = Number.isFinite(Number(body.qty)) ? Number(body.qty) : 0;
 
+  // If client provided ciphertext, stamp the org's current key version.
+  const keyVersion = body.encrypted_blob ? await getOrgCryptoKeyVersion(env.BF_DB, orgId) : null;
+
   await env.BF_DB.prepare(
     `INSERT INTO inventory (
         id, org_id, name, qty, unit, category, location, notes,
@@ -70,7 +73,7 @@ export async function onRequestPost({ env, request, params }) {
       String(body.notes || ""),
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
-		(body.encrypted_blob ? ((await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
+		keyVersion,
       body.is_public ? 1 : 0,
       t,
       t
@@ -110,6 +113,9 @@ export async function onRequestPut({ env, request, params }) {
       ? Number(body.qty)
       : 0;
 
+  // If client provided ciphertext, stamp the org's current key version.
+  const keyVersion = body.encrypted_blob ? await getOrgCryptoKeyVersion(env.BF_DB, orgId) : null;
+
   await env.BF_DB.prepare(
     `UPDATE inventory
      SET name = COALESCE(?, name),
@@ -134,7 +140,7 @@ export async function onRequestPut({ env, request, params }) {
       body.notes ?? null,
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
-		(body.encrypted_blob ? ((await db.prepare("SELECT key_version FROM org_crypto WHERE org_id = ?").bind(orgId).first())?.key_version || 1) : null),
+		keyVersion,
       isPublic,
       now(),
       id,
