@@ -4,11 +4,17 @@ import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 /**
- * Overview (Dashboard)
- * Goal: keep Bondfire's existing styling (card/btn/helper/table/etc) but upgrade layout.
- * - Top row: compact stat cards (People, Inventory, Needs, Meetings, Pledges, Subscribers) with delta vs last load.
- * - Below: detailed cards with previews + simple visuals (inventory bars), scrollable.
- * - ZK: decrypt on client if encrypted_blob present and org key cached.
+ * Dashboard (Overview)
+ *
+ * What this DOES:
+ * - Keeps current Bondfire styling tokens (card/btn/helper/grid).
+ * - Adds the “mockup” level UI inside the content area: bars, sparklines, pills, ring gauge.
+ * - Fixes scrolling: whole page scrolls (no inner scroll box).
+ * - ZK-safe: decrypts encrypted_blob client-side when org key is cached.
+ *
+ * What this does NOT do (needs layout shell edits):
+ * - Sidebar redesign, global search, notifications, profile photo UI.
+ *   Those belong to the app shell/layout component, not Overview.jsx.
  */
 
 function readOrgInfo(orgId) {
@@ -22,25 +28,25 @@ function readOrgInfo(orgId) {
   }
 }
 
+function safeStr(v) {
+  return String(v ?? "");
+}
+
 function fmtDT(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n)) return "";
   try {
     const d = new Date(n);
     return d.toLocaleString(undefined, {
+      weekday: "short",
       month: "short",
       day: "numeric",
-      year: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
   } catch {
     return "";
   }
-}
-
-function safeStr(v) {
-  return String(v ?? "");
 }
 
 async function tryDecryptRow(orgId, row) {
@@ -61,13 +67,114 @@ async function decryptRows(orgId, rows) {
   return out;
 }
 
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
 function deltaBadge(now, prev) {
   const a = Number(now || 0);
   const b = Number(prev || 0);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return { txt: "• 0", tone: "helper" };
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return { txt: "• 0", tone: "flat" };
   const diff = a - b;
   const arrow = diff > 0 ? "▲" : "▼";
   return { txt: `${arrow} ${Math.abs(diff)}`, tone: diff > 0 ? "up" : "down" };
+}
+
+function statusPill(status) {
+  const s = safeStr(status).trim().toLowerCase();
+  if (!s) return { label: "", bg: "rgba(255,255,255,0.08)", fg: "rgba(255,255,255,0.75)" };
+  if (s === "accepted") return { label: "accepted", bg: "rgba(124,252,152,0.18)", fg: "#7CFC98" };
+  if (s === "offered") return { label: "offered", bg: "rgba(255,214,102,0.18)", fg: "#FFD666" };
+  if (s === "declined") return { label: "declined", bg: "rgba(255,138,138,0.18)", fg: "#FF8A8A" };
+  if (s === "fulfilled") return { label: "done", bg: "rgba(128,200,255,0.18)", fg: "#80C8FF" };
+  return { label: s, bg: "rgba(255,255,255,0.08)", fg: "rgba(255,255,255,0.8)" };
+}
+
+function urgencyPill(urgency) {
+  const u = safeStr(urgency).trim().toLowerCase();
+  if (!u) return null;
+  if (u === "urgent") return { label: "urgent", bg: "rgba(255,80,80,0.18)", fg: "#FF8A8A" };
+  if (u === "high") return { label: "high", bg: "rgba(255,214,102,0.18)", fg: "#FFD666" };
+  if (u === "medium") return { label: "medium", bg: "rgba(128,200,255,0.18)", fg: "#80C8FF" };
+  return { label: u, bg: "rgba(255,255,255,0.08)", fg: "rgba(255,255,255,0.8)" };
+}
+
+function pillEl(p) {
+  if (!p?.label) return null;
+  return (
+    <span
+      className="helper"
+      style={{
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: p.bg,
+        color: p.fg,
+        fontWeight: 800,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {p.label}
+    </span>
+  );
+}
+
+function Sparkline({ points = [], height = 34 }) {
+  const w = 180;
+  const h = height;
+  const pts = (points || []).map((n) => Number(n)).filter((n) => Number.isFinite(n));
+  if (pts.length < 2) return <div style={{ height: h }} />;
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const span = Math.max(1e-6, max - min);
+  const step = w / (pts.length - 1);
+  const d = pts
+    .map((v, i) => {
+      const x = i * step;
+      const y = h - ((v - min) / span) * (h - 6) - 3;
+      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      <path d={d} fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" />
+      <path d={`${d} L ${w} ${h} L 0 ${h} Z`} fill="rgba(255,255,255,0.06)" />
+    </svg>
+  );
+}
+
+function Ring({ value, max, label }) {
+  const v = clamp(Number(value || 0), 0, Number(max || 1));
+  const m = Math.max(1, Number(max || 1));
+  const pct = v / m;
+  const r = 18;
+  const c = 2 * Math.PI * r;
+  const dash = pct * c;
+  const gap = c - dash;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <svg width="44" height="44" viewBox="0 0 44 44" style={{ display: "block" }}>
+        <circle cx="22" cy="22" r={r} stroke="rgba(255,255,255,0.10)" strokeWidth="6" fill="none" />
+        <circle
+          cx="22"
+          cy="22"
+          r={r}
+          stroke="rgba(255,255,255,0.55)"
+          strokeWidth="6"
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${gap}`}
+          transform="rotate(-90 22 22)"
+        />
+      </svg>
+      <div>
+        <div style={{ fontWeight: 900 }}>{value}</div>
+        <div className="helper">{label}</div>
+      </div>
+    </div>
+  );
 }
 
 function pickPledgeTarget(p, needTitleById) {
@@ -80,16 +187,6 @@ function pickPledgeTarget(p, needTitleById) {
 
   const t = safeStr(p?.type).trim();
   return t || "pledge";
-}
-
-function pill(label) {
-  const s = String(label || "").trim().toLowerCase();
-  if (!s) return "";
-  if (s === "accepted") return "accepted";
-  if (s === "offered") return "offered";
-  if (s === "declined") return "declined";
-  if (s === "fulfilled") return "fulfilled";
-  return s;
 }
 
 export default function Overview() {
@@ -111,7 +208,6 @@ export default function Overview() {
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
 
-  // previous counts snapshot for deltas
   const prevCountsRef = useRef(null);
 
   async function refresh() {
@@ -122,7 +218,6 @@ export default function Overview() {
       const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
       const d = { ...d0 };
 
-      // Decrypt dashboard previews if ZK is on and we have an org key cached.
       d.people = await decryptRows(orgId, d0?.people);
       d.inventory = await decryptRows(orgId, d0?.inventory);
       d.needs = await decryptRows(orgId, d0?.needs);
@@ -130,7 +225,6 @@ export default function Overview() {
       d.newsletter = await decryptRows(orgId, d0?.newsletter);
       if (d0?.nextMeeting) d.nextMeeting = await tryDecryptRow(orgId, d0.nextMeeting);
 
-      // Load previous counts for deltas.
       const prevKey = `bf_dash_counts_${orgId}`;
       const prev =
         prevCountsRef.current ||
@@ -141,14 +235,11 @@ export default function Overview() {
             return null;
           }
         })();
-
       prevCountsRef.current = prev;
-
-      // Store current counts for next time.
       try {
         localStorage.setItem(prevKey, JSON.stringify(d?.counts || {}));
       } catch {
-        // ignore quota issues
+        // ignore
       }
 
       setData(d);
@@ -183,16 +274,24 @@ export default function Overview() {
     return m;
   }, [needs]);
 
-  const nextMeetingLabel = useMemo(() => {
-    const pretty = fmtDT(nextMeeting?.starts_at);
-    if (!pretty) return "not scheduled";
-    return `${pretty}${nextMeeting?.title ? ` · ${nextMeeting.title}` : ""}`;
-  }, [nextMeeting]);
-
   const recentSubs = useMemo(() => {
     const arr = newsletter.slice();
     arr.sort((a, b) => Number(b?.created_at || b?.joined_at || 0) - Number(a?.created_at || a?.joined_at || 0));
     return arr.slice(0, 5);
+  }, [newsletter]);
+
+  const subsSpark = useMemo(() => {
+    const now = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const bins = new Array(8).fill(0);
+    for (const s of newsletter) {
+      const t = Number(s?.created_at || s?.joined_at || 0);
+      if (!Number.isFinite(t) || t <= 0) continue;
+      const ageWeeks = Math.floor((now - t) / weekMs);
+      if (ageWeeks >= 0 && ageWeeks < 8) bins[7 - ageWeeks] += 1;
+    }
+    let cum = 0;
+    return bins.map((x) => (cum += x));
   }, [newsletter]);
 
   const recentPledges = useMemo(() => {
@@ -201,7 +300,23 @@ export default function Overview() {
     return arr.slice(0, 6);
   }, [pledges]);
 
-  // Inventory “growth bars”: use qty as magnitude when present.
+  const openNeeds = useMemo(() => {
+    const arr = needs.filter((n) => safeStr(n?.status).toLowerCase() !== "closed");
+    const rankU = (u) => {
+      const s = safeStr(u).toLowerCase();
+      if (s === "urgent") return 3;
+      if (s === "high") return 2;
+      if (s === "medium") return 1;
+      return 0;
+    };
+    arr.sort((a, b) => {
+      const du = rankU(b?.urgency) - rankU(a?.urgency);
+      if (du !== 0) return du;
+      return Number(b?.priority || 0) - Number(a?.priority || 0);
+    });
+    return arr.slice(0, 6);
+  }, [needs]);
+
   const invBars = useMemo(() => {
     const items = inventory.slice(0, 8).map((it) => ({
       id: it?.id,
@@ -213,43 +328,28 @@ export default function Overview() {
     return items.map((x) => ({ ...x, pct: x.qty == null ? 0 : Math.round((x.qty / max) * 100) }));
   }, [inventory]);
 
+  const nextMeetingLabel = useMemo(() => {
+    const pretty = fmtDT(nextMeeting?.starts_at);
+    if (!pretty) return "not scheduled";
+    return `${pretty}${nextMeeting?.title ? ` · ${nextMeeting.title}` : ""}`;
+  }, [nextMeeting]);
+
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
-  const StatCard = ({ title, value, prevValue, onClick }) => {
+  const StatCard = ({ icon, title, value, prevValue, hint, onClick }) => {
     const d = deltaBadge(value, prevValue);
+    const toneColor = d.tone === "up" ? "#7CFC98" : d.tone === "down" ? "#FF8A8A" : "rgba(255,255,255,0.7)";
     return (
-      <button
-        type="button"
-        className="card"
-        onClick={onClick}
-        style={{
-          padding: 12,
-          textAlign: "left",
-          cursor: "pointer",
-          display: "grid",
-          gap: 6,
-          minHeight: 84,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+      <button type="button" className="card" onClick={onClick} style={{ padding: 12, textAlign: "left", cursor: "pointer", display: "grid", gap: 6, minHeight: 88 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 16 }}>{icon}</div>
           <div style={{ fontWeight: 900, fontSize: 14 }}>{title}</div>
-          <div
-            className="helper"
-            style={{
-              marginLeft: "auto",
-              opacity: 0.9,
-              color: d.tone === "up" ? "#7CFC98" : d.tone === "down" ? "#FF8A8A" : undefined,
-              fontWeight: 700,
-              fontSize: 12,
-              whiteSpace: "nowrap",
-            }}
-            title="Change since last refresh"
-          >
+          <div className="helper" style={{ marginLeft: "auto", color: toneColor, fontWeight: 800 }} title="Change since last refresh">
             {d.txt}
           </div>
         </div>
         <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1 }}>{Number(value || 0)}</div>
-        <div className="helper" style={{ opacity: 0.85 }}>View</div>
+        <div className="helper" style={{ opacity: 0.9 }}>{hint || ""}</div>
       </button>
     );
   };
@@ -266,220 +366,196 @@ export default function Overview() {
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
       </div>
 
-      {/* TOP: compact stat row */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <StatCard title="People" value={counts.people || 0} prevValue={prevCounts.people || 0} onClick={() => go("people")} />
-        <StatCard title="Inventory" value={counts.inventory || 0} prevValue={prevCounts.inventory || 0} onClick={() => go("inventory")} />
-        <StatCard title="Needs (open)" value={counts.needsOpen || 0} prevValue={prevCounts.needsOpen || 0} onClick={() => go("needs")} />
-        <StatCard title="Meetings (upcoming)" value={counts.meetingsUpcoming || 0} prevValue={prevCounts.meetingsUpcoming || 0} onClick={() => go("meetings")} />
-        <StatCard title="Pledges" value={pledges.length} prevValue={prevCounts.pledges || 0} onClick={() => go("settings")} />
-        <StatCard title="Subscribers" value={newsletter.length} prevValue={prevCounts.newsletter || 0} onClick={() => go("settings")} />
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <StatCard icon="👥" title="People" value={counts.people || 0} prevValue={prevCounts.people || 0} hint="members" onClick={() => go("people")} />
+        <StatCard icon="📦" title="Inventory" value={counts.inventory || 0} prevValue={prevCounts.inventory || 0} hint="items" onClick={() => go("inventory")} />
+        <StatCard icon="🧯" title="Needs" value={counts.needsOpen || 0} prevValue={prevCounts.needsOpen || 0} hint="open" onClick={() => go("needs")} />
+        <StatCard icon="🗓️" title="Meetings" value={counts.meetingsUpcoming || 0} prevValue={prevCounts.meetingsUpcoming || 0} hint="upcoming" onClick={() => go("meetings")} />
+        <StatCard icon="🤝" title="Pledges" value={pledges.length} prevValue={prevCounts.pledges || 0} hint="recent" onClick={() => go("settings")} />
+        <StatCard icon="📮" title="New Subs" value={recentSubs.length} prevValue={prevCounts.newsletterNew || 0} hint="recent" onClick={() => go("settings")} />
       </div>
 
-      {/* BELOW: detailed cards (scrollable “tight” section) */}
-      <div
-        style={{
-          display: "grid",
-          gap: 12,
-          maxHeight: "calc(100vh - 320px)",
-          overflow: "auto",
-          paddingRight: 4,
-        }}
-      >
-        {/* Inventory detail with bars */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
-            <button className="btn" onClick={() => go("inventory")}>View all</button>
-          </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}
-          </div>
-
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {invBars.length ? invBars.map((it) => (
-              <div key={it.id} style={{ display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                  <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {it.name}
-                  </div>
-                  <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-                    {it.qty == null ? "" : `${it.qty}${it.unit ? ` ${it.unit}` : ""}`}
-                  </div>
-                </div>
-                <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${it.pct}%`, background: "rgba(255,255,255,0.22)" }} />
-                </div>
-              </div>
-            )) : (
-              <div className="helper" style={{ marginTop: 10 }}>No inventory yet.</div>
-            )}
-          </div>
-        </div>
-
-        {/* Needs detail */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
-            <button className="btn" onClick={() => go("needs")}>View all</button>
-          </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.needsAll || 0} total, {counts.needsOpen || 0} open
-          </div>
-
-          {needs.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {needs.slice(0, 6).map((n) => (
-                <div key={n.id} className="card" style={{ padding: 12 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {safeStr(n.title || "").trim() || "(untitled need)"}
-                    </div>
-                    <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                      {safeStr(n.status || "").trim() || ""}
-                    </div>
-                  </div>
-                  <div className="helper" style={{ marginTop: 6, opacity: 0.9 }}>
-                    {Number.isFinite(Number(n.priority)) ? `priority ${Number(n.priority)}` : ""}
-                    {safeStr(n.urgency).trim() ? ` · ${safeStr(n.urgency).trim()}` : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 10 }}>No needs yet.</div>
-          )}
-        </div>
-
-        {/* Meetings detail */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
+        <div className="card" style={{ gridColumn: "span 5", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
             <button className="btn" onClick={() => go("meetings")}>View all</button>
           </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.meetingsUpcoming || 0} upcoming
-          </div>
-
-          <div style={{ marginTop: 12 }} className="card">
-            <div style={{ padding: 12 }}>
-              <div className="helper">Next</div>
-              <div style={{ marginTop: 6, fontWeight: 900 }}>
-                {nextMeeting?.title && safeStr(nextMeeting.title) !== "__encrypted__" ? safeStr(nextMeeting.title) : "not scheduled"}
-              </div>
-              <div className="helper" style={{ marginTop: 6 }}>
-                {nextMeetingLabel}
-              </div>
+          <div className="card" style={{ padding: 12, marginTop: 12 }}>
+            <div className="helper">Next</div>
+            <div style={{ marginTop: 6, fontWeight: 900, fontSize: 16 }}>
+              {nextMeeting?.title && safeStr(nextMeeting.title) !== "__encrypted__" ? safeStr(nextMeeting.title) : "not scheduled"}
+            </div>
+            <div className="helper" style={{ marginTop: 6 }}>{nextMeetingLabel}</div>
+            <div style={{ marginTop: 10, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => go("meetings")}>RSVP</button>
             </div>
           </div>
         </div>
 
-        {/* People detail */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-            <button className="btn" onClick={() => go("people")}>View all</button>
+        <div className="card" style={{ gridColumn: "span 4", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
+            <button className="btn" onClick={() => go("inventory")}>Manage</button>
           </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
-          </div>
-
-          {people.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {people.slice(0, 6).map((p) => (
-                <div key={p.id} className="card" style={{ padding: 12, display: "flex", gap: 12, alignItems: "baseline" }}>
-                  <div style={{ fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {safeStr(p.name || "").trim() || "(unnamed)"}
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {invBars.length ? invBars.map((it) => {
+              const low = it.qty != null && it.qty <= 5;
+              return (
+                <div key={it.id} style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                    <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                    <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap", color: low ? "#FFD666" : undefined }}>
+                      {it.qty == null ? "" : `${it.qty}${it.unit ? ` ${it.unit}` : ""}`}{low ? "  low" : ""}
+                    </div>
                   </div>
-                  <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-                    {safeStr(p.role || "").trim() || ""}
+                  <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${it.pct}%`, background: low ? "rgba(255,214,102,0.35)" : "rgba(255,255,255,0.22)" }} />
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 10 }}>No people yet.</div>
-          )}
+              );
+            }) : <div className="helper">No inventory yet.</div>}
+          </div>
         </div>
 
-        {/* Pulse: recent subs + pledges */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Pulse</h2>
+        <div className="card" style={{ gridColumn: "span 3", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>New This Week</h2>
             <button className="btn" onClick={() => go("settings")}>View</button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginTop: 12 }}>
-            <div className="card" style={{ padding: 12 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                <div style={{ fontWeight: 900 }}>New subscribers</div>
-                <div className="helper" style={{ marginLeft: "auto" }}>{recentSubs.length} shown</div>
-              </div>
-              {recentSubs.length ? (
-                <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                  {recentSubs.map((s) => (
-                    <div key={s.id} style={{ display: "flex", gap: 10 }}>
-                      <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {safeStr(s?.name || "").trim() || "(no name)"}
-                      </div>
-                      <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-                        {fmtDT(s?.created_at || s?.joined_at)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 10 }}>none yet</div>
-              )}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div style={{ fontWeight: 900 }}>+ {recentSubs.length} subscribers</div>
+              <div style={{ marginLeft: "auto" }}><Sparkline points={subsSpark} /></div>
             </div>
-
-            <div className="card" style={{ padding: 12 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                <div style={{ fontWeight: 900 }}>Recent pledges</div>
-                <div className="helper" style={{ marginLeft: "auto" }}>{recentPledges.length} shown</div>
-              </div>
-
-              {recentPledges.length ? (
-                <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                  {recentPledges.map((p) => {
-                    const who = safeStr(p?.pledger_name).trim() || "someone";
-                    const target = pickPledgeTarget(p, needTitleById);
-                    const st = safeStr(pill(p?.status));
-                    return (
-                      <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                        <div style={{ fontWeight: 900, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {who}
-                        </div>
-                        <div className="helper">→</div>
-                        <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {target}
-                        </div>
-                        <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                          {st}
-                        </div>
-                      </div>
-                    );
-                  })}
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              {recentSubs.length ? recentSubs.slice(0, 3).map((s) => (
+                <div key={s.id} style={{ display: "flex", gap: 10 }}>
+                  <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {safeStr(s?.name || "").trim() || "(no name)"}
+                  </div>
+                  <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{fmtDT(s?.created_at || s?.joined_at)}</div>
                 </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 10 }}>none yet</div>
-              )}
+              )) : <div className="helper">none yet</div>}
             </div>
           </div>
 
-          <div className="helper" style={{ marginTop: 12, opacity: 0.85 }}>
-            Dashboard note: emails are intentionally not shown here.
+          <div style={{ marginTop: 14, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12 }}>
+            <div style={{ fontWeight: 900 }}>+ {recentPledges.length} pledges</div>
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              {recentPledges.length ? recentPledges.slice(0, 3).map((p) => {
+                const who = safeStr(p?.pledger_name).trim() || "someone";
+                const target = pickPledgeTarget(p, needTitleById);
+                const pill = statusPill(p?.status);
+                return (
+                  <div key={p.id} className="card" style={{ padding: 10 }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                      {pillEl(pill)}
+                      <div style={{ fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
+                    </div>
+                    <div className="helper" style={{ marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {target}
+                    </div>
+                  </div>
+                );
+              }) : <div className="helper">none yet</div>}
+            </div>
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => go("settings")}>View Pledge Board</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: "span 5", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Newsletter Growth</h2>
+            <button className="btn" onClick={() => go("settings")}>View all</button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
+            <Ring value={newsletter.length} max={Math.max(newsletter.length, 10)} label="subscribers" />
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <Sparkline points={subsSpark} height={46} />
+              <div className="helper" style={{ marginTop: 6, opacity: 0.85 }}>last ~8 weeks</div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {recentSubs.length ? recentSubs.slice(0, 3).map((s) => (
+              <div key={s.id} className="card" style={{ padding: 12, display: "flex", gap: 12 }}>
+                <div style={{ fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {safeStr(s?.name || "").trim() || "(no name)"}
+                </div>
+                <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{fmtDT(s?.created_at || s?.joined_at)}</div>
+              </div>
+            )) : <div className="helper">No subscribers yet.</div>}
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: "span 4", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
+            <button className="btn" onClick={() => go("needs")}>View all</button>
+          </div>
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {openNeeds.length ? openNeeds.map((n) => {
+              const up = urgencyPill(n?.urgency);
+              return (
+                <div key={n.id} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                    {pillEl(up)}
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {safeStr(n.title || "").trim() || "(untitled need)"}
+                    </div>
+                    <div className="helper" style={{ whiteSpace: "nowrap" }}>{safeStr(n.status || "").trim()}</div>
+                  </div>
+                  <div className="helper" style={{ marginTop: 6, opacity: 0.9 }}>
+                    {Number.isFinite(Number(n.priority)) ? `priority ${Number(n.priority)}` : ""}
+                  </div>
+                </div>
+              );
+            }) : <div className="helper">No needs yet.</div>}
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: "span 3", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
+            <button className="btn" onClick={() => go("settings")}>View all</button>
+          </div>
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {recentPledges.length ? recentPledges.slice(0, 5).map((p) => {
+              const who = safeStr(p?.pledger_name).trim() || "someone";
+              const target = pickPledgeTarget(p, needTitleById);
+              const pill = statusPill(p?.status);
+              return (
+                <div key={p.id} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                    {pillEl(pill)}
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {who}
+                    </div>
+                  </div>
+                  <div className="helper" style={{ marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {target}
+                  </div>
+                  <div className="helper" style={{ marginTop: 6, opacity: 0.85 }}>{fmtDT(p?.created_at)}</div>
+                </div>
+              );
+            }) : <div className="helper">No pledges yet.</div>}
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: "span 12", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 900, fontSize: 16, flex: 1 }}>Need help?</div>
+            <button className="btn" onClick={() => go("settings")}>View guides</button>
+          </div>
+          <div className="helper" style={{ marginTop: 8, opacity: 0.9 }}>
+            Sidebar, search, notifications, and profile photo are layout-shell work. This file focuses on the dashboard content panels.
           </div>
         </div>
       </div>
