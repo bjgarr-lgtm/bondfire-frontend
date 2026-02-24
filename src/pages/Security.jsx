@@ -186,7 +186,7 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       setZkStatus((s) => ({ ...s, orgKey: true }));
       setMsg("org key loaded on this device");
     } catch (e) {
-      setMsg(e.message || "failed");
+      setMsg(String(e?.message || e || "failed"));
     }
   }
 

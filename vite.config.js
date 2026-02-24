@@ -29,6 +29,10 @@ export default defineConfig({
         // Important for SPAs with hash routes (/app/#/orgs etc.)
         // This keeps the SW from trying to be "helpful" and breaking routing.
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
+        // Ensure updates replace older SW versions promptly.
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
       }
     })
   ]

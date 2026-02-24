@@ -4,7 +4,20 @@ import App from './App.jsx';
 import './index.css';
 import { registerSW } from "virtual:pwa-register";
 
-registerSW({ immediate: true });
+// PWA: single registration path.
+// IMPORTANT: do NOT also call navigator.serviceWorker.register() manually.
+// Double-registration can strand users on stale caches until they "unregister the SW".
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    // Prefer self-healing over leaving the UI half-updated.
+    try {
+      updateSW(true);
+    } finally {
+      window.location.reload();
+    }
+  },
+});
 
 
 // === CANARY: proves a new build is running ===
@@ -17,13 +30,4 @@ createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 );
-
-// PWA: register service worker (optional but recommended)
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // swallow; PWA should not break the app
-    });
-  });
-}
 
