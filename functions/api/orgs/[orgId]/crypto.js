@@ -124,17 +124,34 @@ export async function onRequestPost({ env, request, params }) {
   }
 
   if (keyVersion != null) {
-    await tryRun(
-      db,
-      "INSERT INTO org_crypto (org_id, key_version, updated_at) VALUES ('" +
-        String(orgId).replace(/'/g, "''") +
-        "', " +
-        String(keyVersion) +
-        ", " +
-        String(Date.now()) +
-        ") ON CONFLICT(org_id) DO UPDATE SET key_version = excluded.key_version, updated_at = excluded.updated_at"
-    );
+    const info = await db.prepare("PRAGMA table_info(org_crypto)").all();
+    const cols = new Set((info?.results || []).map((r) => r.name));
+    const hasCreatedAt = cols.has("created_at");
+
+    const now = Date.now();
+
+    if (hasCreatedAt) {
+      // Legacy org_crypto has NOT NULL created_at with no default. Keep it satisfied forever.
+      await db
+        .prepare(
+          "INSERT INTO org_crypto (org_id, key_version, updated_at, created_at) VALUES (?, ?, ?, ?) " +
+            "ON CONFLICT(org_id) DO UPDATE SET " +
+            "key_version = excluded.key_version, " +
+            "updated_at = excluded.updated_at, " +
+            "created_at = COALESCE(org_crypto.created_at, excluded.created_at)"
+        )
+        .bind(orgId, keyVersion, now, now)
+        .run();
+    } else {
+      await db
+        .prepare(
+          "INSERT INTO org_crypto (org_id, key_version, updated_at) VALUES (?, ?, ?) " +
+            "ON CONFLICT(org_id) DO UPDATE SET key_version = excluded.key_version, updated_at = excluded.updated_at"
+        )
+        .bind(orgId, keyVersion, now)
+        .run();
+    }
   }
 
-  return json({ ok: true });
+return json({ ok: true });
 }
