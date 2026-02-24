@@ -1,7 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+
+/**
+ * Overview (Dashboard)
+ * Goal: keep Bondfire's existing styling (card/btn/helper/table/etc) but upgrade layout.
+ * - Top row: compact stat cards (People, Inventory, Needs, Meetings, Pledges, Subscribers) with delta vs last load.
+ * - Below: detailed cards with previews + simple visuals (inventory bars), scrollable.
+ * - ZK: decrypt on client if encrypted_blob present and org key cached.
+ */
 
 function readOrgInfo(orgId) {
   try {
@@ -14,92 +22,12 @@ function readOrgInfo(orgId) {
   }
 }
 
-function shortId(s) {
-  const t = String(s || "");
-  if (!t) return "";
-  if (t.length <= 10) return t;
-  return `${t.slice(0, 4)}…${t.slice(-4)}`;
-}
-
-function normalizeKind(kind) {
-  const k = String(kind || "").trim().toLowerCase();
-  const map = {
-    "inventory.deleted": "Inventory deleted",
-    "inventory.delete": "Inventory deleted",
-    "inventory.created": "Inventory added",
-    "inventory.create": "Inventory added",
-    "inventory.updated": "Inventory updated",
-    "inventory.update": "Inventory updated",
-
-    "need.deleted": "Need deleted",
-    "need.delete": "Need deleted",
-    "need.created": "Need created",
-    "need.create": "Need created",
-    "need.updated": "Need updated",
-    "need.update": "Need updated",
-
-    "person.deleted": "Person removed",
-    "person.delete": "Person removed",
-    "person.created": "Person added",
-    "person.create": "Person added",
-    "person.updated": "Person updated",
-    "person.update": "Person updated",
-
-    "meeting.deleted": "Meeting deleted",
-    "meeting.delete": "Meeting deleted",
-    "meeting.created": "Meeting created",
-    "meeting.create": "Meeting created",
-    "meeting.updated": "Meeting updated",
-    "meeting.update": "Meeting updated",
-
-    "invite.created": "Invite created",
-    "invite.redeemed": "Invite redeemed",
-  };
-  if (map[k]) return map[k];
-  const last = k.split(".").filter(Boolean).slice(-1)[0] || k;
-  return last ? last.charAt(0).toUpperCase() + last.slice(1) : "Activity";
-}
-
-function prettyMessage(a) {
-  const title = String(a?.entity_title || a?.entity_name || a?.title || a?.name || "").trim();
-  const entId = String(a?.entity_id || "").trim();
-  if (title) return entId ? `${title} (${shortId(entId)})` : title;
-
-  const raw = String(a?.message || "").trim();
-  if (!raw) return "";
-
-  const uuidRe = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-  return raw.replace(uuidRe, (m) => shortId(m));
-}
-
-function groupActivity(activity) {
-  const arr = Array.isArray(activity) ? activity : [];
-  const grouped = [];
-
-  for (const a of arr) {
-    const label = normalizeKind(a?.kind);
-    const msg = prettyMessage(a);
-    const key = `${label}::${msg}`;
-
-    const last = grouped[grouped.length - 1];
-    if (last && last.key === key) {
-      last.count += 1;
-      continue;
-    }
-
-    grouped.push({ key, label, msg, count: 1, raw: a });
-  }
-
-  return grouped.slice(0, 10);
-}
-
 function fmtDT(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n)) return "";
   try {
     const d = new Date(n);
     return d.toLocaleString(undefined, {
-      weekday: "short",
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -109,6 +37,10 @@ function fmtDT(ms) {
   } catch {
     return "";
   }
+}
+
+function safeStr(v) {
+  return String(v ?? "");
 }
 
 async function tryDecryptRow(orgId, row) {
@@ -129,15 +61,24 @@ async function decryptRows(orgId, rows) {
   return out;
 }
 
+function deltaBadge(now, prev) {
+  const a = Number(now || 0);
+  const b = Number(prev || 0);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return { txt: "• 0", tone: "helper" };
+  const diff = a - b;
+  const arrow = diff > 0 ? "▲" : "▼";
+  return { txt: `${arrow} ${Math.abs(diff)}`, tone: diff > 0 ? "up" : "down" };
+}
+
 function pickPledgeTarget(p, needTitleById) {
-  const nid = String(p?.need_id || "");
+  const nid = safeStr(p?.need_id).trim();
   if (nid && needTitleById[nid]) return needTitleById[nid];
 
-  const note = String(p?.note || "");
+  const note = safeStr(p?.note);
   const m = note.match(/item:\s*([^\n|]+)(?:\s*\||\n|$)/i);
   if (m && m[1]) return m[1].trim();
 
-  const t = String(p?.type || "").trim();
+  const t = safeStr(p?.type).trim();
   return t || "pledge";
 }
 
@@ -158,7 +99,6 @@ export default function Overview() {
   const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
   useEffect(() => {
     setOrgInfo(readOrgInfo(orgId));
-
     const onChange = (e) => {
       const changedId = e?.detail?.orgId;
       if (!changedId || changedId === orgId) setOrgInfo(readOrgInfo(orgId));
@@ -170,7 +110,9 @@ export default function Overview() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
-  const [peoplePreview, setPeoplePreview] = useState([]);
+
+  // previous counts snapshot for deltas
+  const prevCountsRef = useRef(null);
 
   async function refresh() {
     if (!orgId) return;
@@ -178,30 +120,38 @@ export default function Overview() {
     setErr("");
     try {
       const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
-
       const d = { ...d0 };
+
+      // Decrypt dashboard previews if ZK is on and we have an org key cached.
       d.people = await decryptRows(orgId, d0?.people);
       d.inventory = await decryptRows(orgId, d0?.inventory);
       d.needs = await decryptRows(orgId, d0?.needs);
-      d.newsletter = await decryptRows(orgId, d0?.newsletter);
       d.pledges = await decryptRows(orgId, d0?.pledges);
-
+      d.newsletter = await decryptRows(orgId, d0?.newsletter);
       if (d0?.nextMeeting) d.nextMeeting = await tryDecryptRow(orgId, d0.nextMeeting);
 
-      setData(d);
+      // Load previous counts for deltas.
+      const prevKey = `bf_dash_counts_${orgId}`;
+      const prev =
+        prevCountsRef.current ||
+        (() => {
+          try {
+            return JSON.parse(localStorage.getItem(prevKey) || "null");
+          } catch {
+            return null;
+          }
+        })();
 
-      const countPeople = Number(d?.counts?.people || 0);
-      const hasPeoplePreview = Array.isArray(d?.people) && d.people.length > 0;
+      prevCountsRef.current = prev;
 
-      if (hasPeoplePreview) {
-        setPeoplePreview(d.people);
-      } else if (countPeople > 0) {
-        const p0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-        const pList = Array.isArray(p0?.people) ? p0.people.slice(0, 5) : [];
-        setPeoplePreview(await decryptRows(orgId, pList));
-      } else {
-        setPeoplePreview([]);
+      // Store current counts for next time.
+      try {
+        localStorage.setItem(prevKey, JSON.stringify(d?.counts || {}));
+      } catch {
+        // ignore quota issues
       }
+
+      setData(d);
     } catch (e) {
       setErr(e?.message || "Failed to load dashboard");
     } finally {
@@ -213,20 +163,22 @@ export default function Overview() {
     refresh().catch(console.error);
   }, [orgId]);
 
-  const counts = data?.counts || {};
-  const people = Array.isArray(data?.people) && data.people.length > 0 ? data.people : peoplePreview;
-  const needs = Array.isArray(data?.needs) ? data.needs : [];
-  const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
-  const activity = Array.isArray(data?.activity) ? data.activity : [];
-  const nextMeeting = data?.nextMeeting || null;
+  if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
 
-  const newsletter = Array.isArray(data?.newsletter) ? data.newsletter : [];
+  const counts = data?.counts || {};
+  const prevCounts = prevCountsRef.current || {};
+
+  const people = Array.isArray(data?.people) ? data.people : [];
+  const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
+  const needs = Array.isArray(data?.needs) ? data.needs : [];
   const pledges = Array.isArray(data?.pledges) ? data.pledges : [];
+  const newsletter = Array.isArray(data?.newsletter) ? data.newsletter : [];
+  const nextMeeting = data?.nextMeeting || null;
 
   const needTitleById = useMemo(() => {
     const m = {};
     for (const n of needs) {
-      if (n?.id && n?.title && String(n.title) !== "__encrypted__") m[String(n.id)] = String(n.title);
+      if (n?.id && n?.title && safeStr(n.title) !== "__encrypted__") m[safeStr(n.id)] = safeStr(n.title);
     }
     return m;
   }, [needs]);
@@ -240,180 +192,296 @@ export default function Overview() {
   const recentSubs = useMemo(() => {
     const arr = newsletter.slice();
     arr.sort((a, b) => Number(b?.created_at || b?.joined_at || 0) - Number(a?.created_at || a?.joined_at || 0));
-    return arr.slice(0, 3);
+    return arr.slice(0, 5);
   }, [newsletter]);
 
   const recentPledges = useMemo(() => {
     const arr = pledges.slice();
     arr.sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0));
-    return arr.slice(0, 5);
+    return arr.slice(0, 6);
   }, [pledges]);
 
-  if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
+  // Inventory “growth bars”: use qty as magnitude when present.
+  const invBars = useMemo(() => {
+    const items = inventory.slice(0, 8).map((it) => ({
+      id: it?.id,
+      name: safeStr(it?.name || "").trim() || "(unnamed)",
+      qty: Number.isFinite(Number(it?.qty)) ? Number(it?.qty) : null,
+      unit: safeStr(it?.unit || "").trim(),
+    }));
+    const max = Math.max(1, ...items.map((x) => (x.qty == null ? 0 : x.qty)));
+    return items.map((x) => ({ ...x, pct: x.qty == null ? 0 : Math.round((x.qty / max) * 100) }));
+  }, [inventory]);
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
+
+  const StatCard = ({ title, value, prevValue, onClick }) => {
+    const d = deltaBadge(value, prevValue);
+    return (
+      <button
+        type="button"
+        className="card"
+        onClick={onClick}
+        style={{
+          padding: 12,
+          textAlign: "left",
+          cursor: "pointer",
+          display: "grid",
+          gap: 6,
+          minHeight: 84,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ fontWeight: 900, fontSize: 14 }}>{title}</div>
+          <div
+            className="helper"
+            style={{
+              marginLeft: "auto",
+              opacity: 0.9,
+              color: d.tone === "up" ? "#7CFC98" : d.tone === "down" ? "#FF8A8A" : undefined,
+              fontWeight: 700,
+              fontSize: 12,
+              whiteSpace: "nowrap",
+            }}
+            title="Change since last refresh"
+          >
+            {d.txt}
+          </div>
+        </div>
+        <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1 }}>{Number(value || 0)}</div>
+        <div className="helper" style={{ opacity: 0.85 }}>View</div>
+      </button>
+    );
+  };
 
   return (
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0, flex: 1 }}>{orgInfo?.name || "Dashboard"}</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0, flex: 1, minWidth: 200 }}>{orgInfo?.name || "Dashboard"}</h1>
           <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
-
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-            <button className="btn" onClick={() => go("people")}>View all</button>
-          </div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
-          </div>
-          {(counts.people || 0) === 0 ? (
-            <div className="helper" style={{ marginTop: 10 }}>No people yet.</div>
-          ) : Array.isArray(people) && people.length > 0 ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {people.slice(0, 5).map((p) => <li key={p.id}>{p.name}</li>)}
-            </ul>
-          ) : null}
-        </div>
+      {/* TOP: compact stat row */}
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        <StatCard title="People" value={counts.people || 0} prevValue={prevCounts.people || 0} onClick={() => go("people")} />
+        <StatCard title="Inventory" value={counts.inventory || 0} prevValue={prevCounts.inventory || 0} onClick={() => go("inventory")} />
+        <StatCard title="Needs (open)" value={counts.needsOpen || 0} prevValue={prevCounts.needsOpen || 0} onClick={() => go("needs")} />
+        <StatCard title="Meetings (upcoming)" value={counts.meetingsUpcoming || 0} prevValue={prevCounts.meetingsUpcoming || 0} onClick={() => go("meetings")} />
+        <StatCard title="Pledges" value={pledges.length} prevValue={prevCounts.pledges || 0} onClick={() => go("settings")} />
+        <StatCard title="Subscribers" value={newsletter.length} prevValue={prevCounts.newsletter || 0} onClick={() => go("settings")} />
+      </div>
 
+      {/* BELOW: detailed cards (scrollable “tight” section) */}
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          maxHeight: "calc(100vh - 320px)",
+          overflow: "auto",
+          paddingRight: 4,
+        }}
+      >
+        {/* Inventory detail with bars */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
             <button className="btn" onClick={() => go("inventory")}>View all</button>
           </div>
+
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}
           </div>
-          {inventory.length ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {inventory.map((it) => (
-                <li key={it.id}>
-                  {it.name}
-                  {typeof it.qty === "number" ? ` (${it.qty}${it.unit ? ` ${it.unit}` : ""})` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="helper" style={{ marginTop: 10 }}>No inventory yet.</div>
-          )}
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {invBars.length ? invBars.map((it) => (
+              <div key={it.id} style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                  <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {it.name}
+                  </div>
+                  <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
+                    {it.qty == null ? "" : `${it.qty}${it.unit ? ` ${it.unit}` : ""}`}
+                  </div>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${it.pct}%`, background: "rgba(255,255,255,0.22)" }} />
+                </div>
+              </div>
+            )) : (
+              <div className="helper" style={{ marginTop: 10 }}>No inventory yet.</div>
+            )}
+          </div>
         </div>
 
+        {/* Needs detail */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
             <button className="btn" onClick={() => go("needs")}>View all</button>
           </div>
+
           <div className="helper" style={{ marginTop: 10 }}>
             {counts.needsAll || 0} total, {counts.needsOpen || 0} open
           </div>
+
           {needs.length ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {needs.map((n) => (
-                <li key={n.id}>
-                  {n.title}
-                  {n.status ? ` · ${n.status}` : ""}
-                </li>
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {needs.slice(0, 6).map((n) => (
+                <div key={n.id} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {safeStr(n.title || "").trim() || "(untitled need)"}
+                    </div>
+                    <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                      {safeStr(n.status || "").trim() || ""}
+                    </div>
+                  </div>
+                  <div className="helper" style={{ marginTop: 6, opacity: 0.9 }}>
+                    {Number.isFinite(Number(n.priority)) ? `priority ${Number(n.priority)}` : ""}
+                    {safeStr(n.urgency).trim() ? ` · ${safeStr(n.urgency).trim()}` : ""}
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
             <div className="helper" style={{ marginTop: 10 }}>No needs yet.</div>
           )}
         </div>
 
+        {/* Meetings detail */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
             <button className="btn" onClick={() => go("meetings")}>View all</button>
           </div>
-          <div className="helper" style={{ marginTop: 10 }}>{counts.meetingsUpcoming || 0} upcoming</div>
-          <div className="helper" style={{ marginTop: 10 }}>Next: <strong>{nextMeetingLabel}</strong></div>
+
+          <div className="helper" style={{ marginTop: 10 }}>
+            {counts.meetingsUpcoming || 0} upcoming
+          </div>
+
+          <div style={{ marginTop: 12 }} className="card">
+            <div style={{ padding: 12 }}>
+              <div className="helper">Next</div>
+              <div style={{ marginTop: 6, fontWeight: 900 }}>
+                {nextMeeting?.title && safeStr(nextMeeting.title) !== "__encrypted__" ? safeStr(nextMeeting.title) : "not scheduled"}
+              </div>
+              <div className="helper" style={{ marginTop: 6 }}>
+                {nextMeetingLabel}
+              </div>
+            </div>
+          </div>
         </div>
 
+        {/* People detail */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Pulse</h2>
-            <button className="btn" onClick={() => go("settings")} style={{ whiteSpace: "nowrap" }}>Settings</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, flex: 1 }}>People</h2>
+            <button className="btn" onClick={() => go("people")}>View all</button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="helper" style={{ fontWeight: 800 }}>new subscribers</div>
-              {recentSubs.length ? (
-                <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
-                  {recentSubs.map((s) => {
-                    const name = String(s?.name || "").trim() || "(no name)";
-                    const t = fmtDT(s?.created_at || s?.joined_at);
-                    return (
-                      <div key={s.id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
-                        <span className="helper" style={{ whiteSpace: "nowrap" }}>
-                          {t ? t.split(", ").slice(-2).join(", ") : ""}
-                        </span>
-                      </div>
-                    );
-                  })}
+          <div className="helper" style={{ marginTop: 10 }}>
+            {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
+          </div>
+
+          {people.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {people.slice(0, 6).map((p) => (
+                <div key={p.id} className="card" style={{ padding: 12, display: "flex", gap: 12, alignItems: "baseline" }}>
+                  <div style={{ fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {safeStr(p.name || "").trim() || "(unnamed)"}
+                  </div>
+                  <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
+                    {safeStr(p.role || "").trim() || ""}
+                  </div>
                 </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 6 }}>none yet</div>
-              )}
+              ))}
             </div>
-
-            <div style={{ minWidth: 0 }}>
-              <div className="helper" style={{ fontWeight: 800 }}>recent pledges</div>
-              {recentPledges.length ? (
-                <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
-                  {recentPledges.map((p) => {
-                    const who = String(p?.pledger_name || "").trim() || "someone";
-                    const target = pickPledgeTarget(p, needTitleById);
-                    const st = pill(p?.status);
-                    return (
-                      <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                        <span style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 90 }}>
-                          {who}
-                        </span>
-                        <span className="helper" style={{ whiteSpace: "nowrap" }}>→</span>
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {target}
-                        </span>
-                        {st ? <span className="helper" style={{ whiteSpace: "nowrap", opacity: 0.85 }}>{st}</span> : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 6 }}>none yet</div>
-              )}
-            </div>
-          </div>
-
-          <div className="helper" style={{ marginTop: 12, display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <span>{newsletter.length} total subs</span>
-            <span>{pledges.length} total pledges</span>
-          </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 10 }}>No people yet.</div>
+          )}
         </div>
 
-        {/* Recent Activity intentionally removed because it was useless noise */}
-        {activity && false ? (
-          <div className="card" style={{ padding: 16 }}>
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {groupActivity(activity).map((g) => (
-                <li key={g.raw?.id || g.key}>
-                  <strong>{g.label}</strong>
-                  {g.count > 1 ? ` x${g.count}` : ""}
-                  {g.msg ? `: ${g.msg}` : ""}
-                </li>
-              ))}
-            </ul>
+        {/* Pulse: recent subs + pledges */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Pulse</h2>
+            <button className="btn" onClick={() => go("settings")}>View</button>
           </div>
-        ) : null}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginTop: 12 }}>
+            <div className="card" style={{ padding: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div style={{ fontWeight: 900 }}>New subscribers</div>
+                <div className="helper" style={{ marginLeft: "auto" }}>{recentSubs.length} shown</div>
+              </div>
+              {recentSubs.length ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                  {recentSubs.map((s) => (
+                    <div key={s.id} style={{ display: "flex", gap: 10 }}>
+                      <div style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {safeStr(s?.name || "").trim() || "(no name)"}
+                      </div>
+                      <div className="helper" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
+                        {fmtDT(s?.created_at || s?.joined_at)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 10 }}>none yet</div>
+              )}
+            </div>
+
+            <div className="card" style={{ padding: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div style={{ fontWeight: 900 }}>Recent pledges</div>
+                <div className="helper" style={{ marginLeft: "auto" }}>{recentPledges.length} shown</div>
+              </div>
+
+              {recentPledges.length ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                  {recentPledges.map((p) => {
+                    const who = safeStr(p?.pledger_name).trim() || "someone";
+                    const target = pickPledgeTarget(p, needTitleById);
+                    const st = safeStr(pill(p?.status));
+                    return (
+                      <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                        <div style={{ fontWeight: 900, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {who}
+                        </div>
+                        <div className="helper">→</div>
+                        <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {target}
+                        </div>
+                        <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                          {st}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 10 }}>none yet</div>
+              )}
+            </div>
+          </div>
+
+          <div className="helper" style={{ marginTop: 12, opacity: 0.85 }}>
+            Dashboard note: emails are intentionally not shown here.
+          </div>
+        </div>
       </div>
     </div>
   );
