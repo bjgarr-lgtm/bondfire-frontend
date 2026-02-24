@@ -69,7 +69,6 @@ export async function onRequestGet({ env, request, params }) {
 
   const nextMeeting = await safeFirst(
     env,
-    // Include encrypted_blob so clients with the org key can decrypt title/notes client-side.
     "SELECT id, title, starts_at, encrypted_blob, key_version FROM meetings WHERE org_id = ? AND starts_at IS NOT NULL AND starts_at >= ? ORDER BY starts_at ASC LIMIT 1",
     [orgId, nowMs],
     null
@@ -77,32 +76,57 @@ export async function onRequestGet({ env, request, params }) {
 
   const people = await safeAll(
     env,
-    // Include encrypted_blob so the dashboard can decrypt names/phones/etc on-device.
-    "SELECT id, name, role, phone, skills, notes, encrypted_blob, key_version FROM people WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    "SELECT id, name, encrypted_blob, key_version FROM people WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
   const needs = await safeAll(
     env,
-    // Include encrypted fields so the dashboard can show plaintext in-app after client-side decrypt.
-    "SELECT id, title, status, priority, urgency, encrypted_blob, encrypted_description, key_version FROM needs WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    "SELECT id, title, status, encrypted_blob, key_version FROM needs WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
   const inventory = await safeAll(
     env,
-    // Include encrypted fields so the dashboard can show plaintext in-app after client-side decrypt.
-    "SELECT id, name, qty, unit, encrypted_blob, encrypted_notes, key_version FROM inventory WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    "SELECT id, name, qty, unit, encrypted_blob, key_version FROM inventory WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
     [orgId],
     []
   );
 
-  const activity = await safeAll(
+  
+  const newsletterCount = await safeFirst(
     env,
-    // meta_json may carry structured info in newer rows.
-    "SELECT id, kind, message, actor_user_id, created_at, meta_json FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 25",
+    "SELECT COUNT(*) as c FROM newsletter_subscribers WHERE org_id = ?",
+    [orgId],
+    { c: 0 }
+  );
+
+  const pledgesCount = await safeFirst(
+    env,
+    "SELECT COUNT(*) as c FROM pledges WHERE org_id = ?",
+    [orgId],
+    { c: 0 }
+  );
+
+  const newsletter = await safeAll(
+    env,
+    "SELECT id, name, email, created_at, encrypted_blob, key_version FROM newsletter_subscribers WHERE org_id = ? ORDER BY created_at DESC LIMIT 5",
+    [orgId],
+    []
+  );
+
+  const pledges = await safeAll(
+    env,
+    "SELECT id, title, qty, unit, created_at, encrypted_blob, key_version FROM pledges WHERE org_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5",
+    [orgId],
+    []
+  );
+
+const activity = await safeAll(
+    env,
+    "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 25",
     [orgId],
     []
   );
@@ -115,11 +139,15 @@ export async function onRequestGet({ env, request, params }) {
       needsAll: needsAllCount?.c || 0,
       inventory: inventoryCount?.c || 0,
       meetingsUpcoming: meetingsUpcomingCount?.c || 0,
+      newsletter: newsletterCount?.c || 0,
+      pledges: pledgesCount?.c || 0,
     },
     nextMeeting: nextMeeting || null,
     people,
     needs,
     inventory,
+    newsletter,
+    pledges,
     activity,
   });
 }
