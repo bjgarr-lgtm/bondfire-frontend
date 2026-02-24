@@ -14,6 +14,46 @@ const DEVICE_KEY_ID = "device_keypair_v1";
 const LS_PUB = "bf_device_public_jwk_v1";
 const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
 
+// Stable-ish identifier for a device public key.
+// Used for UX/debug only (detecting mismatches), not as a security primitive.
+export async function kidFromJwk(jwk) {
+  const s = JSON.stringify(jwk);
+  const bytes = new TextEncoder().encode(s);
+  const h = await crypto.subtle.digest("SHA-256", bytes);
+  const u8 = new Uint8Array(h);
+  // short, URL-safe
+  return b64(u8.slice(0, 12));
+}
+
+async function getServerPublicKey() {
+  try {
+    const d = await api("/api/auth/keys", { method: "GET" });
+    const pk = d?.public_key;
+    if (!pk) return null;
+    const jwk = typeof pk === "string" ? JSON.parse(pk) : pk;
+    return jwk || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncDevicePublicKeyToServer({ force = false } = {}) {
+  const device = await ensureDeviceKeypair({ skipServerSync: true });
+  const localKid = await kidFromJwk(device.pubJwk);
+  const serverJwk = await getServerPublicKey();
+  const serverKid = serverJwk ? await kidFromJwk(serverJwk) : null;
+
+  const same = !!serverKid && serverKid === localKid;
+  if (same && !force) return { ok: true, synced: false, localKid, serverKid };
+
+  await api("/api/auth/keys", {
+    method: "POST",
+    body: JSON.stringify({ public_key: JSON.stringify(device.pubJwk) }),
+  });
+
+  return { ok: true, synced: true, localKid, serverKid };
+}
+
 function b64(bytes) {
   let s = "";
   bytes.forEach((b) => (s += String.fromCharCode(b)));
@@ -27,40 +67,6 @@ function unb64(s) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
-
-
-function canonicalJwk(jwk) {
-  // Stable-ish string for hashing (avoid key order surprises)
-  if (!jwk || typeof jwk !== "object") return "";
-  const out = {};
-  const keys = Object.keys(jwk).sort();
-  for (const k of keys) out[k] = jwk[k];
-  return JSON.stringify(out);
-}
-
-async function sha256b64url(str) {
-  const data = new TextEncoder().encode(str);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  const bytes = new Uint8Array(digest);
-  return b64(bytes);
-}
-
-export async function computeDeviceKid(pubJwk) {
-  // Short readable id for debugging and wrap matching (not a secret)
-  const canon = canonicalJwk(pubJwk);
-  const full = await sha256b64url(canon);
-  return full.slice(0, 16);
-}
-
-export function getDevicePublicJwk() {
-  try {
-    const s = localStorage.getItem(LS_PUB);
-    return s ? JSON.parse(s) : null;
-  } catch {
-    return null;
-  }
-}
-
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -105,12 +111,24 @@ async function hkdfAesKey(sharedBits, saltBytes, infoStr) {
   );
 }
 
-export async function ensureDeviceKeypair() {
+export async function ensureDeviceKeypair({ skipServerSync = false } = {}) {
   const existing = await idbGet(DEVICE_KEY_ID);
   if (existing?.privJwk && existing?.pubJwk) {
     if (!localStorage.getItem(LS_PUB)) localStorage.setItem(LS_PUB, JSON.stringify(existing.pubJwk));
-    if (!localStorage.getItem("bf_device_kid_v1")) {
-      try { localStorage.setItem("bf_device_kid_v1", await computeDeviceKid(existing.pubJwk)); } catch {}
+    if (!skipServerSync) {
+      try {
+        const localKid = await kidFromJwk(existing.pubJwk);
+        const serverJwk = await getServerPublicKey();
+        const serverKid = serverJwk ? await kidFromJwk(serverJwk) : null;
+        if (!serverKid || serverKid !== localKid) {
+          await api("/api/auth/keys", {
+            method: "POST",
+            body: JSON.stringify({ public_key: JSON.stringify(existing.pubJwk) }),
+          });
+        }
+      } catch {
+        // We'll surface this via explicit UI actions where needed.
+      }
     }
     return existing;
   }
@@ -121,10 +139,18 @@ export async function ensureDeviceKeypair() {
 
   await idbSet(DEVICE_KEY_ID, { pubJwk, privJwk });
   localStorage.setItem(LS_PUB, JSON.stringify(pubJwk));
-  try { localStorage.setItem("bf_device_kid_v1", await computeDeviceKid(pubJwk)); } catch {}
 
   // register public key with server
-  try { await api("/api/auth/keys", { method: "POST", body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }) }); } catch {}
+  if (!skipServerSync) {
+    try {
+      await api("/api/auth/keys", {
+        method: "POST",
+        body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }),
+      });
+    } catch {
+      // If this fails, org key wrapping for this user will break until they sync.
+    }
+  }
   return { pubJwk, privJwk };
 }
 
@@ -146,22 +172,14 @@ export async function wrapForMember(orgKeyBytes, memberPublicJwk) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, orgKeyBytes);
 
-  const sender_kid = await computeDeviceKid(device.pubJwk);
-  const recipient_kid = await computeDeviceKid(memberPublicJwk);
-  return JSON.stringify({ v: 1, sender_pub: device.pubJwk, sender_kid, recipient_kid, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) });
+  return JSON.stringify({ v: 1, sender_pub: device.pubJwk, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) });
 }
 
 export async function unwrapOrgKey(wrappedStr) {
   const device = await ensureDeviceKeypair();
   const priv = await importPriv(device.privJwk);
 
-  let wrapped;
-  try {
-    wrapped = typeof wrappedStr === "string" ? JSON.parse(wrappedStr) : wrappedStr;
-  } catch {
-    throw new Error("WRAPPED_KEY_NOT_JSON");
-  }
-
+  const wrapped = JSON.parse(wrappedStr);
   const salt = unb64(wrapped.salt);
   const iv = unb64(wrapped.iv);
   const ct = unb64(wrapped.ct);
@@ -170,25 +188,10 @@ export async function unwrapOrgKey(wrappedStr) {
   if (!senderPubJwk) throw new Error("MISSING_SENDER_PUB");
   const senderPub = await importPub(senderPubJwk);
 
-  try {
-    const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: senderPub }, priv, 256);
-    const aes = await hkdfAesKey(shared, salt, "bondfire:orgkey-wrap:v1");
-    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aes, ct);
-    return new Uint8Array(pt);
-  } catch (e) {
-    const kid = localStorage.getItem("bf_device_kid_v1") || "";
-    const recipientKid = String(wrapped?.recipient_kid || "");
-    const senderKid = String(wrapped?.sender_kid || "");
-    // Most common cause: the wrapped key was generated for a different device key than the one you have locally.
-    const hint =
-      recipientKid && kid && recipientKid !== kid
-        ? `Device key mismatch (this device=${kid}, wrap expects=${recipientKid}). Rewrap org key needed.`
-        : "Decrypt/unwrap failed. If you recently cleared site data or switched devices, an admin needs to rewrap org keys for you.";
-    const msg = `ORG_KEY_UNWRAP_FAILED: ${e?.name || "Error"} ${e?.message || String(e)}. ${hint} (sender=${senderKid || "?"})`;
-    const err = new Error(msg);
-    err.name = e?.name || "Error";
-    throw err;
-  }
+  const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: senderPub }, priv, 256);
+  const aes = await hkdfAesKey(shared, salt, "bondfire:orgkey-wrap:v1");
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aes, ct);
+  return new Uint8Array(pt);
 }
 
 export function randomOrgKey() {

@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import {
   ensureDeviceKeypair,
+  syncDevicePublicKeyToServer,
+  kidFromJwk,
   randomOrgKey,
   wrapForMember,
   unwrapOrgKey,
@@ -22,8 +24,7 @@ export default function Security() {
 
   const [zkStatus, setZkStatus] = React.useState({ deviceKey: false, orgKey: false });
   const [orgKeyVersion, setOrgKeyVersion] = React.useState(1);
-  const [deviceKid, setDeviceKid] = React.useState("");
-  const [wrapExpectedKid, setWrapExpectedKid] = React.useState("");
+  const [keySync, setKeySync] = React.useState({ localKid: null, serverKid: null, synced: false, lastError: null });
 
 
   React.useEffect(() => {
@@ -31,12 +32,38 @@ export default function Security() {
       const orgKey = getCachedOrgKey(orgId);
       setZkStatus((s) => ({ ...s, orgKey: !!orgKey }));
       try {
-        const dev = await ensureDeviceKeypair();
+        const dev = await ensureDeviceKeypair({ skipServerSync: true });
         setZkStatus((s) => ({ ...s, deviceKey: !!dev?.pubJwk }));
-        try { setDeviceKid(localStorage.getItem("bf_device_kid_v1") || ""); } catch {}
+
+        // Show whether the server still has your current public key.
+        try {
+          const localKid = dev?.pubJwk ? await kidFromJwk(dev.pubJwk) : null;
+          let serverKid = null;
+          try {
+            const d = await api("/api/auth/keys", { method: "GET" });
+            if (d?.public_key) {
+              const jwk = typeof d.public_key === "string" ? JSON.parse(d.public_key) : d.public_key;
+              serverKid = jwk ? await kidFromJwk(jwk) : null;
+            }
+          } catch {}
+
+          setKeySync((s) => ({ ...s, localKid, serverKid, lastError: null }));
+        } catch {}
       } catch {}
     })();
   }, [orgId]);
+
+  async function syncMyKey() {
+    setMsg("");
+    try {
+      const r = await syncDevicePublicKeyToServer({ force: true });
+      setKeySync((s) => ({ ...s, localKid: r.localKid, serverKid: r.localKid, synced: true, lastError: null }));
+      setMsg("synced your key to the server. now click rewrap for all members.");
+    } catch (e) {
+      setKeySync((s) => ({ ...s, synced: false, lastError: e?.message || String(e) }));
+      setMsg(e?.message || "failed to sync key");
+    }
+  }
 
   async function startMfa() {
     setMsg("");
@@ -82,7 +109,8 @@ export default function Security() {
   async function enableZkForOrg() {
     setMsg("");
     try {
-      await ensureDeviceKeypair();
+      // Make sure your key is actually on the server before we try to wrap for you.
+      await syncDevicePublicKeyToServer({ force: true });
 
       const members = await api(`/api/orgs/${orgId}/members`);
       const list = Array.isArray(members.members) ? members.members : [];
@@ -119,7 +147,8 @@ export default function Security() {
 async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
   setMsg("");
   try {
-    await ensureDeviceKeypair();
+    // If your server-stored key is stale, rewrap will keep producing wraps you cannot open.
+    await syncDevicePublicKeyToServer({ force: true });
 
     const cached = getCachedOrgKey(orgId);
     if (!cached) {
@@ -179,39 +208,28 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
     setMsg("");
     try {
       await ensureDeviceKeypair();
-      try { setDeviceKid(localStorage.getItem("bf_device_kid_v1") || ""); } catch {}
       const d = await api(`/api/orgs/${orgId}/crypto`, { method: "GET" });
-
       if (!d?.wrapped_key) {
         setMsg("no wrapped key for you on this org yet");
         return;
       }
-
-      // Try to read the wrap's expected recipient kid (helps explain mismatches).
-      try {
-        const w = JSON.parse(d.wrapped_key);
-        if (w?.recipient_kid) setWrapExpectedKid(String(w.recipient_kid));
-      } catch {}
-
       const key = await unwrapOrgKey(d.wrapped_key);
       cacheOrgKey(orgId, key);
       setZkStatus((s) => ({ ...s, orgKey: true }));
       setMsg("org key loaded on this device");
     } catch (e) {
-      const name = String(e?.name || "");
-      const message = String(e?.message || e || "failed");
-      if (name === "OperationError" || message.includes("ORG_KEY_UNWRAP_FAILED")) {
+      const m = String(e?.message || e || "failed");
+      // Friendlier guidance for the most common failure.
+      if (m.includes("OperationError") || m.includes("ORG_KEY_UNWRAP_FAILED")) {
         setMsg(
-          "could not load the org key on this device. most common cause: your device key changed (new browser, cleared site data, different computer). " +
-          "fix: ask an org admin to click 'rewrap for all members' (or do it yourself if you're admin). " +
-          "details: " + message
+          "could not load org key. usually this means your browser key does not match what the server wrapped for you. click 'sync my key to server', then rewrap, then try load again. details: " +
+            m
         );
-        return;
+      } else {
+        setMsg(m);
       }
-      setMsg(message);
     }
   }
-
 
   return (
     <div style={{ maxWidth: 920, margin: "0 auto", padding: 16 }}>
@@ -254,16 +272,20 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       <section style={{ marginTop: 16, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
         <h3>zero knowledge storage (beta)</h3>
         <div style={{ fontSize: 14, opacity: 0.9 }}>
-          device key: {zkStatus.deviceKey ? "ok" : "missing"}
-          {deviceKid ? ` (kid ${deviceKid})` : ""}
-          {" | "}
-          org key cached: {zkStatus.orgKey ? "yes" : "no"}
-          {wrapExpectedKid ? ` (wrap expects ${wrapExpectedKid})` : ""}
-          {" | "}
-          org key version: {orgKeyVersion}
+          device key: {zkStatus.deviceKey ? "ok" : "missing"} | org key cached: {zkStatus.orgKey ? "yes" : "no"} | org key version: {orgKeyVersion}
+        </div>
+
+        <div style={{ fontSize: 13, marginTop: 6, opacity: 0.85 }}>
+          your key id (this browser): <b>{keySync.localKid || "unknown"}</b> | server has: <b>{keySync.serverKid || "none"}</b>
+          {keySync.localKid && keySync.serverKid && keySync.localKid !== keySync.serverKid ? (
+            <span style={{ marginLeft: 8, color: "#f88" }}>
+              mismatch. sync + rewrap needed.
+            </span>
+          ) : null}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button onClick={syncMyKey}>sync my key to server</button>
           <button onClick={enableZkForOrg}>enable zk for this org (admin)</button>
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: false })}>rewrap for all members</button>
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: true })}>rotate org key</button>
