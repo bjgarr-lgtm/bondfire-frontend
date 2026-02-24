@@ -70,6 +70,13 @@ export async function ensureZkSchema(db) {
     await tryRun(db, "ALTER TABLE org_crypto ADD COLUMN updated_at INTEGER");
     await tryRun(db, "UPDATE org_crypto SET updated_at = COALESCE(updated_at, (strftime('%s','now')*1000))");
   }
+
+  // ===== Members + Newsletter subscribers (sensitive settings data) =====
+  // Store ciphertext only in encrypted_blob. Plaintext columns may still exist for legacy/backfill.
+  await tryRun(db, "ALTER TABLE org_memberships ADD COLUMN encrypted_blob TEXT");
+  await tryRun(db, "ALTER TABLE org_memberships ADD COLUMN key_version INTEGER DEFAULT 1");
+  await tryRun(db, "ALTER TABLE newsletter_subscribers ADD COLUMN encrypted_blob TEXT");
+  await tryRun(db, "ALTER TABLE newsletter_subscribers ADD COLUMN key_version INTEGER DEFAULT 1");
 }
 
 export async function getOrgKeyVersion(db, orgId) {
@@ -103,30 +110,13 @@ export async function bumpOrgKeyVersion(db, orgId) {
 
   // Try to write modern schema, but if org_crypto is legacy-only, update both.
   try {
-    const info = await db.prepare("PRAGMA table_info(org_crypto)").all();
-    const cols = new Set((info?.results || []).map((r) => r.name));
-    const hasCreatedAt = cols.has("created_at");
-
-    if (hasCreatedAt) {
-      await db
-        .prepare(
-          "INSERT INTO org_crypto (org_id, key_version, updated_at, created_at) VALUES (?, ?, ?, ?) " +
-            "ON CONFLICT(org_id) DO UPDATE SET " +
-            "key_version = excluded.key_version, " +
-            "updated_at = excluded.updated_at, " +
-            "created_at = COALESCE(org_crypto.created_at, excluded.created_at)"
-        )
-        .bind(orgId, next, t, t)
-        .run();
-    } else {
-      await db
-        .prepare(
-          "INSERT INTO org_crypto (org_id, key_version, updated_at) VALUES (?, ?, ?) " +
-            "ON CONFLICT(org_id) DO UPDATE SET key_version = excluded.key_version, updated_at = excluded.updated_at"
-        )
-        .bind(orgId, next, t)
-        .run();
-    }
+    await db
+      .prepare(
+        "INSERT INTO org_crypto (org_id, key_version, updated_at) VALUES (?, ?, ?) " +
+          "ON CONFLICT(org_id) DO UPDATE SET key_version = excluded.key_version, updated_at = excluded.updated_at"
+      )
+      .bind(orgId, next, t)
+      .run();
 
     // If legacy "version" column exists, keep it in sync.
     try {
