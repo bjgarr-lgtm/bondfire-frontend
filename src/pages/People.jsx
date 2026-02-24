@@ -54,6 +54,9 @@ export default function People() {
 	const [err, setErr] = useState("");
 	const [busyZk, setBusyZk] = useState(false);
 	const [zkMsg, setZkMsg] = useState("");
+	const [detailOpen, setDetailOpen] = useState(false);
+	const [detailPerson, setDetailPerson] = useState(null);
+	const [detailDraft, setDetailDraft] = useState({ name: "", role: "", phone: "", skills: "", notes: "" });
 
 	// Controlled add form so it clears every time
 	const [form, setForm] = useState({
@@ -61,7 +64,27 @@ export default function People() {
 		role: "",
 		phone: "",
 		skills: "",
+		notes: "",
 	});
+
+	function openDetails(p) {
+		setErr("");
+		setZkMsg("");
+		setDetailPerson(p);
+		setDetailDraft({
+			name: safeStr(p?.name).trim(),
+			role: safeStr(p?.role).trim(),
+			phone: safeStr(p?.phone).trim(),
+			skills: safeStr(p?.skills).trim(),
+			notes: safeStr(p?.notes).trim(),
+		});
+		setDetailOpen(true);
+	}
+
+	function closeDetails() {
+		setDetailOpen(false);
+		setDetailPerson(null);
+	}
 
 	async function refresh() {
 		if (!orgId) return;
@@ -81,7 +104,7 @@ export default function People() {
 							out.push({ ...p, ...dec });
 							continue;
 						} catch {
-							out.push({ ...p, name: "(encrypted)", role: "", phone: "", skills: "" });
+							out.push({ ...p, name: "(encrypted)", role: "", phone: "", skills: "", notes: "" });
 							continue;
 						}
 					}
@@ -119,7 +142,7 @@ export default function People() {
 	const list = useMemo(() => {
 		const needle = q.toLowerCase();
 		return people.filter((p) =>
-			[safeStr(p.name), safeStr(p.role), safeStr(p.skills), safeStr(p.phone)]
+			[safeStr(p.name), safeStr(p.role), safeStr(p.skills), safeStr(p.phone), safeStr(p.notes)]
 				.filter(Boolean)
 				.join(" ")
 				.toLowerCase()
@@ -138,9 +161,10 @@ export default function People() {
 				role: safeStr(patch?.role).trim(),
 				phone: safeStr(patch?.phone).trim(),
 				skills: safeStr(patch?.skills).trim(),
+				notes: safeStr(patch?.notes).trim(),
 			};
 			const enc = await encryptWithOrgKey(orgKey, JSON.stringify(next));
-			payload = { id, name: "__encrypted__", role: "", phone: "", skills: "", encrypted_blob: enc };
+			payload = { id, name: "__encrypted__", role: "", phone: "", skills: "", notes: "", encrypted_blob: enc };
 		}
 
 		await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
@@ -169,15 +193,16 @@ export default function People() {
 		const role = safeStr(form.role).trim();
 		const phone = safeStr(form.phone).trim();
 		const skills = safeStr(form.skills).trim();
+		const notes = safeStr(form.notes).trim();
 
 		const orgKey = getCachedOrgKey(orgId);
-		let payload = { name, role, phone, skills };
-		let optimistic = { name, role, phone, skills };
+		let payload = { name, role, phone, skills, notes };
+		let optimistic = { name, role, phone, skills, notes };
 		if (orgKey) {
-			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, role, phone, skills }));
-			payload = { name: "__encrypted__", role: "", phone: "", skills: "", encrypted_blob: enc };
+			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, role, phone, skills, notes }));
+			payload = { name: "__encrypted__", role: "", phone: "", skills: "", notes: "", encrypted_blob: enc };
 			// Don't keep plaintext in state when ZK is on.
-			optimistic = { name: "(encrypted)", role: "", phone: "", skills: "" };
+			optimistic = { name: "(encrypted)", role: "", phone: "", skills: "", notes: "" };
 		}
 
 		const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
@@ -190,7 +215,7 @@ export default function People() {
 			setPeople((prev) => [{ id: data.id, ...optimistic }, ...prev]);
 		}
 
-		setForm({ name: "", role: "", phone: "", skills: "" });
+		setForm({ name: "", role: "", phone: "", skills: "", notes: "" });
 		setTimeout(() => refresh().catch(console.error), 300);
 	}
 
@@ -218,12 +243,13 @@ export default function People() {
 					role: safeStr(p.role).trim(),
 					phone: safeStr(p.phone).trim(),
 					skills: safeStr(p.skills).trim(),
+					notes: safeStr(p.notes).trim(),
 				};
 				const enc = await encryptWithOrgKey(orgKey, JSON.stringify(next));
 				await api(`/api/orgs/${encodeURIComponent(orgId)}/people`, {
 					method: "PUT",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ id: p.id, name: "__encrypted__", role: "", phone: "", skills: "", encrypted_blob: enc }),
+					body: JSON.stringify({ id: p.id, name: "__encrypted__", role: "", phone: "", skills: "", notes: "", encrypted_blob: enc }),
 				});
 				changed++;
 			}
@@ -245,6 +271,38 @@ export default function People() {
 			{children}
 		</label>
 	);
+
+	const Modal = ({ open, title, children, onClose }) => {
+		if (!open) return null;
+		return (
+			<div
+				role="dialog"
+				aria-modal="true"
+				onMouseDown={(e) => {
+					if (e.target === e.currentTarget) onClose();
+				}}
+				style={{
+					position: "fixed",
+					inset: 0,
+					background: "rgba(0,0,0,0.55)",
+					display: "grid",
+					placeItems: "center",
+					padding: 16,
+					zIndex: 50,
+				}}
+			>
+				<div className="card" style={{ width: "min(720px, 100%)", padding: 16 }}>
+					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+						<h3 style={{ margin: 0, flex: 1 }}>{title}</h3>
+						<button className="btn" type="button" onClick={onClose}>
+							Close
+						</button>
+					</div>
+					<div style={{ marginTop: 12 }}>{children}</div>
+				</div>
+			</div>
+		);
+	};
 
 	return (
 		<div>
@@ -278,25 +336,19 @@ export default function People() {
 							<div key={p.id} className="card" style={{ padding: 12 }}>
 								<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 									<div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{String(p.name || "Unnamed")}</div>
+										<button className="btn" style={{ whiteSpace: "nowrap" }} type="button" onClick={() => openDetails(p)}>
+											Details
+										</button>
 									<button className="btn" style={{ whiteSpace: "nowrap" }} type="button" onClick={() => delPerson(p.id).catch(console.error)}>
 										Delete
 									</button>
 								</div>
 
-								<div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-									<Field label="Name">
-										<input className="input" defaultValue={p.name || ""} style={cellInputStyle} onBlur={(e) => putPerson(p.id, { ...p, name: e.target.value }).catch(console.error)} />
-									</Field>
-									<Field label="Role">
-										<input className="input" list="role_opts" defaultValue={p.role || ""} style={cellInputStyle} onBlur={(e) => putPerson(p.id, { ...p, role: e.target.value }).catch(console.error)} />
-									</Field>
-									<Field label="Phone">
-										<input className="input" defaultValue={p.phone || ""} style={cellInputStyle} onBlur={(e) => putPerson(p.id, { ...p, phone: e.target.value }).catch(console.error)} />
-									</Field>
-									<Field label="Skills">
-										<input className="input" list="skills_opts" defaultValue={p.skills || ""} style={cellInputStyle} onBlur={(e) => putPerson(p.id, { ...p, skills: e.target.value }).catch(console.error)} />
-									</Field>
-								</div>
+									<div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+										<div className="helper">Role: {safeStr(p.role) || ""}</div>
+										<div className="helper">Phone: {safeStr(p.phone) || ""}</div>
+										<div className="helper">Skills: {safeStr(p.skills) || ""}</div>
+									</div>
 							</div>
 						))}
 					</div>
@@ -328,6 +380,9 @@ export default function People() {
 											<input className="input" list="skills_opts" defaultValue={p.skills || ""} style={cellInputStyle} onBlur={(e) => putPerson(p.id, { ...p, skills: e.target.value }).catch(console.error)} />
 										</td>
 										<td style={{ textAlign: "right" }}>
+											<button className="btn" type="button" onClick={() => openDetails(p)} style={{ marginRight: 8 }}>
+												Details
+											</button>
 											<button className="btn" type="button" onClick={() => delPerson(p.id).catch(console.error)}>
 												Delete
 											</button>
@@ -351,10 +406,60 @@ export default function People() {
 						<input className="input" placeholder="Role" value={form.role} onChange={(e) => setForm((p) => ({ ...p, role: e.target.value }))} list="role_opts" />
 						<input className="input" placeholder="Phone" value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} />
 						<input className="input" placeholder="Skills" value={form.skills} onChange={(e) => setForm((p) => ({ ...p, skills: e.target.value }))} list="skills_opts" />
+						<input className="input" placeholder="Notes (private)" value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
 					</div>
 					<button className="btn-red" type="submit">Add</button>
 				</form>
 			</div>
+
+			<Modal open={detailOpen} title="Person Details" onClose={() => closeDetails()}>
+				{detailPerson ? (
+					<div style={{ display: "grid", gap: 10 }}>
+						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+							<Field label="Name">
+								<input className="input" value={detailDraft.name} onChange={(e) => setDetailDraft((d) => ({ ...d, name: e.target.value }))} />
+							</Field>
+							<Field label="Role">
+								<input className="input" list="role_opts" value={detailDraft.role} onChange={(e) => setDetailDraft((d) => ({ ...d, role: e.target.value }))} />
+							</Field>
+							<Field label="Phone">
+								<input className="input" value={detailDraft.phone} onChange={(e) => setDetailDraft((d) => ({ ...d, phone: e.target.value }))} />
+							</Field>
+							<Field label="Skills">
+								<input className="input" list="skills_opts" value={detailDraft.skills} onChange={(e) => setDetailDraft((d) => ({ ...d, skills: e.target.value }))} />
+							</Field>
+						</div>
+						<Field label="Notes">
+							<textarea className="input" rows={5} value={detailDraft.notes} onChange={(e) => setDetailDraft((d) => ({ ...d, notes: e.target.value }))} />
+						</Field>
+
+						<div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+							<button
+								className="btn"
+								type="button"
+								onClick={() => {
+									if (!detailPerson?.id) return;
+									putPerson(detailPerson.id, { ...detailPerson, ...detailDraft }).catch(console.error);
+									closeDetails();
+								}}
+							>
+								Save Changes
+							</button>
+							<button
+								className="btn"
+								type="button"
+								onClick={() => {
+									if (!detailPerson?.id) return;
+									delPerson(detailPerson.id).catch(console.error);
+									closeDetails();
+								}}
+							>
+								Delete
+							</button>
+						</div>
+					</div>
+				) : null}
+			</Modal>
 		</div>
 	);
 }
