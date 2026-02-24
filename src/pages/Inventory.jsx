@@ -249,7 +249,7 @@ export default function Inventory() {
 		}
 	}
 
-	return \(
+	return(
 		<div>
 			<div className="card" style={{ margin: 16, padding: 16 }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
