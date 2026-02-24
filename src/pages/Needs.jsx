@@ -246,9 +246,9 @@ export default function Needs() {
 							<tr>
 								<th>Title</th>
 								<th>Status</th>
-								<th></th>
 								<th>Priority</th>
 								<th>Public</th>
+								<th></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -258,6 +258,9 @@ export default function Needs() {
 									<td>{n.status || "open"}</td>
 									<td>{n.priority ?? 0}</td>
 									<td>{n.is_public ? "Yes" : "No"}</td>
+									<td style={{ textAlign: "right" }}>
+										<button className="btn" type="button" onClick={() => openItem(n)}>Details</button>
+									</td>
 								</tr>
 							))}
 						</tbody>
