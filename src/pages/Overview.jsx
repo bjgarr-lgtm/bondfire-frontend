@@ -3,92 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
-function readOrgInfo(orgId) {
-  try {
-    const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
-    const orgs = JSON.parse(localStorage.getItem("bf_orgs") || "[]");
-    const o = orgs.find((x) => x?.id === orgId) || {};
-    return { name: (s.name || o.name || orgId || "Dashboard").trim() };
-  } catch {
-    return { name: orgId || "Dashboard" };
-  }
-}
-
-function shortId(s) {
-  const t = String(s || "");
-  if (!t) return "";
-  if (t.length <= 10) return t;
-  return `${t.slice(0, 4)}…${t.slice(-4)}`;
-}
-
-function normalizeKind(kind) {
-  const k = String(kind || "").trim().toLowerCase();
-  const map = {
-    "inventory.deleted": "Inventory deleted",
-    "inventory.delete": "Inventory deleted",
-    "inventory.created": "Inventory added",
-    "inventory.create": "Inventory added",
-    "inventory.updated": "Inventory updated",
-    "inventory.update": "Inventory updated",
-
-    "need.deleted": "Need deleted",
-    "need.delete": "Need deleted",
-    "need.created": "Need created",
-    "need.create": "Need created",
-    "need.updated": "Need updated",
-    "need.update": "Need updated",
-
-    "person.deleted": "Person removed",
-    "person.delete": "Person removed",
-    "person.created": "Person added",
-    "person.create": "Person added",
-    "person.updated": "Person updated",
-    "person.update": "Person updated",
-
-    "meeting.deleted": "Meeting deleted",
-    "meeting.delete": "Meeting deleted",
-    "meeting.created": "Meeting created",
-    "meeting.create": "Meeting created",
-    "meeting.updated": "Meeting updated",
-    "meeting.update": "Meeting updated",
-
-    "invite.created": "Invite created",
-    "invite.redeemed": "Invite redeemed",
-  };
-  if (map[k]) return map[k];
-  const last = k.split(".").filter(Boolean).slice(-1)[0] || k;
-  return last ? last.charAt(0).toUpperCase() + last.slice(1) : "Activity";
-}
-
-function prettyMessage(a) {
-  const title =
-    String(a?.entity_title || a?.entity_name || a?.title || a?.name || "").trim();
-  const entId = String(a?.entity_id || "").trim();
-  if (title) return entId ? `${title} (${shortId(entId)})` : title;
-
-  let raw = String(a?.message || "").trim();
-  if (!raw) return "";
-
-  // Most of our activity messages historically include a redundant prefix,
-  // because kind already tells the story. Strip it so the feed isn't nonsense.
-  // Examples:
-  //   "inventory added: __encrypted__" => "(encrypted item)"
-  //   "person updated: Sam" => "Sam"
-  raw = raw.replace(/^(inventory|person|people|need|needs|meeting|meetings)\s+(added|created|updated|deleted|removed)\s*:\s*/i, "");
-  raw = raw.replace(/^(inventory|person|people|need|needs|meeting|meetings)\s*:\s*/i, "");
-
-  // If the title is ZK-scrubbed, don't show the literal marker.
-  raw = raw.replace(/__encrypted__/gi, "").trim();
-  if (!raw) raw = "(encrypted item)";
-
-  const uuidRe =
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-  return raw.replace(uuidRe, (m) => shortId(m));
-}
-
-async function tryDecryptRow(orgKey, row) {
-  if (!orgKey) return row;
-  if (!row || !row.encrypted_blob) return row;
+async function tryDecryptRow(orgId, row) {
+  const orgKey = getCachedOrgKey(orgId);
+  if (!orgKey || !row?.encrypted_blob) return row;
   try {
     const dec = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
     return { ...row, ...dec };
@@ -98,73 +15,19 @@ async function tryDecryptRow(orgKey, row) {
 }
 
 async function decryptRows(orgId, rows) {
-  const orgKey = getCachedOrgKey(orgId);
-  if (!orgKey) return Array.isArray(rows) ? rows : [];
   const arr = Array.isArray(rows) ? rows : [];
   const out = [];
-  for (const r of arr) out.push(await tryDecryptRow(orgKey, r));
+  for (const r of arr) out.push(await tryDecryptRow(orgId, r));
   return out;
-}
-
-function groupActivity(activity) {
-  const arr = Array.isArray(activity) ? activity : [];
-  const grouped = [];
-
-  for (const a of arr) {
-    const label = normalizeKind(a?.kind);
-    const msg = prettyMessage(a);
-    const key = `${label}::${msg}`;
-
-    const last = grouped[grouped.length - 1];
-    if (last && last.key === key) {
-      last.count += 1;
-      continue;
-    }
-
-    grouped.push({ key, label, msg, count: 1, raw: a });
-  }
-
-  return grouped.slice(0, 10);
-}
-
-function fmtDT(ms) {
-  const n = Number(ms);
-  if (!Number.isFinite(n)) return "";
-  try {
-    const d = new Date(n);
-    return d.toLocaleString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
 }
 
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
 
-  const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
-  useEffect(() => {
-    setOrgInfo(readOrgInfo(orgId));
-
-    const onChange = (e) => {
-      const changedId = e?.detail?.orgId;
-      if (!changedId || changedId === orgId) setOrgInfo(readOrgInfo(orgId));
-    };
-    window.addEventListener("bf:org_settings_changed", onChange);
-    return () => window.removeEventListener("bf:org_settings_changed", onChange);
-  }, [orgId]);
-
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
-  const [peoplePreview, setPeoplePreview] = useState([]);
 
   async function refresh() {
     if (!orgId) return;
@@ -172,31 +35,19 @@ export default function Overview() {
     setErr("");
     try {
       const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
-
-      // Dashboard should be readable in-app. If org key is loaded, decrypt the previews.
       const d = { ...d0 };
+
       d.people = await decryptRows(orgId, d0?.people);
       d.inventory = await decryptRows(orgId, d0?.inventory);
       d.needs = await decryptRows(orgId, d0?.needs);
+      d.newsletter = await decryptRows(orgId, d0?.newsletter);
+      d.pledges = await decryptRows(orgId, d0?.pledges);
+
       if (d0?.nextMeeting) {
-        const orgKey = getCachedOrgKey(orgId);
-        d.nextMeeting = await tryDecryptRow(orgKey, d0.nextMeeting);
+        d.nextMeeting = await tryDecryptRow(orgId, d0.nextMeeting);
       }
 
       setData(d);
-
-      const countPeople = Number(d?.counts?.people || 0);
-      const hasPeoplePreview = Array.isArray(d?.people) && d.people.length > 0;
-
-      if (hasPeoplePreview) {
-        setPeoplePreview(d.people);
-      } else if (countPeople > 0) {
-        const p = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-        const slice = Array.isArray(p?.people) ? p.people.slice(0, 5) : [];
-        setPeoplePreview(await decryptRows(orgId, slice));
-      } else {
-        setPeoplePreview([]);
-      }
     } catch (e) {
       setErr(e?.message || "Failed to load dashboard");
     } finally {
@@ -208,21 +59,15 @@ export default function Overview() {
     refresh().catch(console.error);
   }, [orgId]);
 
-  const counts = data?.counts || {};
-  const people = Array.isArray(data?.people) && data.people.length > 0 ? data.people : peoplePreview;
-  const needs = Array.isArray(data?.needs) ? data.needs : [];
-  const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
-  const activity = Array.isArray(data?.activity) ? data.activity : [];
-  const nextMeeting = data?.nextMeeting || null;
-
-  const nextMeetingLabel = useMemo(() => {
-    const when = nextMeeting?.starts_at;
-    const pretty = fmtDT(when);
-    if (!pretty) return "not scheduled";
-    return `${pretty}${nextMeeting?.title ? ` · ${nextMeeting.title}` : ""}`;
-  }, [nextMeeting]);
-
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
+
+  const counts = data?.counts || {};
+  const people = data?.people || [];
+  const inventory = data?.inventory || [];
+  const needs = data?.needs || [];
+  const newsletter = data?.newsletter || [];
+  const pledges = data?.pledges || [];
+  const nextMeeting = data?.nextMeeting || null;
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
@@ -230,151 +75,57 @@ export default function Overview() {
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0, flex: 1 }}>{orgInfo?.name || "Dashboard"}</h1>
-          <button
-            className="btn"
-            onClick={() => refresh().catch(console.error)}
-            disabled={loading}
-          >
+          <h1 style={{ margin: 0, flex: 1 }}>Dashboard</h1>
+          <button className="btn" onClick={() => refresh()} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
-
-        {err ? (
+        {err && (
           <div className="helper" style={{ color: "tomato", marginTop: 10 }}>
             {err}
           </div>
-        ) : null}
+        )}
       </div>
 
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {/* People */}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>People</h2>
-            <button className="btn" onClick={() => go("people")}>
-              View all
-            </button>
-          </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
-          </div>
-
-          {/* Only show the empty-state if count is truly zero */}
-          {(counts.people || 0) === 0 ? (
-            <div className="helper" style={{ marginTop: 10 }}>
-              No people yet.
-            </div>
-          ) : Array.isArray(people) && people.length > 0 ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {people.slice(0, 5).map((p) => (
-                <li key={p.id}>{p.name}</li>
-              ))}
-            </ul>
-          ) : null}
+          <h2>People</h2>
+          <div className="helper">{counts.people || 0} members</div>
+          <ul>{people.slice(0,5).map(p => <li key={p.id}>{p.name}</li>)}</ul>
         </div>
 
-
-        {/* Inventory */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Inventory</h2>
-            <button className="btn" onClick={() => go("inventory")}>
-              View all
-            </button>
-          </div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.inventory || 0} item{(counts.inventory || 0) === 1 ? "" : "s"}
-          </div>
-          {inventory.length ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {inventory.map((it) => (
-                <li key={it.id}>
-                  {it.name}
-                  {typeof it.qty === "number" ? ` (${it.qty}${it.unit ? ` ${it.unit}` : ""})` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="helper" style={{ marginTop: 10 }}>
-              No inventory yet.
-            </div>
-          )}
+          <h2>Inventory</h2>
+          <div className="helper">{counts.inventory || 0} items</div>
+          <ul>{inventory.slice(0,5).map(i => <li key={i.id}>{i.name}</li>)}</ul>
         </div>
 
-        {/* Needs */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Needs</h2>
-            <button className="btn" onClick={() => go("needs")}>
-              View all
-            </button>
-          </div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.needsAll || 0} total, {counts.needsOpen || 0} open
-          </div>
-          {needs.length ? (
-            <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-              {needs.map((n) => (
-                <li key={n.id}>
-                  {n.title}
-                  {n.status ? ` · ${n.status}` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="helper" style={{ marginTop: 10 }}>
-              No needs yet.
-            </div>
-          )}
+          <h2>Needs</h2>
+          <div className="helper">{counts.needsOpen || 0} open</div>
+          <ul>{needs.slice(0,5).map(n => <li key={n.id}>{n.title}</li>)}</ul>
         </div>
 
-        {/* Meetings */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Meetings</h2>
-            <button className="btn" onClick={() => go("meetings")}>
-              View all
-            </button>
-          </div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            {counts.meetingsUpcoming || 0} upcoming
-          </div>
-          <div className="helper" style={{ marginTop: 10 }}>
-            Next: <strong>{nextMeetingLabel}</strong>
+          <h2>Meetings</h2>
+          <div className="helper">
+            Next: {nextMeeting?.title || "Not scheduled"}
           </div>
         </div>
 
-        {/* Recent Activity */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Recent Activity</h2>
-            <button
-              className="btn"
-              onClick={() => refresh().catch(console.error)}
-              disabled={loading}
-            >
-              Refresh
-            </button>
-          </div>
-          <ul style={{ marginTop: 10, paddingLeft: 18 }}>
-            {groupActivity(activity).map((g) => (
-              <li key={g.raw?.id || g.key}>
-                <strong>{g.label}</strong>
-                {g.count > 1 ? ` x${g.count}` : ""}
-                {g.msg ? `: ${g.msg}` : ""}
-              </li>
-            ))}
-            {activity.length === 0 && <li className="helper">No activity yet.</li>}
-          </ul>
+          <h2>Newsletter</h2>
+          <div className="helper">{newsletter.length} subscribers</div>
+          <ul>{newsletter.slice(0,5).map(s => <li key={s.id}>{s.name} · {s.email}</li>)}</ul>
         </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <h2>Pledges</h2>
+          <div className="helper">{pledges.length} active</div>
+          <ul>{pledges.slice(0,5).map(p => <li key={p.id}>{p.name || p.title}</li>)}</ul>
+        </div>
+
       </div>
     </div>
   );
