@@ -44,6 +44,8 @@ export default function Meetings() {
 	const [busyZk, setBusyZk] = useState(false);
 	const [zkMsg, setZkMsg] = useState("");
 
+	const [edit, setEdit] = useState(null);
+
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
 		title: "",
@@ -194,6 +196,82 @@ export default function Meetings() {
 		}
 	}
 
+	function openItem(m) {
+		setEdit({
+			id: m.id,
+			title: m.title || "",
+			starts_at: m.starts_at ? new Date(Number(m.starts_at)).toISOString().slice(0, 16) : "",
+			ends_at: m.ends_at ? new Date(Number(m.ends_at)).toISOString().slice(0, 16) : "",
+			location: m.location || "",
+			agenda: m.agenda || "",
+			is_public: !!m.is_public,
+		});
+	}
+
+	function closeModal() {
+		setEdit(null);
+	}
+
+	async function saveEdit() {
+		if (!orgId || !edit?.id) return;
+		setErr("");
+		try {
+			const orgKey = getCachedOrgKey(orgId);
+			const is_public = !!edit.is_public;
+			const starts_at = fromInputDT(edit.starts_at);
+			const ends_at = fromInputDT(edit.ends_at);
+
+			let payload = {
+				id: edit.id,
+				title: safeStr(edit.title).trim(),
+				starts_at,
+				ends_at,
+				location: safeStr(edit.location).trim(),
+				agenda: safeStr(edit.agenda),
+				is_public,
+			};
+
+			if (orgKey && !is_public) {
+				const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ title: payload.title, location: payload.location, agenda: payload.agenda }));
+				payload = {
+					id: edit.id,
+					title: "__encrypted__",
+					starts_at,
+					ends_at,
+					location: "",
+					agenda: "",
+					is_public,
+					encrypted_blob: enc,
+				};
+			}
+
+			await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+
+			closeModal();
+			setTimeout(() => refresh().catch(console.error), 250);
+		} catch (e) {
+			console.error(e);
+			setErr(e?.message || String(e));
+		}
+	}
+
+	async function deleteItem() {
+		if (!orgId || !edit?.id) return;
+		setErr("");
+		try {
+			await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings?id=${encodeURIComponent(edit.id)}`, { method: "DELETE" });
+			closeModal();
+			setTimeout(() => refresh().catch(console.error), 250);
+		} catch (e) {
+			console.error(e);
+			setErr(e?.message || String(e));
+		}
+	}
+
 	return (
 		<div>
 			<div className="card" style={{ margin: 16, padding: 16 }}>
@@ -223,6 +301,7 @@ export default function Meetings() {
 								<th>Ends</th>
 								<th>Location</th>
 								<th>Public</th>
+								<th></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -233,12 +312,64 @@ export default function Meetings() {
 									<td>{formatDT(m.ends_at)}</td>
 									<td>{m.location || ""}</td>
 									<td>{m.is_public ? "Yes" : "No"}</td>
+									<td style={{ textAlign: "right" }}><button className="btn" type="button" onClick={() => openItem(m)}>Details</button></td>
 								</tr>
 							))}
 						</tbody>
 					</table>
 				</div>
 			</div>
+
+
+			{edit ? (
+				<div
+					style={{
+						position: "fixed",
+						inset: 0,
+						background: "rgba(0,0,0,0.55)",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						padding: 16,
+						zIndex: 50,
+					}}
+					onMouseDown={(e) => {
+						if (e.target === e.currentTarget) closeModal();
+					}}
+				>
+					<div className="card" style={{ width: "min(920px, 100%)", padding: 16 }}>
+						<div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+							<h3 style={{ margin: 0 }}>Meeting Details</h3>
+							<button className="btn" type="button" onClick={closeModal}>Close</button>
+						</div>
+
+						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+							<input className="input" placeholder="Title" value={edit.title} onChange={(e) => setEdit((p) => ({ ...p, title: e.target.value }))} />
+							<input className="input" type="datetime-local" value={edit.starts_at} onChange={(e) => setEdit((p) => ({ ...p, starts_at: e.target.value }))} />
+							<input className="input" type="datetime-local" value={edit.ends_at} onChange={(e) => setEdit((p) => ({ ...p, ends_at: e.target.value }))} />
+							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />
+						</div>
+
+						<textarea className="input" rows={6} placeholder="Agenda / Notes" value={edit.agenda} onChange={(e) => setEdit((p) => ({ ...p, agenda: e.target.value }))} style={{ marginTop: 10 }} />
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+							<input type="checkbox" checked={!!edit.is_public} onChange={(e) => setEdit((p) => ({ ...p, is_public: e.target.checked }))} />
+							<span className="helper">Public</span>
+						</label>
+
+						<div className="row" style={{ gap: 10, marginTop: 12, justifyContent: "space-between" }}>
+							<button className="btn" type="button" onClick={deleteItem}>Delete</button>
+							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
+						</div>
+
+						<div className="helper" style={{ marginTop: 10 }}>
+							If ZK is enabled and this meeting is not public, Title, Location, and Agenda are encrypted automatically on save.
+							Start and end times stay unencrypted so you can sort and display schedules.
+						</div>
+					</div>
+				</div>
+			) : null}
+
 
 			<div className="card" style={{ margin: 16, padding: 16 }}>
 				<h3 style={{ marginTop: 0 }}>Add Meeting</h3>
