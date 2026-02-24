@@ -43,6 +43,52 @@ function safeStr(v) {
 	return String(v ?? "");
 }
 
+/**
+ * IMPORTANT: These must be module-scope, not defined inside People().
+ * If defined inside People(), React sees a new component type every render,
+ * remounts the modal, and inputs lose focus after each keystroke.
+ */
+function Field({ label, children }) {
+	return (
+		<label style={{ display: "grid", gap: 6 }}>
+			<span className="helper">{label}</span>
+			{children}
+		</label>
+	);
+}
+
+function Modal({ open, title, children, onClose }) {
+	if (!open) return null;
+	return (
+		<div
+			role="dialog"
+			aria-modal="true"
+			onMouseDown={(e) => {
+				if (e.target === e.currentTarget) onClose();
+			}}
+			style={{
+				position: "fixed",
+				inset: 0,
+				background: "rgba(0,0,0,0.55)",
+				display: "grid",
+				placeItems: "center",
+				padding: 16,
+				zIndex: 50,
+			}}
+		>
+			<div className="card" style={{ width: "min(720px, 100%)", padding: 16 }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+					<h3 style={{ margin: 0, flex: 1 }}>{title}</h3>
+					<button className="btn" type="button" onClick={onClose}>
+						Close
+					</button>
+				</div>
+				<div style={{ marginTop: 12 }}>{children}</div>
+			</div>
+		</div>
+	);
+}
+
 export default function People() {
 	const orgId = getOrgId();
 
@@ -84,6 +130,7 @@ export default function People() {
 	function closeDetails() {
 		setDetailOpen(false);
 		setDetailPerson(null);
+		// keep draft as-is; it gets reset on openDetails anyway
 	}
 
 	async function refresh() {
@@ -124,6 +171,7 @@ export default function People() {
 
 	useEffect(() => {
 		refresh().catch(console.error);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [orgId]);
 
 	// datalist options to keep entries consistent (but not hard locked yet)
@@ -265,45 +313,6 @@ export default function People() {
 
 	const cellInputStyle = { width: "100%", minWidth: 0, boxSizing: "border-box" };
 
-	const Field = ({ label, children }) => (
-		<label style={{ display: "grid", gap: 6 }}>
-			<span className="helper">{label}</span>
-			{children}
-		</label>
-	);
-
-	const Modal = ({ open, title, children, onClose }) => {
-		if (!open) return null;
-		return (
-			<div
-				role="dialog"
-				aria-modal="true"
-				onMouseDown={(e) => {
-					if (e.target === e.currentTarget) onClose();
-				}}
-				style={{
-					position: "fixed",
-					inset: 0,
-					background: "rgba(0,0,0,0.55)",
-					display: "grid",
-					placeItems: "center",
-					padding: 16,
-					zIndex: 50,
-				}}
-			>
-				<div className="card" style={{ width: "min(720px, 100%)", padding: 16 }}>
-					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-						<h3 style={{ margin: 0, flex: 1 }}>{title}</h3>
-						<button className="btn" type="button" onClick={onClose}>
-							Close
-						</button>
-					</div>
-					<div style={{ marginTop: 12 }}>{children}</div>
-				</div>
-			</div>
-		);
-	};
-
 	return (
 		<div>
 			<div className="card" style={{ margin: 16 }}>
@@ -336,16 +345,16 @@ export default function People() {
 							<div key={p.id} className="card" style={{ padding: 12 }}>
 								<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 									<div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{String(p.name || "Unnamed")}</div>
-										<button className="btn" style={{ whiteSpace: "nowrap" }} type="button" onClick={() => openDetails(p)}>
-											Details
-										</button>
+									<button className="btn" style={{ whiteSpace: "nowrap" }} type="button" onClick={() => openDetails(p)}>
+										Details
+									</button>
 								</div>
 
-									<div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-										<div className="helper">Role: {safeStr(p.role) || ""}</div>
-										<div className="helper">Phone: {safeStr(p.phone) || ""}</div>
-										<div className="helper">Skills: {safeStr(p.skills) || ""}</div>
-									</div>
+								<div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+									<div className="helper">Role: {safeStr(p.role) || ""}</div>
+									<div className="helper">Phone: {safeStr(p.phone) || ""}</div>
+									<div className="helper">Skills: {safeStr(p.skills) || ""}</div>
+								</div>
 							</div>
 						))}
 					</div>
