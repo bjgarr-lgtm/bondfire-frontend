@@ -2,6 +2,15 @@ import { ok, bad, readJSON } from '../../../_lib/http.js';
 import { requireOrgRole } from '../../../_lib/auth.js';
 import { ensureZkSchema, ensureOrgCryptoRow, orgKeyWrappedCapabilities } from '../../../_lib/zkSchema.js';
 
+function extractKidFromWrappedKey(wrappedKeyStr) {
+  try {
+    const w = JSON.parse(String(wrappedKeyStr || ""));
+    return String(w?.recipient_kid || w?.kid || "");
+  } catch {
+    return "";
+  }
+}
+
 function normalizeWraps(body, fallbackUserId) {
   if (Array.isArray(body?.wraps)) {
     return body.wraps
@@ -36,15 +45,29 @@ export async function onRequestPost({ env, request, params }) {
     let stored = 0;
 
     for (const w of wraps) {
+      const kid = caps.hasKid ? (extractKidFromWrappedKey(w.wrapped_key) || null) : null;
+
       // If schema lacks key_version, we can only store one wrap per user.
-      if (caps.hasKeyVersion && caps.hasWrappedAt) {
+      if (caps.hasKeyVersion && caps.hasWrappedAt && caps.hasKid) {
+        await db.prepare(
+          'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, key_version, wrapped_key, wrapped_at, kid) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(orgId, w.user_id, keyVersion, String(w.wrapped_key), now, kid).run();
+      } else if (caps.hasKeyVersion && caps.hasWrappedAt) {
         await db.prepare(
           'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, key_version, wrapped_key, wrapped_at) VALUES (?, ?, ?, ?, ?)'
         ).bind(orgId, w.user_id, keyVersion, String(w.wrapped_key), now).run();
+      } else if (caps.hasKeyVersion && caps.hasKid) {
+        await db.prepare(
+          'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, key_version, wrapped_key, kid) VALUES (?, ?, ?, ?, ?)'
+        ).bind(orgId, w.user_id, keyVersion, String(w.wrapped_key), kid).run();
       } else if (caps.hasKeyVersion) {
         await db.prepare(
           'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, key_version, wrapped_key) VALUES (?, ?, ?, ?)'
         ).bind(orgId, w.user_id, keyVersion, String(w.wrapped_key)).run();
+      } else if (caps.hasKid) {
+        await db.prepare(
+          'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, wrapped_key, kid) VALUES (?, ?, ?, ?)'
+        ).bind(orgId, w.user_id, String(w.wrapped_key), kid).run();
       } else {
         await db.prepare(
           'INSERT OR REPLACE INTO org_key_wrapped (org_id, user_id, wrapped_key) VALUES (?, ?, ?)'

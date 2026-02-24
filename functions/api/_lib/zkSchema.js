@@ -80,5 +80,6 @@ export async function orgKeyWrappedCapabilities(db) {
   return {
     hasKeyVersion: names.has('key_version'),
     hasWrappedAt: names.has('wrapped_at'),
+    hasKid: names.has('kid'),
   };
 }

@@ -22,6 +22,8 @@ export default function Security() {
 
   const [zkStatus, setZkStatus] = React.useState({ deviceKey: false, orgKey: false });
   const [orgKeyVersion, setOrgKeyVersion] = React.useState(1);
+  const [deviceKid, setDeviceKid] = React.useState("");
+  const [wrapExpectedKid, setWrapExpectedKid] = React.useState("");
 
 
   React.useEffect(() => {
@@ -31,6 +33,7 @@ export default function Security() {
       try {
         const dev = await ensureDeviceKeypair();
         setZkStatus((s) => ({ ...s, deviceKey: !!dev?.pubJwk }));
+        try { setDeviceKid(localStorage.getItem("bf_device_kid_v1") || ""); } catch {}
       } catch {}
     })();
   }, [orgId]);
@@ -176,19 +179,39 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
     setMsg("");
     try {
       await ensureDeviceKeypair();
+      try { setDeviceKid(localStorage.getItem("bf_device_kid_v1") || ""); } catch {}
       const d = await api(`/api/orgs/${orgId}/crypto`, { method: "GET" });
+
       if (!d?.wrapped_key) {
         setMsg("no wrapped key for you on this org yet");
         return;
       }
+
+      // Try to read the wrap's expected recipient kid (helps explain mismatches).
+      try {
+        const w = JSON.parse(d.wrapped_key);
+        if (w?.recipient_kid) setWrapExpectedKid(String(w.recipient_kid));
+      } catch {}
+
       const key = await unwrapOrgKey(d.wrapped_key);
       cacheOrgKey(orgId, key);
       setZkStatus((s) => ({ ...s, orgKey: true }));
       setMsg("org key loaded on this device");
     } catch (e) {
-      setMsg(String(e?.message || e || "failed"));
+      const name = String(e?.name || "");
+      const message = String(e?.message || e || "failed");
+      if (name === "OperationError" || message.includes("ORG_KEY_UNWRAP_FAILED")) {
+        setMsg(
+          "could not load the org key on this device. most common cause: your device key changed (new browser, cleared site data, different computer). " +
+          "fix: ask an org admin to click 'rewrap for all members' (or do it yourself if you're admin). " +
+          "details: " + message
+        );
+        return;
+      }
+      setMsg(message);
     }
   }
+
 
   return (
     <div style={{ maxWidth: 920, margin: "0 auto", padding: 16 }}>
@@ -231,7 +254,13 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       <section style={{ marginTop: 16, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
         <h3>zero knowledge storage (beta)</h3>
         <div style={{ fontSize: 14, opacity: 0.9 }}>
-          device key: {zkStatus.deviceKey ? "ok" : "missing"} | org key cached: {zkStatus.orgKey ? "yes" : "no"} | org key version: {orgKeyVersion}
+          device key: {zkStatus.deviceKey ? "ok" : "missing"}
+          {deviceKid ? ` (kid ${deviceKid})` : ""}
+          {" | "}
+          org key cached: {zkStatus.orgKey ? "yes" : "no"}
+          {wrapExpectedKid ? ` (wrap expects ${wrapExpectedKid})` : ""}
+          {" | "}
+          org key version: {orgKeyVersion}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
