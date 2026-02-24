@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function readOrgInfo(orgId) {
   try {
@@ -112,6 +113,31 @@ function fmtDT(ms) {
   }
 }
 
+// Try to decrypt one record that uses encrypted_blob
+async function tryDecryptRow(orgKey, row) {
+  if (!orgKey) return row;
+  if (!row || !row.encrypted_blob) return row;
+
+  try {
+    const dec = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
+    return { ...row, ...dec };
+  } catch {
+    return row;
+  }
+}
+
+async function decryptRows(orgId, rows) {
+  const orgKey = getCachedOrgKey(orgId);
+  if (!orgKey) return rows;
+
+  const arr = Array.isArray(rows) ? rows : [];
+  const out = [];
+  for (const r of arr) {
+    out.push(await tryDecryptRow(orgKey, r));
+  }
+  return out;
+}
+
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -138,7 +164,20 @@ export default function Overview() {
     setLoading(true);
     setErr("");
     try {
-      const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
+      const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
+
+      // Decrypt what the dashboard endpoint returns (if it includes encrypted_blob).
+      // This keeps the dashboard readable without weakening ZK.
+      const d = { ...d0 };
+      d.people = await decryptRows(orgId, d0?.people);
+      d.inventory = await decryptRows(orgId, d0?.inventory);
+      d.needs = await decryptRows(orgId, d0?.needs);
+
+      if (d0?.nextMeeting) {
+        const orgKey = getCachedOrgKey(orgId);
+        d.nextMeeting = await tryDecryptRow(orgKey, d0.nextMeeting);
+      }
+
       setData(d);
 
       const countPeople = Number(d?.counts?.people || 0);
@@ -147,8 +186,10 @@ export default function Overview() {
       if (hasPeoplePreview) {
         setPeoplePreview(d.people);
       } else if (countPeople > 0) {
-        const p = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
-        setPeoplePreview(Array.isArray(p?.people) ? p.people.slice(0, 5) : []);
+        const p0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/people`);
+        const pList = Array.isArray(p0?.people) ? p0.people.slice(0, 5) : [];
+        const pDec = await decryptRows(orgId, pList);
+        setPeoplePreview(pDec);
       } else {
         setPeoplePreview([]);
       }
@@ -222,7 +263,6 @@ export default function Overview() {
             {counts.people || 0} member{(counts.people || 0) === 1 ? "" : "s"}
           </div>
 
-          {/* Only show the empty-state if count is truly zero */}
           {(counts.people || 0) === 0 ? (
             <div className="helper" style={{ marginTop: 10 }}>
               No people yet.
@@ -235,7 +275,6 @@ export default function Overview() {
             </ul>
           ) : null}
         </div>
-
 
         {/* Inventory */}
         <div className="card" style={{ padding: 16 }}>
