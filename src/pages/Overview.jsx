@@ -1,3 +1,4 @@
+// src/pages/Overview.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
@@ -22,8 +23,7 @@ function fmtDT(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n)) return "";
   try {
-    const d = new Date(n);
-    return d.toLocaleString(undefined, {
+    return new Date(n).toLocaleString(undefined, {
       weekday: "short",
       month: "short",
       day: "numeric",
@@ -36,137 +36,85 @@ function fmtDT(ms) {
   }
 }
 
-async function tryDecryptJSON(orgKey, encryptedBlob) {
-  if (!orgKey || !encryptedBlob) return null;
+function isEncryptedNameLike(v) {
+  const s = String(v || "").trim().toLowerCase();
+  return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
+}
+
+async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
+  const arr = Array.isArray(rows) ? rows : [];
+  const orgKey = getCachedOrgKey(orgId);
+  if (!orgKey) return arr;
+
+  const out = [];
+  for (const r of arr) {
+    if (r && r[blobField]) {
+      try {
+        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        out.push({ ...r, ...dec });
+        continue;
+      } catch {
+        // fall through
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+function readPrevCounts(orgId) {
   try {
-    const raw = await decryptWithOrgKey(orgKey, encryptedBlob);
-    return JSON.parse(raw);
+    return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-async function tryDecryptString(orgKey, encryptedBlob) {
-  if (!orgKey || !encryptedBlob) return null;
+function writePrevCounts(orgId, counts) {
   try {
-    return await decryptWithOrgKey(orgKey, encryptedBlob);
-  } catch {
-    return null;
-  }
+    localStorage.setItem(`bf_dash_counts_${orgId}`, JSON.stringify(counts || {}));
+  } catch {}
 }
 
-async function decryptPeopleList(orgId, orgKey, raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  if (!orgKey) return arr;
-  const out = [];
-  for (const p of arr) {
-    if (p?.encrypted_blob) {
-      const dec = await tryDecryptJSON(orgKey, p.encrypted_blob);
-      if (dec) out.push({ ...p, ...dec });
-      else out.push({ ...p, name: "(encrypted)" });
-    } else {
-      out.push(p);
-    }
-  }
-  return out;
+function deltaBadge(delta) {
+  if (!Number.isFinite(delta) || delta === 0) return null;
+  const up = delta > 0;
+  const txt = up ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`;
+  const bg = up ? "rgba(0, 200, 120, 0.18)" : "rgba(255, 80, 80, 0.18)";
+  const bd = up ? "rgba(0, 200, 120, 0.35)" : "rgba(255, 80, 80, 0.35)";
+  const fg = up ? "#b8ffe4" : "#ffd0d0";
+  return { txt, style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: bg, border: `1px solid ${bd}`, color: fg } };
 }
 
-async function decryptInventoryList(orgId, orgKey, raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  if (!orgKey) return arr;
-  const out = [];
-  for (const it of arr) {
-    if (it?.encrypted_blob) {
-      const dec = await tryDecryptJSON(orgKey, it.encrypted_blob);
-      if (dec) out.push({ ...it, ...dec });
-      else out.push({ ...it, name: "(encrypted)" });
-      continue;
-    }
-    if (it?.encrypted_notes && !it?.notes) {
-      const notes = await tryDecryptString(orgKey, it.encrypted_notes);
-      out.push({ ...it, notes: notes ?? it.notes });
-      continue;
-    }
-    out.push(it);
-  }
-  return out;
-}
-
-async function decryptNeedsList(orgId, orgKey, raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  if (!orgKey) return arr;
-  const out = [];
-  for (const n of arr) {
-    if (n?.encrypted_blob) {
-      const dec = await tryDecryptJSON(orgKey, n.encrypted_blob);
-      if (dec) out.push({ ...n, ...dec });
-      else out.push({ ...n, title: "(encrypted)" });
-      continue;
-    }
-    if (n?.encrypted_description && !n?.description) {
-      const desc = await tryDecryptString(orgKey, n.encrypted_description);
-      out.push({ ...n, description: desc ?? n.description });
-      continue;
-    }
-    out.push(n);
-  }
-  return out;
-}
-
-async function decryptMeetingsList(orgId, orgKey, raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  if (!orgKey) return arr;
-  const out = [];
-  for (const m of arr) {
-    if (m?.encrypted_blob) {
-      const dec = await tryDecryptJSON(orgKey, m.encrypted_blob);
-      if (dec) out.push({ ...m, ...dec });
-      else out.push({ ...m, title: "(encrypted)" });
-      continue;
-    }
-    if (m?.encrypted_notes && !m?.notes) {
-      const notes = await tryDecryptString(orgKey, m.encrypted_notes);
-      out.push({ ...m, notes: notes ?? m.notes });
-      continue;
-    }
-    out.push(m);
-  }
-  return out;
-}
-
-function clamp(n, a, b) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return a;
-  return Math.max(a, Math.min(b, x));
-}
-
-function Sparkline({ points = [], height = 32 }) {
-  const w = 120;
-  const h = height;
-  const arr = Array.isArray(points) ? points : [];
-  if (arr.length < 2) {
-    return (
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-        <path d={`M0 ${h - 2} L${w} ${h - 2}`} stroke="rgba(255,255,255,0.25)" strokeWidth="2" fill="none" />
-      </svg>
-    );
-  }
-
-  const min = Math.min(...arr);
-  const max = Math.max(...arr);
-  const denom = max === min ? 1 : (max - min);
-
-  const pts = arr.map((v, i) => {
-    const x = (i / (arr.length - 1)) * (w - 4) + 2;
-    const y = h - 2 - ((v - min) / denom) * (h - 6);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-
+function pill(text, tone) {
+  const tones = {
+    accepted: { bg: "rgba(0, 200, 120, 0.18)", bd: "rgba(0, 200, 120, 0.35)", fg: "#b8ffe4" },
+    offered: { bg: "rgba(255, 200, 0, 0.14)", bd: "rgba(255, 200, 0, 0.35)", fg: "#ffe9a8" },
+    urgent: { bg: "rgba(255, 80, 80, 0.18)", bd: "rgba(255, 80, 80, 0.38)", fg: "#ffd0d0" },
+    high: { bg: "rgba(255, 140, 0, 0.16)", bd: "rgba(255, 140, 0, 0.34)", fg: "#ffd6a8" },
+    medium: { bg: "rgba(120, 180, 255, 0.14)", bd: "rgba(120, 180, 255, 0.32)", fg: "#cfe3ff" },
+    low: { bg: "rgba(255, 255, 255, 0.08)", bd: "rgba(255, 255, 255, 0.18)", fg: "#e9e9e9" },
+  };
+  const t = tones[tone] || tones.low;
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-      <polyline points={pts} fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: t.bg, border: `1px solid ${t.bd}`, color: t.fg, letterSpacing: ".2px" }}>
+      {text}
+    </span>
   );
+}
+
+function readInvPar(orgId) {
+  try {
+    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeInvPar(orgId, obj) {
+  try {
+    localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
+  } catch {}
 }
 
 export default function Overview() {
@@ -186,62 +134,58 @@ export default function Overview() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [counts, setCounts] = useState({
-    people: 0,
-    inventory: 0,
-    needsOpen: 0,
-    needsAll: 0,
-    meetingsUpcoming: 0,
-  });
 
+  const [counts, setCounts] = useState({});
   const [people, setPeople] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [needs, setNeeds] = useState([]);
   const [meetings, setMeetings] = useState([]);
-  const [pledges, setPledges] = useState([]);
   const [subs, setSubs] = useState([]);
+  const [pledges, setPledges] = useState([]);
+
+  const [rsvpMsg, setRsvpMsg] = useState("");
+
+  const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
 
   async function refresh() {
     if (!orgId) return;
     setLoading(true);
     setErr("");
+    setRsvpMsg("");
     try {
-      const orgKey = getCachedOrgKey(orgId);
-
+      // Dashboard endpoint (counts + some previews)
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
-      if (!d?.ok) throw new Error(d?.detail || d?.error || "Failed to load dashboard");
 
-      setCounts({
-        people: Number(d?.counts?.people || 0),
-        inventory: Number(d?.counts?.inventory || 0),
-        needsOpen: Number(d?.counts?.needsOpen || 0),
-        needsAll: Number(d?.counts?.needsAll || 0),
-        meetingsUpcoming: Number(d?.counts?.meetingsUpcoming || 0),
-      });
+      const rawCounts = d?.counts || {};
+      setCounts(rawCounts);
 
-      // Pull full lists so we can decrypt in the UI (dashboard endpoint doesn't include encrypted_blob).
-      const [p1, i1, n1, m1, pl1, s1] = await Promise.all([
-        api(`/api/orgs/${encodeURIComponent(orgId)}/people`).catch(() => ({ people: [] })),
-        api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`).catch(() => ({ inventory: [] })),
-        api(`/api/orgs/${encodeURIComponent(orgId)}/needs`).catch(() => ({ needs: [] })),
-        api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`).catch(() => ({ meetings: [] })),
-        api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`).catch(() => ({ pledges: [] })),
-        api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`).catch(() => ({ subscribers: [] })),
-      ]);
+      // Pull previews if present, otherwise fetch lists
+      const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
+      const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
+      const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
-      const peopleDec = await decryptPeopleList(orgId, orgKey, p1?.people);
-      const invDec = await decryptInventoryList(orgId, orgKey, i1?.inventory);
-      const needsDec = await decryptNeedsList(orgId, orgKey, n1?.needs);
-      const meetingsDec = await decryptMeetingsList(orgId, orgKey, m1?.meetings);
+      // These live under Settings pages, so fetch directly.
+      const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`);
+      const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
 
-      setPeople(peopleDec);
-      setInventory(invDec);
-      setNeeds(needsDec);
-      setMeetings(meetingsDec);
+      const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
+      const invDec = await tryDecryptList(orgId, invRaw, "encrypted_blob");
+      const needsDec = await tryDecryptList(orgId, needsRaw, "encrypted_blob");
+      const meetsDec = await tryDecryptList(orgId, meetsRaw, "encrypted_blob");
+      const subsDec = await tryDecryptList(orgId, subsResp?.subscribers || [], "encrypted_blob");
+      const pledgesDec = await tryDecryptList(orgId, pledgesResp?.pledges || [], "encrypted_blob");
 
-      setPledges(Array.isArray(pl1?.pledges) ? pl1.pledges : []);
-      setSubs(Array.isArray(s1?.subscribers) ? s1.subscribers : []);
+      setPeople(Array.isArray(pplDec) ? pplDec : []);
+      setInventory(Array.isArray(invDec) ? invDec : []);
+      setNeeds(Array.isArray(needsDec) ? needsDec : []);
+      setMeetings(Array.isArray(meetsDec) ? meetsDec : []);
+      setSubs(Array.isArray(subsDec) ? subsDec : []);
+      setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
+
+      writePrevCounts(orgId, rawCounts);
     } catch (e) {
+      console.error(e);
       setErr(e?.message || "Failed to load dashboard");
     } finally {
       setLoading(false);
@@ -250,151 +194,192 @@ export default function Overview() {
 
   useEffect(() => {
     refresh().catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
-  // Upcoming meetings: next 3 by starts_at
-  const upcomingMeetings = useMemo(() => {
+  // ----- derived -----
+  const countsNormalized = useMemo(() => {
+    const c = counts || {};
+    return {
+      people: Number(c.people || 0),
+      inventory: Number(c.inventory || 0),
+      needsOpen: Number(c.needsOpen || 0),
+      meetingsUpcoming: Number(c.meetingsUpcoming || 0),
+      pledgesActive: Number(c.pledgesActive || c.pledges || 0),
+      subsTotal: Number(c.subscribers || c.subs || 0),
+    };
+  }, [counts]);
+
+  const deltas = useMemo(() => {
+    const pc = prevCounts || {};
+    const d = {
+      people: countsNormalized.people - Number(pc.people || 0),
+      inventory: countsNormalized.inventory - Number(pc.inventory || 0),
+      needsOpen: countsNormalized.needsOpen - Number(pc.needsOpen || 0),
+      meetingsUpcoming: countsNormalized.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
+      pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || pc.pledges || 0),
+      subsTotal: countsNormalized.subsTotal - Number(pc.subscribers || pc.subs || 0),
+    };
+    return d;
+  }, [countsNormalized, prevCounts]);
+
+  const topCards = useMemo(() => {
+    const mk = (key, title, icon, value, sub, to) => {
+      const db = deltaBadge(deltas[key]);
+      return {
+        key,
+        title,
+        icon,
+        value,
+        sub,
+        to,
+        badge: db,
+      };
+    };
+    return [
+      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
+      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
+      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
+      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+    ];
+  }, [countsNormalized, deltas]);
+
+  const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
-    const nowMs = Date.now();
     return arr
-      .filter((m) => Number(m?.starts_at) >= nowMs - 60_000)
-      .sort((a, b) => Number(a?.starts_at || 0) - Number(b?.starts_at || 0))
+      .filter((m) => Number(m?.starts_at) > 0)
+      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
       .slice(0, 3);
   }, [meetings]);
 
-  const nextMeetingLabel = useMemo(() => {
-    const m = upcomingMeetings[0];
-    if (!m) return "not scheduled";
-    const pretty = fmtDT(m?.starts_at);
-    return `${pretty || "scheduled"}${m?.title ? ` · ${m.title}` : ""}`;
-  }, [upcomingMeetings]);
+  const needsOpen = useMemo(() => {
+    const arr = Array.isArray(needs) ? needs : [];
+    return arr
+      .filter((n) => String(n?.status || "").toLowerCase() === "open")
+      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
+      .slice(0, 6);
+  }, [needs]);
 
-  // Inventory: group by category and compute bars
+  const subsSorted = useMemo(() => {
+    const arr = Array.isArray(subs) ? subs : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
+      .slice(0, 6);
+  }, [subs]);
+
+  const pledgesSorted = useMemo(() => {
+    const arr = Array.isArray(pledges) ? pledges : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
+      .slice(0, 6);
+  }, [pledges]);
+
   const invByCat = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const map = new Map();
     for (const it of arr) {
-      const cat = safeStr(it?.category).trim() || "uncategorized";
-      const qty = Number(it?.qty || 0);
+      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
+      const qty = Number(it?.qty);
       map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
     }
-    const rows = Array.from(map.entries()).map(([category, totalQty]) => ({
-      category,
-      totalQty,
-    }));
-    rows.sort((a, b) => b.totalQty - a.totalQty);
-    const top = rows.slice(0, 4);
-    const max = top.length ? Math.max(...top.map((r) => r.totalQty)) : 1;
-    return { top, max: max || 1 };
+    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
+    out.sort((a, b) => b.qty - a.qty);
+    return out.slice(0, 6);
   }, [inventory]);
 
-  const invLowCount = useMemo(() => {
-    const arr = Array.isArray(inventory) ? inventory : [];
-    return arr.filter((it) => Number(it?.qty) > 0 && Number(it?.qty) <= 5).length;
-  }, [inventory]);
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  const openNeeds = useMemo(() => {
-    const arr = Array.isArray(needs) ? needs : [];
-    return arr
-      .filter((n) => safeStr(n?.status).toLowerCase() === "open" || !n?.status)
-      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
-      .slice(0, 5);
-  }, [needs]);
+  const invMax = useMemo(() => {
+    let m = 1;
+    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
+    return m;
+  }, [invByCat, invPar]);
 
-  const recentSubs = useMemo(() => {
-    const arr = Array.isArray(subs) ? subs : [];
-    return arr.slice(0, 5);
-  }, [subs]);
-
-  const subsWeekSeries = useMemo(() => {
-    // last 7 days counts for sparkline
-    const arr = Array.isArray(subs) ? subs : [];
-    const dayMs = 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const buckets = Array.from({ length: 7 }, () => 0);
-    for (const s of arr) {
-      const t = Number(s?.created_at);
-      if (!Number.isFinite(t)) continue;
-      const d = Math.floor((now - t) / dayMs);
-      if (d >= 0 && d < 7) buckets[6 - d] += 1;
+  const lowCats = useMemo(() => {
+    const lows = [];
+    for (const x of invByCat) {
+      const par = Number(invPar?.[x.category]);
+      if (!Number.isFinite(par) || par <= 0) continue;
+      const pct = par ? (Number(x.qty || 0) / par) : 1;
+      if (pct < 0.25) lows.push({ ...x, par });
     }
-    return buckets;
-  }, [subs]);
+    return lows;
+  }, [invByCat, invPar]);
 
-  const newSubsThisWeek = subsWeekSeries.reduce((a, b) => a + b, 0);
+  async function rsvp(meeting) {
+    if (!orgId || !meeting?.id) return;
+    setRsvpMsg("");
+    try {
+      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meeting_id: meeting.id }),
+      });
+      setRsvpMsg("RSVP saved.");
+    } catch (e) {
+      // fallback: still useful navigation
+      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
+      go("meetings");
+    }
+  }
 
-  const recentPledges = useMemo(() => {
-    const arr = Array.isArray(pledges) ? pledges : [];
-    return arr.slice(0, 5);
-  }, [pledges]);
-
-  const pledgesThisWeek = useMemo(() => {
-    const arr = Array.isArray(pledges) ? pledges : [];
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return arr.filter((p) => Number(p?.created_at) >= cutoff).length;
-  }, [pledges]);
-
-  const pillStyle = (status) => {
-    const s = safeStr(status).toLowerCase();
-    const base = {
-      display: "inline-block",
-      padding: "2px 8px",
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 800,
-      border: "1px solid rgba(255,255,255,0.14)",
-      background: "rgba(255,255,255,0.06)",
-    };
-    if (s === "accepted") return { ...base, border: "1px solid rgba(0,255,150,0.25)", background: "rgba(0,255,150,0.10)" };
-    if (s === "offered") return { ...base, border: "1px solid rgba(255,200,0,0.25)", background: "rgba(255,200,0,0.10)" };
-    if (s === "declined") return { ...base, border: "1px solid rgba(255,80,80,0.25)", background: "rgba(255,80,80,0.10)" };
-    return base;
+  const cardBtnStyle = {
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    cursor: "pointer",
   };
-
-  const CountCard = ({ title, value, sub, onView }) => (
-    <div className="card" style={{ padding: 14, minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-        <button className="btn" type="button" onClick={onView} style={{ padding: "6px 10px" }}>
-          View
-        </button>
-      </div>
-      <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.05, marginTop: 8 }}>{value}</div>
-      <div className="helper" style={{ marginTop: 4 }}>{sub}</div>
-    </div>
-  );
 
   return (
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0, flex: 1 }}>{orgInfo?.name || "Dashboard"}</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0, flex: 1, minWidth: 180 }}>{orgInfo?.name || "Dashboard"}</h1>
           <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
             {loading ? "Loading" : "Refresh"}
           </button>
         </div>
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
+        {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
       </div>
 
-      {/* Top count row: 6 cards, one row on desktop */}
+      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(150px, 1fr))",
+          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
           gap: 12,
           marginBottom: 12,
         }}
       >
-        <CountCard title="People" value={counts.people || 0} sub="members" onView={() => go("people")} />
-        <CountCard title="Inventory" value={counts.inventory || 0} sub={`${invLowCount} low`} onView={() => go("inventory")} />
-        <CountCard title="Needs" value={counts.needsOpen || 0} sub="open" onView={() => go("needs")} />
-        <CountCard title="Meetings" value={counts.meetingsUpcoming || 0} sub="upcoming" onView={() => go("meetings")} />
-        <CountCard title="Pledges" value={pledgesThisWeek} sub="this week" onView={() => go("settings?tab=pledges")} />
-        <CountCard title="New Subs" value={newSubsThisWeek} sub="this week" onView={() => go("settings?tab=newsletter")} />
+        {topCards.map((c) => (
+          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+            <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+              {c.badge ? (
+                <div style={{ position: "absolute", top: 12, right: 12 }}>
+                  <span style={c.badge.style}>{c.badge.txt}</span>
+                </div>
+              ) : null}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 18 }}>{c.icon}</div>
+                <div style={{ fontWeight: 900 }}>{c.title}</div>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+              <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+            </div>
+          </button>
+        ))}
       </div>
 
       {/* Main grid */}
@@ -403,31 +388,31 @@ export default function Overview() {
         style={{
           gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
           gap: 12,
+          alignItems: "start",
         }}
       >
-        {/* Next Meetings */}
+        {/* Next meetings */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
-            <button className="btn" onClick={() => go("meetings")}>View all</button>
+            <button className="btn" type="button" onClick={() => go("meetings")}>
+              View all
+            </button>
           </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            Next: <strong>{nextMeetingLabel}</strong>
-          </div>
-
-          {upcomingMeetings.length ? (
+          {meetingsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {upcomingMeetings.map((m) => (
-                <div key={m.id} className="card" style={{ padding: 12, borderRadius: 14, background: "rgba(255,255,255,0.03)" }}>
+              {meetingsSorted.map((m) => (
+                <div key={m.id} className="card" style={{ padding: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{safeStr(m.title) || "(untitled)"}</div>
-                    <button className="btn-red" type="button" onClick={() => go("meetings")} style={{ padding: "6px 10px" }}>
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                      {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                    </div>
+                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
                       RSVP
                     </button>
                   </div>
                   <div className="helper" style={{ marginTop: 6 }}>
-                    {fmtDT(m.starts_at)}{m.location ? ` · ${m.location}` : ""}
+                    {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
                   </div>
                 </div>
               ))}
@@ -437,31 +422,71 @@ export default function Overview() {
           )}
         </div>
 
-        {/* Inventory at a glance */}
+        {/* Inventory glance */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
-            <button className="btn" onClick={() => go("inventory")}>Manage</button>
+            <button className="btn" type="button" onClick={() => go("inventory")}>
+              Manage
+            </button>
           </div>
 
-          {invByCat.top.length ? (
+          {invByCat.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {invByCat.top.map((r) => {
-                const pct = invByCat.max ? (r.totalQty / invByCat.max) : 0;
+              {invByCat.map((x) => {
+                const par = Number(invPar?.[x.category]) || 0;
+                const pct = Math.max(0, Math.min(1, (Number(x.qty) || 0) / invMax));
+                const label = x.category;
                 return (
-                  <div key={r.category} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{r.category}</div>
-                      <div className="helper">{r.totalQty}</div>
+                  <div key={label} style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                        {Number(x.qty) || 0}{par ? ` / ${par}` : ""}
+                      </div>
                     </div>
                     <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${clamp(pct * 100, 0, 100)}%`, background: "rgba(255,0,0,0.35)" }} />
+                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
                     </div>
                   </div>
                 );
               })}
-              <div className="helper" style={{ marginTop: 6 }}>
-                {invLowCount ? <span><strong>{invLowCount}</strong> items are low (qty ≤ 5).</span> : <span>No low items flagged.</span>}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+                <div className="helper">
+                  {lowCats.length ? (
+                    <span>{lowCats.length} low categorie{lowCats.length === 1 ? "y" : "s"} flagged.</span>
+                  ) : (
+                    <span>No low items flagged.</span>
+                  )}
+                </div>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    // quick and dirty, but it works: "medical=200,food=100"
+                    const curr = Object.entries(invPar || {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(",");
+                    const next = window.prompt("Set par targets (category=number, comma-separated). Example: medical=200,food=100", curr);
+                    if (next == null) return;
+                    const obj = {};
+                    String(next)
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .forEach((pair) => {
+                        const [k, v] = pair.split("=").map((x) => x.trim());
+                        const n = Number(v);
+                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
+                      });
+                    writeInvPar(orgId, obj);
+                    // force rerender
+                    setCounts((c) => ({ ...(c || {}) }));
+                  }}
+                >
+                  Set par
+                </button>
               </div>
             </div>
           ) : (
@@ -469,26 +494,34 @@ export default function Overview() {
           )}
         </div>
 
-        {/* Open Needs */}
+        {/* Open needs */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-            <button className="btn" onClick={() => go("needs")}>View all</button>
+            <button className="btn" type="button" onClick={() => go("needs")}>
+              View all
+            </button>
           </div>
 
-          {openNeeds.length ? (
+          {needsOpen.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {openNeeds.map((n) => (
-                <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 900 }}>{safeStr(n.title) || "(untitled)"}</div>
-                    <div className="helper" style={{ marginTop: 2 }}>
-                      {n.urgency ? `${safeStr(n.urgency)} · ` : ""}priority {Number(n.priority || 0)}
+              {needsOpen.map((n) => {
+                const pr = Number(n?.priority || 0);
+                const urgency = String(n?.urgency || "").toLowerCase();
+                const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
+                const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
+                return (
+                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {pill(tone.toUpperCase(), tone)}
+                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
                     </div>
-                  </div>
-                  <button className="btn" type="button" onClick={() => go("needs")} style={{ padding: "6px 10px" }}>Open</button>
-                </div>
-              ))}
+                    <div className="helper" style={{ marginTop: 6 }}>
+                      {urgency ? `${urgency}` : "open"} · priority {pr}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
@@ -497,57 +530,68 @@ export default function Overview() {
 
         {/* Newsletter */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
-            <button className="btn" onClick={() => go("settings?tab=newsletter")}>View all</button>
+            <button className="btn" type="button" onClick={() => go("settings")}>
+              View all
+            </button>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
-            <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1 }}>{Number(subs?.length || 0)}</div>
-            <div className="helper">subscribers</div>
-            <div style={{ marginLeft: "auto" }}><Sparkline points={subsWeekSeries} /></div>
+          <div className="helper" style={{ marginTop: 10 }}>
+            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
           </div>
 
-          {recentSubs.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {recentSubs.map((s) => (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{safeStr(s.name) || "(unnamed)"}</div>
-                  <div className="helper">{fmtDT(s.created_at)}</div>
-                </div>
-              ))}
+          {subsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {subsSorted.map((s) => {
+                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
+                const joined = Number(s?.joined || s?.created_at || 0);
+                return (
+                  <div key={s.id || `${name}-${joined}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontWeight: 800 }}>{name}</div>
+                    <div className="helper" style={{ whiteSpace: "nowrap" }}>{fmtDT(joined)}</div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No subscribers yet.</div>
           )}
         </div>
 
-        {/* Recent Pledges */}
+        {/* Recent pledges */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" onClick={() => go("settings?tab=pledges")}>View all</button>
+            <button className="btn" type="button" onClick={() => go("pledges")}>
+              View all
+            </button>
           </div>
 
-          {recentPledges.length ? (
+          {pledgesSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {recentPledges.map((p) => (
-                <div key={p.id} style={{ display: "grid", gap: 4 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={pillStyle(p.status)}>{safeStr(p.status) || "offered"}</span>
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                      {safeStr(p.pledger_name) || "someone"}{p.type ? ` · ${p.type}` : ""}
+              {pledgesSorted.map((p) => {
+                const status = String(p?.status || "").toLowerCase();
+                const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
+                const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
+                const type = safeStr(p?.type || "").trim();
+                const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
+                const unit = safeStr(p?.unit || "").trim();
+                const when = fmtDT(p?.created_at);
+                return (
+                  <div key={p.id} style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {pill(status || "pledge", tone)}
+                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                        {who}{type ? ` · ${type}` : ""}
+                      </div>
+                    </div>
+                    <div className="helper">
+                      {amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}
                     </div>
                   </div>
-                  <div className="helper" style={{ marginLeft: 2 }}>
-                    {p.amount ? `${p.amount}${p.unit ? ` ${p.unit}` : ""} · ` : ""}
-                    {fmtDT(p.created_at)}
-                  </div>
-                </div>
-              ))}
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
-                <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>View Pledge Board</button>
-              </div>
+                );
+              })}
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>

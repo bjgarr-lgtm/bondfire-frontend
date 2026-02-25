@@ -1,9 +1,9 @@
 // src/pages/Settings.jsx
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
+import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
-import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -263,36 +263,8 @@ export default function Settings() {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
         method: "GET",
       });
-      const raw = Array.isArray(r.members) ? r.members : [];
-
-      // If org key is loaded on this device, decrypt member PII locally.
-      const orgKey = getCachedOrgKey(orgId);
-      if (orgKey) {
-        const out = [];
-        let needsEnc = 0;
-        for (const m of raw) {
-          if (m?.encrypted_blob) {
-            try {
-              const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
-              out.push({ ...m, ...dec });
-              continue;
-            } catch {
-              out.push({ ...m, email: "(encrypted)", name: "" });
-              continue;
-            }
-          }
-          if (m?.needs_encryption) needsEnc++;
-          out.push(m);
-        }
-        setMembers(out);
-        if (needsEnc) {
-          setMembersMsg(
-            `Some members are still stored in plaintext on the server (${needsEnc}). Use “Encrypt Existing” to fix that.`
-          );
-        }
-      } else {
-        setMembers(raw);
-      }
+      const _mem = Array.isArray(r.members) ? r.members : [];
+      setMembers(await tryDecryptList(orgId, _mem));
       setMembersAllowed(true);
     } catch (e) {
       const msg = String(e?.message || "");
@@ -307,44 +279,6 @@ export default function Settings() {
       }
     }
   }, [orgId]);
-
-  const encryptExistingMembers = React.useCallback(async () => {
-    if (!orgId) return;
-    const orgKey = getCachedOrgKey(orgId);
-    if (!orgKey) {
-      setMembersMsg("Load the org key on this device first (Settings → Security). ");
-      return;
-    }
-    setMembersBusy(true);
-    setMembersMsg("");
-    try {
-      // One-time plaintext fetch for backfill. This is the only time we want PII over the wire.
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members?plaintext=1`, {
-        method: "GET",
-      });
-      const raw = Array.isArray(r.members) ? r.members : [];
-
-      let changed = 0;
-      for (const m of raw) {
-        if (!m?.userId) continue;
-        if (m?.encrypted_blob) continue;
-        const email = String(m.email || "").trim();
-        const name = String(m.name || "").trim();
-        const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ email, name }));
-        await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
-          method: "PUT",
-          body: { userId: m.userId, encrypted_blob: enc },
-        });
-        changed++;
-      }
-      setMembersMsg(changed ? `Encrypted ${changed} member records.` : "Nothing to encrypt.");
-      await loadMembers();
-    } catch (e) {
-      setMembersMsg(e?.message || "Failed to encrypt members");
-    } finally {
-      setMembersBusy(false);
-    }
-  }, [orgId, loadMembers]);
 
   const setMemberRole = async (userId, nextRole, currentRole, email) => {
     if (!orgId) return;
@@ -634,34 +568,8 @@ React.useEffect(() => {
         `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`,
         { method: "GET" }
       );
-      const raw = Array.isArray(r.subscribers) ? r.subscribers : [];
-      const orgKey = getCachedOrgKey(orgId);
-      if (orgKey) {
-        const out = [];
-        let needsEnc = 0;
-        for (const s of raw) {
-          if (s?.encrypted_blob) {
-            try {
-              const dec = JSON.parse(await decryptWithOrgKey(orgKey, s.encrypted_blob));
-              out.push({ ...s, ...dec });
-              continue;
-            } catch {
-              out.push({ ...s, email: "(encrypted)", name: "" });
-              continue;
-            }
-          }
-          if (s?.needs_encryption) needsEnc++;
-          out.push(s);
-        }
-        setSubscribers(out);
-        if (needsEnc) {
-          setNlMsg(
-            `Some subscribers are still stored in plaintext on the server (${needsEnc}). Use “Encrypt Existing” to fix that.`
-          );
-        }
-      } else {
-        setSubscribers(raw);
-      }
+      const _subs = Array.isArray(r.subscribers) ? r.subscribers : [];
+      setSubscribers(await tryDecryptList(orgId, _subs));
     } catch (e) {
       setSubscribers([]);
       setNlMsg(e.message || "Failed to load subscribers");
@@ -669,49 +577,6 @@ React.useEffect(() => {
       setNlBusy(false);
     }
   }, [orgId]);
-
-  const encryptExistingSubscribers = React.useCallback(async () => {
-    if (!orgId) return;
-    const orgKey = getCachedOrgKey(orgId);
-    if (!orgKey) {
-      setNlMsg("Load the org key on this device first (Settings → Security). ");
-      return;
-    }
-    setNlBusy(true);
-    setNlMsg("");
-    try {
-      // One-time plaintext fetch for backfill.
-      const r = await authFetch(
-        `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?plaintext=1`,
-        { method: "GET" }
-      );
-      const raw = Array.isArray(r.subscribers) ? r.subscribers : [];
-
-      const updates = [];
-      for (const s of raw) {
-        if (!s?.id) continue;
-        if (s?.encrypted_blob) continue;
-        const email = String(s.email || "").trim();
-        const name = String(s.name || "").trim();
-        const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ email, name }));
-        updates.push({ id: s.id, encrypted_blob: enc });
-      }
-
-      if (updates.length) {
-        await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`, {
-          method: "POST",
-          body: { updates },
-        });
-      }
-
-      setNlMsg(updates.length ? `Encrypted ${updates.length} subscriber records.` : "Nothing to encrypt.");
-      await loadSubscribers();
-    } catch (e) {
-      setNlMsg(e?.message || "Failed to encrypt subscribers");
-    } finally {
-      setNlBusy(false);
-    }
-  }, [orgId, loadSubscribers]);
 
   const saveNewsletter = async () => {
     if (!orgId) return;
@@ -1045,15 +910,6 @@ React.useEffect(() => {
                 <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
                   {membersBusy ? "Refreshing…" : "Refresh"}
                 </button>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={encryptExistingMembers}
-                  disabled={membersBusy}
-                  title="Encrypt member emails/names in D1 using your org key (requires org key loaded on this device)."
-                >
-                  Encrypt Existing
-                </button>
                 {membersMsg ? (
                   <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
                     {membersMsg}
@@ -1295,10 +1151,6 @@ React.useEffect(() => {
               </button>
               <button className="btn" type="button" onClick={() => loadSubscribers()} disabled={nlBusy}>
                 Refresh subscribers
-              </button>
-
-              <button className="btn" type="button" onClick={encryptExistingSubscribers} disabled={nlBusy}>
-                Encrypt Existing
               </button>
 
               <button className="btn" type="button" onClick={() => exportSubscribersCsv().catch(console.error)} disabled={nlBusy}>

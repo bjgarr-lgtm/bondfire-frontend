@@ -14,6 +14,19 @@ const DEVICE_KEY_ID = "device_keypair_v1";
 const LS_PUB = "bf_device_public_jwk_v1";
 const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
 
+
+export function kidFromJwk(jwk) {
+  try {
+    const x = String(jwk?.x || "");
+    const y = String(jwk?.y || "");
+    const raw = (x + "." + y).slice(0, 120);
+    const b64s = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    return b64s.slice(0, 16) || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function b64(bytes) {
   let s = "";
   bytes.forEach((b) => (s += String.fromCharCode(b)));
@@ -145,13 +158,10 @@ export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
 }
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
-  // Be forgiving: callers sometimes pass an already-parsed object.
-  const blob = typeof blobStr === "string" ? JSON.parse(blobStr) : blobStr;
-  if (!blob || typeof blob !== "object") throw new Error("BAD_CIPHERTEXT_BLOB");
+  const blob = (typeof blobStr === \"string\") ? JSON.parse(blobStr) : (blobStr || {});
   const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
-  if (!blob.iv || !blob.ct) throw new Error("BAD_CIPHERTEXT_FIELDS");
-  const iv = unb64(String(blob.iv));
-  const ct = unb64(String(blob.ct));
+  const iv = unb64(blob.iv);
+  const ct = unb64(blob.ct);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
   return new TextDecoder().decode(pt);
 }
@@ -171,6 +181,18 @@ export function cacheOrgKey(orgId, keyBytes) {
 }
 
 export function getCachedOrgKey(orgId) {
-  const v = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + orgId);
-  return v ? unb64(v) : null;
+  // orgId comes from both HashRouter and BrowserRouter paths. Be defensive.
+  const candidates = [];
+  try { if (orgId) candidates.push(String(orgId)); } catch {}
+  try { if (orgId) candidates.push(encodeURIComponent(String(orgId))); } catch {}
+  try { if (orgId) candidates.push(decodeURIComponent(String(orgId))); } catch {}
+  // also try double decode (we've seen it happen in the wild)
+  try { if (orgId) candidates.push(decodeURIComponent(decodeURIComponent(String(orgId)))); } catch {}
+  for (const id of candidates) {
+    try {
+      const v = localStorage.getItem(`bf_org_key_${id}`);
+      if (v) return v;
+    } catch {}
+  }
+  return null;
 }
