@@ -123,3 +123,30 @@ export async function onRequestPost(ctx) {
 
   return ok({ updated: true, changed });
 }
+
+// Delete a subscriber row (admin only).
+// Called by Settings UI to remove test subscribers.
+export async function onRequestDelete(ctx) {
+  const { params, env, request } = ctx;
+  const orgId = String(params.orgId || "");
+  if (!orgId) return err(400, "BAD_ORG_ID");
+
+  const db = getDB(env);
+  if (!db) return err(500, "DB_NOT_CONFIGURED");
+
+  await ensureZkSchema(db);
+
+  const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "admin" });
+  if (!auth.ok) return auth.resp;
+
+  const body = await readJson(request);
+  const id = String(body?.id || "").trim();
+  if (!id) return err(400, "MISSING_ID");
+
+  await db
+    .prepare("DELETE FROM newsletter_subscribers WHERE org_id = ? AND id = ?")
+    .bind(orgId, id)
+    .run();
+
+  return ok({ deleted: true });
+}

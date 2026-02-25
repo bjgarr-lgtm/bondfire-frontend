@@ -16,62 +16,56 @@ function humanizeError(msg) {
   return s;
 }
 
-function b64urlToBytes(s) {
-  // Accept base64url or base64.
-  try {
-    let v = String(s || "").trim();
-    if (!v) return null;
-    v = v.replace(/-/g, "+").replace(/_/g, "/");
-    while (v.length % 4) v += "=";
-    const bin = atob(v);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  } catch {
-    return null;
-  }
+/* ---------- ZK decrypt helper used across Settings tabs ---------- */
+function b64ToBytes(b64) {
+  const s = String(b64 || "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .replace(/\s+/g, "");
+  if (!s) return null;
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const bin = atob(s + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
-function coerceOrgKeyBytes(orgKeyMaybe) {
-  if (!orgKeyMaybe) return null;
-  if (orgKeyMaybe instanceof Uint8Array) return orgKeyMaybe;
-  if (Array.isArray(orgKeyMaybe)) {
-    try {
-      return new Uint8Array(orgKeyMaybe.map((x) => Number(x) & 255));
-    } catch {
-      return null;
-    }
-  }
-  // common case: stored as base64url string
-  if (typeof orgKeyMaybe === "string") {
-    // It might be JSON of byte array (ancient builds)
-    try {
-      const parsed = JSON.parse(orgKeyMaybe);
-      if (Array.isArray(parsed)) return new Uint8Array(parsed.map((x) => Number(x) & 255));
-    } catch {}
-    return b64urlToBytes(orgKeyMaybe);
+async function getOrgKeyBytes(orgId) {
+  if (!orgId) return null;
+  const k = await getCachedOrgKey(orgId);
+  if (!k) return null;
+  if (k instanceof Uint8Array) return k;
+  if (Array.isArray(k)) return new Uint8Array(k);
+  if (typeof k === "string") {
+    // Some old builds cached base64url strings.
+    const bytes = b64ToBytes(k);
+    return bytes;
   }
   return null;
 }
 
-async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
-  const arr = Array.isArray(rows) ? rows : [];
-  const orgKeyRaw = getCachedOrgKey(orgId);
-  const orgKey = coerceOrgKeyBytes(orgKeyRaw);
-  if (!orgKey) return arr;
+async function tryDecryptList(orgId, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length === 0) return [];
+
+  const keyBytes = await getOrgKeyBytes(orgId);
+  if (!keyBytes) return list;
 
   const out = [];
-  for (const r of arr) {
-    if (r && r[blobField]) {
-      try {
-        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        out.push({ ...r, ...dec });
-        continue;
-      } catch {
-        // fall through
-      }
+  for (const row of list) {
+    const enc = row?.encrypted_blob;
+    if (!enc) {
+      out.push(row);
+      continue;
     }
-    out.push(r);
+    try {
+      const dec = await decryptWithOrgKey(keyBytes, enc);
+      // Convention: encrypted blob is JSON.
+      const obj = typeof dec === "string" ? JSON.parse(dec) : dec;
+      out.push({ ...row, ...obj, _decrypted: true });
+    } catch {
+      out.push(row);
+    }
   }
   return out;
 }
@@ -638,6 +632,30 @@ React.useEffect(() => {
     }
   }, [orgId]);
 
+  const deleteSubscriber = async (id) => {
+    if (!orgId) return;
+    const sid = String(id || "").trim();
+    if (!sid) return;
+    const ok = confirm("Delete this subscriber?");
+    if (!ok) return;
+
+    setNlMsg("");
+    setNlBusy(true);
+    try {
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`, {
+        method: "DELETE",
+        body: { id: sid },
+      });
+      setSubscribers((prev) => (prev || []).filter((s) => String(s?.id || "") !== sid));
+      setNlMsg("Deleted.");
+      setTimeout(() => setNlMsg(""), 900);
+    } catch (e) {
+      setNlMsg(e.message || "Failed to delete subscriber");
+    } finally {
+      setNlBusy(false);
+    }
+  };
+
   const saveNewsletter = async () => {
     if (!orgId) return;
     setNlMsg("");
@@ -705,10 +723,7 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      const raw = Array.isArray(r.needs) ? r.needs : [];
-      const dec = await tryDecryptList(orgId, raw, "encrypted_blob");
-      // Ensure dropdown has a stable display label even if decrypted payload is missing.
-      setNeeds(dec.map((n) => ({ ...n, title: n.title || n.name || n.id })));
+      setNeeds(Array.isArray(r.needs) ? r.needs : []);
     } catch {
       setNeeds([]);
     }
@@ -1239,6 +1254,7 @@ React.useEffect(() => {
                           <th>Email</th>
                           <th>Name</th>
                           <th>Joined</th>
+                          <th></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1249,6 +1265,16 @@ React.useEffect(() => {
                             </td>
                             <td>{s.name || ""}</td>
                             <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
+                            <td style={{ textAlign: "right" }}>
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => deleteSubscriber(s.id)}
+                                disabled={nlBusy}
+                              >
+                                Delete
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1269,6 +1295,17 @@ React.useEffect(() => {
                             <div className="bf-field-label">email</div>
                             <div style={{ overflowWrap: "anywhere" }}>{s.email || ""}</div>
                           </div>
+                        </div>
+
+                        <div className="row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() => deleteSubscriber(s.id)}
+                            disabled={nlBusy}
+                          >
+                            Delete
+                          </button>
                         </div>
 
                         <div className="bf-field">

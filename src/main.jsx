@@ -8,12 +8,14 @@ import { registerSW } from "virtual:pwa-register";
 // IMPORTANT: do NOT also call navigator.serviceWorker.register() manually.
 // Double-registration can strand users on stale caches until they "unregister the SW".
 const updateSW = registerSW({
-  // Do NOT auto-reload the app in the middle of sign-in (or any form).
-  // If there is an update, we mark it and let the next navigation/reload pick it up.
+  // DO NOT auto-refresh the page when a new Service Worker is available.
+  // Auto-reloads wipe sign-in form state and feel like "the page blinked".
+  // Users can naturally pick up the new SW on next navigation/reload.
   immediate: false,
   onNeedRefresh() {
-    console.log("BOND🔥 update available; will apply on next reload.");
-    window.__BF_NEED_REFRESH = false;
+    // Intentionally no-op.
+    // If you later add a toast UI, call updateSW(true) only after user confirms.
+    console.log("BOND🔥 update available (SW). Will apply on next reload.");
   },
 });
 
