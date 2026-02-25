@@ -1,5 +1,31 @@
-import { json, error } from "../../../../_lib/http";
-import { requireUser, requireOrgRole } from "../../../../_lib/auth";
+import { err, ok, now, uuid, readJSON, requireMethod } from "../../../../_lib/http.js";
+import { requireOrgRole } from "../../../../_lib/auth.js";
+
+async function ensureMeetingRsvpsTable(db) {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS meeting_rsvps (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      note TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(org_id, meeting_id, user_id)
+    )`
+  ).run();
+
+  try {
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_meeting_rsvps_org_meeting ON meeting_rsvps (org_id, meeting_id)"
+      )
+      .run();
+  } catch {
+    // ignore
+  }
+}
 
 function normStatus(s) {
   const v = String(s || "").trim().toLowerCase();
@@ -11,23 +37,18 @@ function normStatus(s) {
 
 export async function onRequest(ctx) {
   const { request, env, params } = ctx;
-  const db = env.DB;
+  const db = env?.BF_DB || env?.DB;
   const orgId = params.orgId;
   const meetingId = params.meetingId;
 
-  const user = await requireUser(ctx);
-  // Any org member can RSVP.
-  await requireOrgRole(db, orgId, user.id, "member");
+  if (!db) return err(500, "NO_DB_BINDING");
+
+  await ensureMeetingRsvpsTable(db);
 
   if (request.method === "GET") {
-    // Admin/owner can view full RSVP list (optional)
-    const roleRow = await db
-      .prepare("SELECT role FROM org_members WHERE org_id=? AND user_id=?")
-      .bind(orgId, user.id)
-      .first();
-    const role = String(roleRow?.role || "");
-    const isAdmin = role === "admin" || role === "owner";
-    if (!isAdmin) return error(403, "FORBIDDEN");
+    // Admin/owner can view full RSVP list.
+    const a = await requireOrgRole({ env, request, orgId, minRole: "admin" });
+    if (!a.ok) return a.resp;
 
     const rows = await db
       .prepare(
@@ -35,35 +56,34 @@ export async function onRequest(ctx) {
       )
       .bind(orgId, meetingId)
       .all();
-    return json({ ok: true, rsvps: rows?.results || [] });
+    return ok({ rsvps: rows?.results || [] });
   }
 
-  if (request.method !== "POST") return error(405, "METHOD_NOT_ALLOWED");
+  const m = requireMethod(request, "POST");
+  if (m) return m;
 
-  let body = {};
-  try {
-    body = await request.json();
-  } catch {
-    body = {};
-  }
+  const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
+  if (!a.ok) return a.resp;
+
+  const body = await readJSON(request);
 
   const status = normStatus(body.status);
   const note = String(body.note || "").slice(0, 2000);
-  const now = Date.now();
+  const t = now();
+  const userId = String(a.user?.sub || "");
+  if (!userId) return err(401, "UNAUTHORIZED");
 
-  // Requires table meeting_rsvps.
-  // PRIMARY KEY(org_id, meeting_id, user_id)
   await db
     .prepare(
-      `INSERT INTO meeting_rsvps (org_id, meeting_id, user_id, status, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO meeting_rsvps (id, org_id, meeting_id, user_id, status, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(org_id, meeting_id, user_id) DO UPDATE SET
          status=excluded.status,
          note=excluded.note,
          updated_at=excluded.updated_at`
     )
-    .bind(orgId, meetingId, user.id, status, note, now, now)
+    .bind(uuid(), orgId, meetingId, userId, status, note, t, t)
     .run();
 
-  return json({ ok: true, meeting_id: meetingId, status });
+  return ok({ meeting_id: meetingId, status });
 }

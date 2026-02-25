@@ -318,17 +318,14 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: meeting.id }),
+        body: JSON.stringify({ status: "yes" }),
       });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
+      setRsvpMsg(e?.message || "RSVP failed.");
     }
   }
 
