@@ -42,6 +42,18 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   return out;
 }
 
+// In case an older cached chunk somehow loads without the helper above,
+// avoid a hard runtime crash and just return rows unchanged.
+function getTryDecryptList() {
+  try {
+    // eslint-disable-next-line no-undef
+    if (typeof tryDecryptList === "function") return tryDecryptList;
+  } catch {
+    // ignore
+  }
+  return async (_orgId, rows) => (Array.isArray(rows) ? rows : []);
+}
+
 
 async function authFetch(path, opts = {}) {
   const relative = path.startsWith("/") ? path : `/${path}`;
@@ -290,7 +302,8 @@ export default function Settings() {
         method: "GET",
       });
       const _mem = Array.isArray(r.members) ? r.members : [];
-      setMembers(await tryDecryptList(orgId, _mem));
+      const decryptList = getTryDecryptList();
+      setMembers(await decryptList(orgId, _mem));
       setMembersAllowed(true);
     } catch (e) {
       const msg = String(e?.message || "");
@@ -633,7 +646,8 @@ React.useEffect(() => {
         { method: "GET" }
       );
       const _subs = Array.isArray(r.subscribers) ? r.subscribers : [];
-      setSubscribers(await tryDecryptList(orgId, _subs));
+      const decryptList = getTryDecryptList();
+      setSubscribers(await decryptList(orgId, _subs));
     } catch (e) {
       setSubscribers([]);
       setNlMsg(e.message || "Failed to load subscribers");
