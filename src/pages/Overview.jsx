@@ -1,20 +1,20 @@
+// src/pages/Overview.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 /**
- * Dashboard (Overview)
+ * Overview (Dashboard)
  *
- * What this DOES:
- * - Keeps current Bondfire styling tokens (card/btn/helper/grid).
- * - Adds the “mockup” level UI inside the content area: bars, sparklines, pills, ring gauge.
- * - Fixes scrolling: whole page scrolls (no inner scroll box).
- * - ZK-safe: decrypts encrypted_blob client-side when org key is cached.
- *
- * What this does NOT do (needs layout shell edits):
- * - Sidebar redesign, global search, notifications, profile photo UI.
- *   Those belong to the app shell/layout component, not Overview.jsx.
+ * Fixes:
+ * 1) Whole page scrolls normally (no trapped inner scroll box).
+ * 2) Count cards fit in ONE ROW on desktop (6 columns), wrap only on small screens.
+ * 3) Sparkline stays inside its card (responsive SVG).
+ * 4) Decryption works for dashboard previews:
+ *    The /dashboard endpoint often returns scrubbed rows (name="__encrypted__") WITHOUT encrypted_blob,
+ *    so we additionally fetch the real lists from their endpoints (which include encrypted_blob),
+ *    then decrypt client-side and use those for display.
  */
 
 function readOrgInfo(orgId) {
@@ -119,15 +119,18 @@ function pillEl(p) {
   );
 }
 
+// Responsive sparkline that cannot overflow its container
 function Sparkline({ points = [], height = 34 }) {
-  const w = 180;
   const h = height;
   const pts = (points || []).map((n) => Number(n)).filter((n) => Number.isFinite(n));
   if (pts.length < 2) return <div style={{ height: h }} />;
+
+  const w = 200;
   const min = Math.min(...pts);
   const max = Math.max(...pts);
   const span = Math.max(1e-6, max - min);
   const step = w / (pts.length - 1);
+
   const d = pts
     .map((v, i) => {
       const x = i * step;
@@ -137,7 +140,7 @@ function Sparkline({ points = [], height = 34 }) {
     .join(" ");
 
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block" }}>
       <path d={d} fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" />
       <path d={`${d} L ${w} ${h} L 0 ${h} Z`} fill="rgba(255,255,255,0.06)" />
     </svg>
@@ -208,6 +211,13 @@ export default function Overview() {
   const [err, setErr] = useState("");
   const [data, setData] = useState(null);
 
+  // These are the datasets we display
+  const [peoplePreview, setPeoplePreview] = useState([]);
+  const [invPreview, setInvPreview] = useState([]);
+  const [needsPreview, setNeedsPreview] = useState([]);
+  const [pledgesPreview, setPledgesPreview] = useState([]);
+  const [subsPreview, setSubsPreview] = useState([]);
+
   const prevCountsRef = useRef(null);
 
   async function refresh() {
@@ -215,16 +225,12 @@ export default function Overview() {
     setLoading(true);
     setErr("");
     try {
+      // counts/nextMeeting metadata from dashboard
       const d0 = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
       const d = { ...d0 };
-
-      d.people = await decryptRows(orgId, d0?.people);
-      d.inventory = await decryptRows(orgId, d0?.inventory);
-      d.needs = await decryptRows(orgId, d0?.needs);
-      d.pledges = await decryptRows(orgId, d0?.pledges);
-      d.newsletter = await decryptRows(orgId, d0?.newsletter);
       if (d0?.nextMeeting) d.nextMeeting = await tryDecryptRow(orgId, d0.nextMeeting);
 
+      // store previous counts for deltas
       const prevKey = `bf_dash_counts_${orgId}`;
       const prev =
         prevCountsRef.current ||
@@ -238,11 +244,34 @@ export default function Overview() {
       prevCountsRef.current = prev;
       try {
         localStorage.setItem(prevKey, JSON.stringify(d?.counts || {}));
-      } catch {
-        // ignore
-      }
+      } catch {}
 
       setData(d);
+
+      // REAL lists from their endpoints (so we get encrypted_blob), then decrypt
+      const [p1, i1, n1, pl1, s1] = await Promise.all([
+        api(`/api/orgs/${encodeURIComponent(orgId)}/people`).catch(() => null),
+        api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`).catch(() => null),
+        api(`/api/orgs/${encodeURIComponent(orgId)}/needs`).catch(() => null),
+        api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`).catch(() => null),
+        api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter`).catch(() => null),
+      ]);
+
+      const pRaw = Array.isArray(p1?.people) ? p1.people : [];
+      const iRaw = Array.isArray(i1?.inventory) ? i1.inventory : [];
+      const nRaw = Array.isArray(n1?.needs) ? n1.needs : [];
+      const plRaw = Array.isArray(pl1?.pledges) ? pl1.pledges : [];
+      const sRaw = Array.isArray(s1?.subscribers)
+        ? s1.subscribers
+        : Array.isArray(s1?.newsletter)
+          ? s1.newsletter
+          : [];
+
+      setPeoplePreview(await decryptRows(orgId, pRaw));
+      setInvPreview(await decryptRows(orgId, iRaw));
+      setNeedsPreview(await decryptRows(orgId, nRaw));
+      setPledgesPreview(await decryptRows(orgId, plRaw));
+      setSubsPreview(await decryptRows(orgId, sRaw));
     } catch (e) {
       setErr(e?.message || "Failed to load dashboard");
     } finally {
@@ -259,11 +288,10 @@ export default function Overview() {
   const counts = data?.counts || {};
   const prevCounts = prevCountsRef.current || {};
 
-  const people = Array.isArray(data?.people) ? data.people : [];
-  const inventory = Array.isArray(data?.inventory) ? data.inventory : [];
-  const needs = Array.isArray(data?.needs) ? data.needs : [];
-  const pledges = Array.isArray(data?.pledges) ? data.pledges : [];
-  const newsletter = Array.isArray(data?.newsletter) ? data.newsletter : [];
+  const inventory = invPreview;
+  const needs = needsPreview;
+  const pledges = pledgesPreview;
+  const newsletter = subsPreview;
   const nextMeeting = data?.nextMeeting || null;
 
   const needTitleById = useMemo(() => {
@@ -320,7 +348,7 @@ export default function Overview() {
   const invBars = useMemo(() => {
     const items = inventory.slice(0, 8).map((it) => ({
       id: it?.id,
-      name: safeStr(it?.name || "").trim() || "(unnamed)",
+      name: safeStr(it?.name || "").trim() || (safeStr(it?.name) === "__encrypted__" ? "(encrypted)" : "(unnamed)"),
       qty: Number.isFinite(Number(it?.qty)) ? Number(it?.qty) : null,
       unit: safeStr(it?.unit || "").trim(),
     }));
@@ -340,7 +368,12 @@ export default function Overview() {
     const d = deltaBadge(value, prevValue);
     const toneColor = d.tone === "up" ? "#7CFC98" : d.tone === "down" ? "#FF8A8A" : "rgba(255,255,255,0.7)";
     return (
-      <button type="button" className="card" onClick={onClick} style={{ padding: 12, textAlign: "left", cursor: "pointer", display: "grid", gap: 6, minHeight: 88 }}>
+      <button
+        type="button"
+        className="card"
+        onClick={onClick}
+        style={{ padding: 12, textAlign: "left", cursor: "pointer", display: "grid", gap: 6, minHeight: 88 }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ fontSize: 16 }}>{icon}</div>
           <div style={{ fontWeight: 900, fontSize: 14 }}>{title}</div>
@@ -366,7 +399,16 @@ export default function Overview() {
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 12 }}>
+      {/* count cards: one row */}
+      <div
+        className="grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(150px, 1fr))",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
         <StatCard icon="👥" title="People" value={counts.people || 0} prevValue={prevCounts.people || 0} hint="members" onClick={() => go("people")} />
         <StatCard icon="📦" title="Inventory" value={counts.inventory || 0} prevValue={prevCounts.inventory || 0} hint="items" onClick={() => go("inventory")} />
         <StatCard icon="🧯" title="Needs" value={counts.needsOpen || 0} prevValue={prevCounts.needsOpen || 0} hint="open" onClick={() => go("needs")} />
@@ -375,7 +417,16 @@ export default function Overview() {
         <StatCard icon="📮" title="New Subs" value={recentSubs.length} prevValue={prevCounts.newsletterNew || 0} hint="recent" onClick={() => go("settings")} />
       </div>
 
+      {/* wrap on smaller screens */}
+      <style>{`
+        @media (max-width: 980px) {
+          .grid[style*="repeat(6"] { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)) !important; }
+        }
+      `}</style>
+
+      {/* main panels */}
       <div className="grid" style={{ gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
+        {/* Next Meetings */}
         <div className="card" style={{ gridColumn: "span 5", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
@@ -387,12 +438,13 @@ export default function Overview() {
               {nextMeeting?.title && safeStr(nextMeeting.title) !== "__encrypted__" ? safeStr(nextMeeting.title) : "not scheduled"}
             </div>
             <div className="helper" style={{ marginTop: 6 }}>{nextMeetingLabel}</div>
-            <div style={{ marginTop: 10, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
               <button className="btn" onClick={() => go("meetings")}>RSVP</button>
             </div>
           </div>
         </div>
 
+        {/* Inventory glance */}
         <div className="card" style={{ gridColumn: "span 4", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
@@ -418,6 +470,7 @@ export default function Overview() {
           </div>
         </div>
 
+        {/* New this week */}
         <div className="card" style={{ gridColumn: "span 3", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>New This Week</h2>
@@ -426,8 +479,10 @@ export default function Overview() {
 
           <div style={{ marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <div style={{ fontWeight: 900 }}>+ {recentSubs.length} subscribers</div>
-              <div style={{ marginLeft: "auto" }}><Sparkline points={subsSpark} /></div>
+              <div style={{ fontWeight: 900, minWidth: 0 }}>+ {recentSubs.length} subscribers</div>
+              <div style={{ marginLeft: "auto", width: "50%", minWidth: 120, maxWidth: 220 }}>
+                <Sparkline points={subsSpark} />
+              </div>
             </div>
             <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
               {recentSubs.length ? recentSubs.slice(0, 3).map((s) => (
@@ -467,6 +522,7 @@ export default function Overview() {
           </div>
         </div>
 
+        {/* Newsletter Growth */}
         <div className="card" style={{ gridColumn: "span 5", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter Growth</h2>
@@ -493,6 +549,7 @@ export default function Overview() {
           </div>
         </div>
 
+        {/* Open Needs */}
         <div className="card" style={{ gridColumn: "span 4", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
@@ -507,7 +564,7 @@ export default function Overview() {
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                     {pillEl(up)}
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {safeStr(n.title || "").trim() || "(untitled need)"}
+                      {safeStr(n.title || "").trim() || (safeStr(n.title) === "__encrypted__" ? "(encrypted)" : "(untitled need)")}
                     </div>
                     <div className="helper" style={{ whiteSpace: "nowrap" }}>{safeStr(n.status || "").trim()}</div>
                   </div>
@@ -520,6 +577,7 @@ export default function Overview() {
           </div>
         </div>
 
+        {/* Recent Pledges */}
         <div className="card" style={{ gridColumn: "span 3", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
@@ -549,13 +607,15 @@ export default function Overview() {
           </div>
         </div>
 
+        {/* Need help */}
         <div className="card" style={{ gridColumn: "span 12", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontWeight: 900, fontSize: 16, flex: 1 }}>Need help?</div>
             <button className="btn" onClick={() => go("settings")}>View guides</button>
           </div>
           <div className="helper" style={{ marginTop: 8, opacity: 0.9 }}>
-            Sidebar, search, notifications, and profile photo are layout-shell work. This file focuses on the dashboard content panels.
+            If a page still shows “(encrypted)”, that endpoint is returning scrubbed fields without encrypted_blob.
+            This dashboard avoids that by loading from the specific endpoints where encrypted_blob is present.
           </div>
         </div>
       </div>
