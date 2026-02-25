@@ -1,9 +1,7 @@
 // src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
-import { decryptRows } from "../utils/decryptRow.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
 	try {
@@ -37,8 +35,7 @@ function safeStr(v) {
 }
 
 export default function Meetings() {
-	const params = useParams();
-	const orgId = params?.orgId || getOrgId();
+	const orgId = getOrgId();
 
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
@@ -48,6 +45,10 @@ export default function Meetings() {
 	const [zkMsg, setZkMsg] = useState("");
 
 	const [edit, setEdit] = useState(null);
+
+	const [myRsvp, setMyRsvp] = useState(null);
+	const [rsvpBusy, setRsvpBusy] = useState(false);
+	const [rsvpErr, setRsvpErr] = useState("");
 
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
@@ -68,12 +69,25 @@ export default function Meetings() {
 			const raw = Array.isArray(data.meetings) ? data.meetings : [];
 
 			const orgKey = getCachedOrgKey(orgId);
-			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
-			const out = dec.map((m) => {
-				if (m?.encrypted_blob && !m?.title) return { ...m, title: "(encrypted)", location: "", agenda: "" };
-				return m;
-			});
-			setItems(out);
+			if (orgKey) {
+				const out = [];
+				for (const m of raw) {
+					if (m?.encrypted_blob) {
+						try {
+							const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
+							out.push({ ...m, ...dec });
+							continue;
+						} catch {
+							out.push({ ...m, title: "(encrypted)", location: "", agenda: "" });
+							continue;
+						}
+					}
+					out.push(m);
+				}
+				setItems(out);
+			} else {
+				setItems(raw);
+			}
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));
@@ -186,6 +200,38 @@ export default function Meetings() {
 		}
 	}
 
+
+
+async function loadMyRsvp(meetingId) {
+	if (!orgId || !meetingId) return;
+	setRsvpErr("");
+	try {
+		const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`);
+		setMyRsvp(data?.my_rsvp || null);
+	} catch (e) {
+		setMyRsvp(null);
+		setRsvpErr(e?.message || String(e));
+	}
+}
+
+async function setRsvp(status) {
+	if (!orgId || !edit?.id) return;
+	setRsvpBusy(true);
+	setRsvpErr("");
+	try {
+		await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(edit.id)}/rsvp`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ status }),
+		});
+		await loadMyRsvp(edit.id);
+	} catch (e) {
+		setRsvpErr(e?.message || String(e));
+	} finally {
+		setRsvpBusy(false);
+	}
+}
+
 	function openItem(m) {
 		setEdit({
 			id: m.id,
@@ -196,6 +242,7 @@ export default function Meetings() {
 			agenda: m.agenda || "",
 			is_public: !!m.is_public,
 		});
+		loadMyRsvp(m.id).catch(console.error);
 	}
 
 	function closeModal() {
@@ -339,6 +386,20 @@ export default function Meetings() {
 							<input className="input" type="datetime-local" value={edit.ends_at} onChange={(e) => setEdit((p) => ({ ...p, ends_at: e.target.value }))} />
 							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />
 						</div>
+
+
+<div className="card" style={{ padding: 10, marginTop: 10 }}>
+	<div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+		<div className="helper">Your RSVP</div>
+		{myRsvp?.status ? <div className="pill">{myRsvp.status}</div> : <div className="helper">none</div>}
+	</div>
+	{rsvpErr && <div className="helper" style={{ color: "tomato", marginTop: 6 }}>{rsvpErr}</div>}
+	<div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("yes")}>Yes</button>
+		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("maybe")}>Maybe</button>
+		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("no")}>No</button>
+	</div>
+</div>
 
 						<textarea className="input" rows={6} placeholder="Agenda / Notes" value={edit.agenda} onChange={(e) => setEdit((p) => ({ ...p, agenda: e.target.value }))} style={{ marginTop: 10 }} />
 
