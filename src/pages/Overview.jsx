@@ -166,8 +166,8 @@ export default function Overview() {
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
       // These live under Settings pages, so fetch directly.
-      const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`);
-      const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
+      const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/settings/newsletter/subscribers`);
+      const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/settings/pledges`);
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
       const invDec = await tryDecryptList(orgId, invRaw, "encrypted_blob");
