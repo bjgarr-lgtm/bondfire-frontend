@@ -190,13 +190,22 @@ export function getCachedOrgKey(orgId) {
   try { if (orgId) candidates.push(decodeURIComponent(decodeURIComponent(String(orgId)))); } catch {}
   for (const id of candidates) {
     try {
-      // Canonical cache location (written by cacheOrgKey)
+      // Canonical cache key (written by cacheOrgKey)
       const v1 = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
-      if (v1) return unb64(v1);
+      if (v1) {
+        try { return unb64(v1); } catch {}
+      }
 
       // Legacy cache key (older builds)
       const v0 = localStorage.getItem(`bf_org_key_${id}`);
-      if (v0) return unb64(v0);
+      if (v0) {
+        try { return unb64(v0); } catch {}
+        // Extremely old/odd cases: stored as JSON array of bytes
+        try {
+          const arr = JSON.parse(v0);
+          if (Array.isArray(arr) && arr.length) return new Uint8Array(arr);
+        } catch {}
+      }
     } catch {}
   }
   return null;
