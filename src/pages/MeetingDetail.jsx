@@ -29,8 +29,9 @@ function fromLocalDateTimeInput(s) {
 
 export default function MeetingDetail() {
   const nav = useNavigate();
-  const { meetingId } = useParams();
-  const orgId = getOrgId();
+  const params = useParams();
+  const meetingId = params?.meetingId;
+  const orgId = params?.orgId || getOrgId();
 
   const [m, setM] = useState(null);
   const [err, setErr] = useState("");

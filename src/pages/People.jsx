@@ -1,7 +1,9 @@
 // src/pages/People.jsx
 import React, { useMemo, useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptRows } from "../utils/decryptRow.js";
 
 function getOrgId() {
 	try {
@@ -90,7 +92,8 @@ function Modal({ open, title, children, onClose }) {
 }
 
 export default function People() {
-	const orgId = getOrgId();
+	const params = useParams();
+	const orgId = params?.orgId || getOrgId();
 
 	const isMobile = useIsMobile(720);
 
@@ -142,25 +145,12 @@ export default function People() {
 			const raw = Array.isArray(data.people) ? data.people : [];
 
 			const orgKey = getCachedOrgKey(orgId);
-			if (orgKey) {
-				const out = [];
-				for (const p of raw) {
-					if (p?.encrypted_blob) {
-						try {
-							const dec = JSON.parse(await decryptWithOrgKey(orgKey, p.encrypted_blob));
-							out.push({ ...p, ...dec });
-							continue;
-						} catch {
-							out.push({ ...p, name: "(encrypted)", role: "", phone: "", skills: "", notes: "" });
-							continue;
-						}
-					}
-					out.push(p);
-				}
-				setPeople(out);
-			} else {
-				setPeople(raw);
-			}
+			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
+			const out = dec.map((p) => {
+				if (p?.encrypted_blob && !p?.name) return { ...p, name: "(encrypted)", role: "", phone: "", skills: "", notes: "" };
+				return p;
+			});
+			setPeople(out);
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));

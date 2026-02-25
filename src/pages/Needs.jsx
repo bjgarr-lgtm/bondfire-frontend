@@ -1,7 +1,9 @@
 // src/pages/Needs.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptRows } from "../utils/decryptRow.js";
 
 function getOrgId() {
 	try {
@@ -17,7 +19,8 @@ function safeStr(v) {
 }
 
 export default function Needs() {
-	const orgId = getOrgId();
+	const params = useParams();
+	const orgId = params?.orgId || getOrgId();
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
 	const [loading, setLoading] = useState(false);
@@ -37,25 +40,13 @@ export default function Needs() {
 			const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
 			const raw = Array.isArray(data.needs) ? data.needs : [];
 			const orgKey = getCachedOrgKey(orgId);
-			if (orgKey) {
-				const out = [];
-				for (const n of raw) {
-					if (n?.encrypted_blob) {
-						try {
-							const dec = JSON.parse(await decryptWithOrgKey(orgKey, n.encrypted_blob));
-							out.push({ ...n, ...dec });
-							continue;
-						} catch {
-							out.push({ ...n, title: "(encrypted)", description: "", urgency: "" });
-							continue;
-						}
-					}
-					out.push(n);
-				}
-				setItems(out);
-			} else {
-				setItems(raw);
-			}
+			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
+			// If a row was encrypted but couldn't be decrypted on this device, keep it visible.
+			const out = dec.map((n) => {
+				if (n?.encrypted_blob && !n?.title) return { ...n, title: "(encrypted)", description: "", urgency: "" };
+				return n;
+			});
+			setItems(out);
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));

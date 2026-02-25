@@ -1,7 +1,9 @@
 // src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptRows } from "../utils/decryptRow.js";
 
 function getOrgId() {
 	try {
@@ -35,7 +37,8 @@ function safeStr(v) {
 }
 
 export default function Meetings() {
-	const orgId = getOrgId();
+	const params = useParams();
+	const orgId = params?.orgId || getOrgId();
 
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
@@ -65,25 +68,12 @@ export default function Meetings() {
 			const raw = Array.isArray(data.meetings) ? data.meetings : [];
 
 			const orgKey = getCachedOrgKey(orgId);
-			if (orgKey) {
-				const out = [];
-				for (const m of raw) {
-					if (m?.encrypted_blob) {
-						try {
-							const dec = JSON.parse(await decryptWithOrgKey(orgKey, m.encrypted_blob));
-							out.push({ ...m, ...dec });
-							continue;
-						} catch {
-							out.push({ ...m, title: "(encrypted)", location: "", agenda: "" });
-							continue;
-						}
-					}
-					out.push(m);
-				}
-				setItems(out);
-			} else {
-				setItems(raw);
-			}
+			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
+			const out = dec.map((m) => {
+				if (m?.encrypted_blob && !m?.title) return { ...m, title: "(encrypted)", location: "", agenda: "" };
+				return m;
+			});
+			setItems(out);
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));

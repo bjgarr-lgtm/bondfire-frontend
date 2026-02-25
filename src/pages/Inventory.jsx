@@ -1,7 +1,9 @@
 // src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptRows } from "../utils/decryptRow.js";
 
 function getOrgId() {
 	try {
@@ -17,7 +19,8 @@ function safeStr(v) {
 }
 
 export default function Inventory() {
-	const orgId = getOrgId();
+	const params = useParams();
+	const orgId = params?.orgId || getOrgId();
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
 	const [loading, setLoading] = useState(false);
@@ -39,25 +42,12 @@ export default function Inventory() {
 			const raw = Array.isArray(data.inventory) ? data.inventory : [];
 
 			const orgKey = getCachedOrgKey(orgId);
-			if (orgKey) {
-				const out = [];
-				for (const it of raw) {
-					if (it?.encrypted_blob) {
-						try {
-							const dec = JSON.parse(await decryptWithOrgKey(orgKey, it.encrypted_blob));
-							out.push({ ...it, ...dec });
-							continue;
-						} catch {
-							out.push({ ...it, name: "(encrypted)", category: "", location: "", notes: "" });
-							continue;
-						}
-					}
-					out.push(it);
-				}
-				setItems(out);
-			} else {
-				setItems(raw);
-			}
+			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
+			const out = dec.map((it) => {
+				if (it?.encrypted_blob && !it?.name) return { ...it, name: "(encrypted)", category: "", location: "", notes: "" };
+				return it;
+			});
+			setItems(out);
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));
