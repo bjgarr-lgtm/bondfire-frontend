@@ -4,20 +4,37 @@ import App from './App.jsx';
 import './index.css';
 import { registerSW } from "virtual:pwa-register";
 
-// PWA: single registration path.
-// IMPORTANT: do NOT also call navigator.serviceWorker.register() manually.
-// Double-registration can strand users on stale caches until they "unregister the SW".
-const updateSW = registerSW({
-  // DO NOT auto-refresh the page when a new Service Worker is available.
-  // Auto-reloads wipe sign-in form state and feel like "the page blinked".
-  // Users can naturally pick up the new SW on next navigation/reload.
-  immediate: false,
-  onNeedRefresh() {
-    // Intentionally no-op.
-    // If you later add a toast UI, call updateSW(true) only after user confirms.
-    console.log("BOND🔥 update available (SW). Will apply on next reload.");
-  },
-});
+// --- PWA / Service Worker ---
+// Do NOT reload the app while someone is typing into the sign-in form.
+// Forced reloads clear inputs and look like the page is "blinking".
+function isSignInRoute() {
+	try {
+		const h = String(window.location.hash || "");
+		const p = String(window.location.pathname || "");
+		return h.startsWith("#/signin") || h.includes("#/signin") || p === "/signin";
+	} catch {
+		return false;
+	}
+}
+
+if (isSignInRoute() && "serviceWorker" in navigator) {
+	// Proactively unregister to kill any old SW that was forcing reloads.
+	navigator.serviceWorker
+		.getRegistrations()
+		.then((regs) => {
+			for (const r of regs) r.unregister().catch(() => {});
+		})
+		.catch(() => {});
+} else {
+	registerSW({
+		// Never auto-reload. If there is an update, it will apply on the next navigation/reload.
+		immediate: false,
+		onNeedRefresh() {
+			console.log("BOND🔥 update available; will apply on next reload.");
+			window.__BF_NEED_REFRESH = true;
+		},
+	});
+}
 
 
 // === CANARY: proves a new build is running ===

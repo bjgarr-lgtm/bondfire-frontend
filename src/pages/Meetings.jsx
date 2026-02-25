@@ -218,14 +218,20 @@ async function setRsvp(status) {
 	if (!orgId || !edit?.id) return;
 	setRsvpBusy(true);
 	setRsvpErr("");
+	// Optimistic UI so it feels instant even if the network is slow.
+	setMyRsvp({ status });
 	try {
-		await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(edit.id)}/rsvp`, {
+		const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(edit.id)}/rsvp`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status }),
 		});
-		await loadMyRsvp(edit.id);
+		// If the backend returns a normalized status, prefer it.
+		if (res?.status) setMyRsvp({ status: String(res.status) });
+		else await loadMyRsvp(edit.id);
 	} catch (e) {
+		// Roll back to unknown on error.
+		setMyRsvp(null);
 		setRsvpErr(e?.message || String(e));
 	} finally {
 		setRsvpBusy(false);
@@ -365,16 +371,26 @@ async function setRsvp(status) {
 						inset: 0,
 						background: "rgba(0,0,0,0.55)",
 						display: "flex",
-						alignItems: "center",
+						alignItems: "flex-start",
 						justifyContent: "center",
 						padding: 16,
+						overflowY: "auto",
 						zIndex: 50,
 					}}
 					onMouseDown={(e) => {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div className="card" style={{ width: "min(920px, 100%)", padding: 16 }}>
+					<div
+						className="card"
+						style={{
+							width: "min(920px, 100%)",
+							padding: 16,
+							marginTop: 16,
+							maxHeight: "calc(100vh - 32px)",
+							overflowY: "auto",
+						}}
+					>
 						<div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Meeting Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>

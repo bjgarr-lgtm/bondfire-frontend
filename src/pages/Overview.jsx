@@ -318,14 +318,17 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
+      // Canonical endpoint.
       await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "yes" }),
       });
       setRsvpMsg("RSVP saved.");
+      // Refresh so the dashboard can reflect the latest RSVP state.
+      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
-      setRsvpMsg(e?.message || "RSVP failed.");
+      setRsvpMsg(e?.message || String(e));
     }
   }
 
