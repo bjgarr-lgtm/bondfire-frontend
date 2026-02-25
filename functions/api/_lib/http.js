@@ -25,6 +25,10 @@ export function err(status, message, extra) {
   return bad(status, message, extra);
 }
 
+export function error(status, message, extra) {
+  return err(status, message, extra);
+}
+
 export function readJSON(req) {
   // Cloudflare Request.json() throws on empty body / invalid JSON.
   // We return {} instead of exploding.
