@@ -1,4 +1,4 @@
-import { ok, bad } from "../../../../_lib/http.js";
+import { ok, bad, readJSON, now } from "../../../../_lib/http.js";
 import { getDb, requireOrgRole } from "../../../../_lib/auth.js";
 
 function normStatus(s) {
@@ -9,16 +9,9 @@ function normStatus(s) {
   return "yes";
 }
 
-async function readJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return {};
-  }
-}
-
-async function ensureSchema(db) {
-  // Keep schema creation D1-safe. IF NOT EXISTS is supported.
+async function ensureRsvpTable(db) {
+  // Keep schema tolerant. D1 + existing installs may already have the table.
+  // We do NOT require an id column.
   await db
     .prepare(
       `CREATE TABLE IF NOT EXISTS meeting_rsvps (
@@ -28,112 +21,67 @@ async function ensureSchema(db) {
         status TEXT NOT NULL,
         note TEXT,
         created_at INTEGER,
-        updated_at INTEGER
+        updated_at INTEGER,
+        PRIMARY KEY (org_id, meeting_id, user_id)
       )`
     )
     .run();
-
-  // Unique key for upserts.
   await db
     .prepare(
-      `CREATE UNIQUE INDEX IF NOT EXISTS meeting_rsvps_uniq
-         ON meeting_rsvps(org_id, meeting_id, user_id)`
+      "CREATE INDEX IF NOT EXISTS idx_meeting_rsvps_meeting ON meeting_rsvps(org_id, meeting_id, updated_at)"
     )
     .run();
-}
-
-async function getTableColumns(db) {
-  try {
-    const r = await db.prepare("PRAGMA table_info(meeting_rsvps)").all();
-    const cols = new Set((r?.results || []).map((x) => String(x?.name || "")));
-    return cols;
-  } catch {
-    return new Set();
-  }
 }
 
 export async function onRequest(ctx) {
   const { request, env, params } = ctx;
   const orgId = String(params.orgId || "");
   const meetingId = String(params.meetingId || "");
-  if (!orgId || !meetingId) return bad(400, "BAD_PARAMS");
 
   const db = getDb(env);
   if (!db) return bad(500, "NO_DB_BINDING");
 
-  // Ensure table exists (no-op if already there).
-  await ensureSchema(db);
+  await ensureRsvpTable(db);
 
-  // Any member can RSVP and can read their own RSVP.
-  const gateMember = await requireOrgRole({ env, request, orgId, minRole: "member" });
-  if (!gateMember.ok) return gateMember.resp;
-
-  const userId = String(gateMember.user?.sub || "");
-  if (!userId) return bad(401, "UNAUTHORIZED");
+  // Any org member can RSVP.
+  const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
+  if (!gate.ok) return gate.resp;
 
   if (request.method === "GET") {
-    // Admin/owner can view full list.
-    const gateAdmin = await requireOrgRole({ env, request, orgId, minRole: "admin" });
-    if (gateAdmin.ok) {
-      const rows = await db
-        .prepare(
-          "SELECT user_id, status, note, created_at, updated_at FROM meeting_rsvps WHERE org_id=? AND meeting_id=? ORDER BY COALESCE(updated_at, created_at) DESC"
-        )
-        .bind(orgId, meetingId)
-        .all();
-      return ok({ rsvps: rows?.results || [] });
-    }
+    // Admin/owner only.
+    const role = String(gate.role || "");
+    const isAdmin = role === "admin" || role === "owner";
+    if (!isAdmin) return bad(403, "FORBIDDEN");
 
-    // Non-admin: return only the caller's RSVP.
-    const row = await db
+    const rows = await db
       .prepare(
-        "SELECT user_id, status, note, created_at, updated_at FROM meeting_rsvps WHERE org_id=? AND meeting_id=? AND user_id=? LIMIT 1"
+        "SELECT user_id, status, note, created_at, updated_at FROM meeting_rsvps WHERE org_id=? AND meeting_id=? ORDER BY updated_at DESC"
       )
-      .bind(orgId, meetingId, userId)
-      .first();
-
-    return ok({ rsvp: row || null });
+      .bind(orgId, meetingId)
+      .all();
+    return ok({ rsvps: rows?.results || [] });
   }
 
   if (request.method !== "POST") return bad(405, "METHOD_NOT_ALLOWED");
 
-  const body = await readJson(request);
+  const body = await readJSON(request);
   const status = normStatus(body.status);
   const note = String(body.note || "").slice(0, 2000);
-  const now = Date.now();
+  const ts = now();
+  const userId = String(gate.user?.sub || gate.user?.id || "");
+  if (!userId) return bad(401, "UNAUTHORIZED");
 
-  // Be robust to whatever legacy schema exists in D1.
-  const cols = await getTableColumns(db);
-
-  const hasUpdated = cols.has("updated_at");
-  const hasCreated = cols.has("created_at");
-  const hasNote = cols.has("note");
-
-  const insertCols = ["org_id", "meeting_id", "user_id", "status"];
-  const insertVals = [orgId, meetingId, userId, status];
-
-  if (hasNote) {
-    insertCols.push("note");
-    insertVals.push(note);
-  }
-  if (hasCreated) {
-    insertCols.push("created_at");
-    insertVals.push(now);
-  }
-  if (hasUpdated) {
-    insertCols.push("updated_at");
-    insertVals.push(now);
-  }
-
-  const setParts = ["status=excluded.status"];
-  if (hasNote) setParts.push("note=excluded.note");
-  if (hasUpdated) setParts.push("updated_at=excluded.updated_at");
-
-  const sql = `INSERT INTO meeting_rsvps (${insertCols.join(",")})
-               VALUES (${insertCols.map(() => "?").join(",")})
-               ON CONFLICT(org_id, meeting_id, user_id) DO UPDATE SET ${setParts.join(", ")}`;
-
-  await db.prepare(sql).bind(...insertVals).run();
+  await db
+    .prepare(
+      `INSERT INTO meeting_rsvps (org_id, meeting_id, user_id, status, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(org_id, meeting_id, user_id) DO UPDATE SET
+         status=excluded.status,
+         note=excluded.note,
+         updated_at=excluded.updated_at`
+    )
+    .bind(orgId, meetingId, userId, status, note, ts, ts)
+    .run();
 
   return ok({ meeting_id: meetingId, status });
 }

@@ -188,25 +188,31 @@ export function getCachedOrgKey(orgId) {
   try { if (orgId) candidates.push(decodeURIComponent(String(orgId))); } catch {}
   // also try double decode (we've seen it happen in the wild)
   try { if (orgId) candidates.push(decodeURIComponent(decodeURIComponent(String(orgId)))); } catch {}
+
+  // Preferred: canonical cache key written by cacheOrgKey()
   for (const id of candidates) {
     try {
-      // Canonical cache key (written by cacheOrgKey)
-      const v1 = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
-      if (v1) {
-        try { return unb64(v1); } catch {}
-      }
-
-      // Legacy cache key (older builds)
-      const v0 = localStorage.getItem(`bf_org_key_${id}`);
-      if (v0) {
-        try { return unb64(v0); } catch {}
-        // Extremely old/odd cases: stored as JSON array of bytes
-        try {
-          const arr = JSON.parse(v0);
-          if (Array.isArray(arr) && arr.length) return new Uint8Array(arr);
-        } catch {}
-      }
+      const b64key = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
+      if (!b64key) continue;
+      return unb64(b64key);
     } catch {}
   }
+
+  // Back-compat: older builds stored the raw base64 string under bf_org_key_${orgId}
+  for (const id of candidates) {
+    try {
+      const b64key = localStorage.getItem(`bf_org_key_${id}`);
+      if (!b64key) continue;
+      // Some legacy builds stored JSON-encoded byte arrays.
+      if (String(b64key).trim().startsWith("[")) {
+        try {
+          const arr = JSON.parse(b64key);
+          if (Array.isArray(arr)) return new Uint8Array(arr);
+        } catch {}
+      }
+      return unb64(b64key);
+    } catch {}
+  }
+
   return null;
 }

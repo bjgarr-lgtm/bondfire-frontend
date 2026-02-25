@@ -16,9 +16,30 @@ function humanizeError(msg) {
   return s;
 }
 
-function isEncPlaceholder(v) {
+function isEncryptedNameLike(v) {
   const s = String(v || "").trim().toLowerCase();
   return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
+}
+
+async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
+  const arr = Array.isArray(rows) ? rows : [];
+  const orgKey = getCachedOrgKey(orgId);
+  if (!orgKey) return arr;
+
+  const out = [];
+  for (const r of arr) {
+    if (r && r[blobField]) {
+      try {
+        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        out.push({ ...r, ...dec });
+        continue;
+      } catch {
+        // fall through
+      }
+    }
+    out.push(r);
+  }
+  return out;
 }
 
 
@@ -285,50 +306,6 @@ export default function Settings() {
     }
   }, [orgId]);
 
-  const repairMemberProfile = async (m) => {
-    if (!orgId) return;
-    const userId = String(m?.userId || m?.user_id || "").trim();
-    if (!userId) return;
-
-    const orgKey = getCachedOrgKey(orgId);
-    if (!orgKey) {
-      setMembersMsg("Load org key first (Security tab) so we can encrypt member profiles.");
-      return;
-    }
-
-    // The backend stores PII in encrypted_blob for org memberships.
-    // This is a repair tool for legacy rows where the blob is missing or wrong.
-    const defaultName = !isEncPlaceholder(m?.name) && m?.name ? String(m.name) : "Ben";
-    const defaultEmail = !isEncPlaceholder(m?.email) && m?.email ? String(m.email) : "bjgarr@gmail.com";
-
-    const nextName = prompt("Member name", defaultName);
-    if (nextName == null) return;
-    const nextEmail = prompt("Member email", defaultEmail);
-    if (nextEmail == null) return;
-
-    const payload = {
-      name: String(nextName || "").trim(),
-      email: String(nextEmail || "").trim(),
-    };
-
-    try {
-      setMembersBusy(true);
-      setMembersMsg("");
-      const encrypted_blob = await encryptJsonWithOrgKey(orgKey, payload);
-      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
-        method: "PUT",
-        body: { userId, encrypted_blob, key_version: m?.key_version ?? null },
-      });
-      setMembersMsg("Saved encrypted profile.");
-      setTimeout(() => setMembersMsg(""), 1200);
-      await loadMembers();
-    } catch (e) {
-      setMembersMsg(e?.message || "Failed to save encrypted profile");
-    } finally {
-      setMembersBusy(false);
-    }
-  };
-
   const setMemberRole = async (userId, nextRole, currentRole, email) => {
     if (!orgId) return;
     if (!userId) return;
@@ -379,6 +356,44 @@ export default function Settings() {
       await loadMembers();
     } catch (e) {
       setMembersMsg(e.message || "Failed to remove member");
+    } finally {
+      setMembersBusy(false);
+    }
+  };
+
+  // One-off fix utility: set encrypted profile fields (name/email) for a member.
+  // This writes to org_memberships.encrypted_blob, not users table.
+  const setMemberProfile = async (m) => {
+    if (!orgId || !m?.userId) return;
+    const orgKey = getCachedOrgKey(orgId);
+    if (!orgKey) {
+      setMembersMsg("Org key not loaded yet. Open Security and load org keys first.");
+      return;
+    }
+
+    const curName = isEncryptedNameLike(m.name) ? "" : String(m.name || "");
+    const curEmail = isEncryptedNameLike(m.email) ? "" : String(m.email || "");
+    const name = prompt("Member name:", curName);
+    if (name == null) return;
+    const email = prompt("Member email:", curEmail);
+    if (email == null) return;
+
+    setMembersBusy(true);
+    setMembersMsg("");
+    try {
+      const encrypted_blob = await encryptJsonWithOrgKey(orgKey, {
+        name: String(name || "").trim(),
+        email: String(email || "").trim(),
+      });
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "PUT",
+        body: { userId: m.userId, encrypted_blob },
+      });
+      setMembersMsg("Profile updated.");
+      setTimeout(() => setMembersMsg(""), 900);
+      await loadMembers();
+    } catch (e) {
+      setMembersMsg(e?.message || "Failed to update profile");
     } finally {
       setMembersBusy(false);
     }
@@ -977,6 +992,7 @@ React.useEffect(() => {
                               <th>Email</th>
                               <th>Name</th>
                               <th>Role</th>
+                              <th>Profile</th>
                               <th>Remove</th>
                             </tr>
                           </thead>
@@ -986,20 +1002,7 @@ React.useEffect(() => {
                                 <td>
                                   <code>{m.email || m.userId}</code>
                                 </td>
-                                <td style={{ whiteSpace: "nowrap" }}>
-                                  <span>{m.name || ""}</span>
-                                  {(isEncPlaceholder(m?.name) || isEncPlaceholder(m?.email) || m?.needs_encryption) ? (
-                                    <button
-                                      className="btn"
-                                      type="button"
-                                      style={{ marginLeft: 10 }}
-                                      onClick={() => repairMemberProfile(m)}
-                                      disabled={membersBusy}
-                                    >
-                                      Fix
-                                    </button>
-                                  ) : null}
-                                </td>
+                                <td>{m.name || ""}</td>
                                 <td>
                                   <select
                                     className="input"
@@ -1012,6 +1015,15 @@ React.useEffect(() => {
                                     <option value="admin">admin</option>
                                     <option value="owner">owner</option>
                                   </select>
+                                </td>
+                                <td style={{ whiteSpace: "nowrap" }}>
+                                  {isEncryptedNameLike(m.name) || isEncryptedNameLike(m.email) ? (
+                                    <button className="btn" type="button" onClick={() => setMemberProfile(m)} disabled={membersBusy}>
+                                      Fix
+                                    </button>
+                                  ) : (
+                                    <span className="helper">ok</span>
+                                  )}
                                 </td>
                                 <td style={{ whiteSpace: "nowrap" }}>
                                   {m.role === "owner" ? (
@@ -1031,26 +1043,25 @@ React.useEffect(() => {
                             <div key={m.userId || m.email} className="bf-rowcard">
                               <div className="bf-rowcard-top">
                                 <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-                                <div style={{ display: "flex", gap: 8 }}>
-                                  {(isEncPlaceholder(m?.name) || isEncPlaceholder(m?.email) || m?.needs_encryption) ? (
-                                    <button
-                                      className="btn"
-                                      type="button"
-                                      onClick={() => repairMemberProfile(m)}
-                                      disabled={membersBusy}
-                                    >
-                                      Fix
-                                    </button>
-                                  ) : null}
+                                {(isEncryptedNameLike(m.name) || isEncryptedNameLike(m.email)) ? (
                                   <button
                                     className="btn"
                                     type="button"
-                                    onClick={() => removeMember(m.userId, m.email)}
-                                    disabled={membersBusy || m.role === "owner"}
+                                    onClick={() => setMemberProfile(m)}
+                                    disabled={membersBusy}
+                                    title="Set encrypted profile fields"
                                   >
-                                    Remove
+                                    Fix
                                   </button>
-                                </div>
+                                ) : null}
+                                <button
+                                  className="btn"
+                                  type="button"
+                                  onClick={() => removeMember(m.userId, m.email)}
+                                  disabled={membersBusy || m.role === "owner"}
+                                >
+                                  Remove
+                                </button>
                               </div>
 
                               <div className="bf-two">

@@ -318,17 +318,19 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // Canonical RSVP endpoint
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      // Canonical RSVP endpoint: /meetings/:meetingId/rsvp
+      await api(
+        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "yes" }),
-      });
+          body: JSON.stringify({ status: "yes" }),
+        }
+      );
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
+      console.error(e);
+      setRsvpMsg(e?.message || "Failed to RSVP");
     }
   }
 
@@ -411,9 +413,8 @@ export default function Overview() {
                       className="btn-red"
                       type="button"
                       onClick={(e) => {
-                        // If this card (or a parent) becomes clickable, don't let RSVP clicks navigate away.
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e?.preventDefault?.();
+                        e?.stopPropagation?.();
                         rsvp(m);
                       }}
                     >
