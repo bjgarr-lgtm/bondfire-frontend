@@ -318,17 +318,17 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // Canonical endpoint.
+      // Canonical RSVP endpoint
       await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "yes" }),
       });
       setRsvpMsg("RSVP saved.");
-      // Refresh so the dashboard can reflect the latest RSVP state.
-      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
-      setRsvpMsg(e?.message || String(e));
+      // fallback: still useful navigation
+      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
+      go("meetings");
     }
   }
 
@@ -407,7 +407,16 @@ export default function Overview() {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                    <button
+                      className="btn-red"
+                      type="button"
+                      onClick={(e) => {
+                        // If this card (or a parent) becomes clickable, don't let RSVP clicks navigate away.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        rsvp(m);
+                      }}
+                    >
                       RSVP
                     </button>
                   </div>

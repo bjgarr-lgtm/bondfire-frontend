@@ -1,7 +1,7 @@
 // src/pages/Settings.jsx
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptWithOrgKey, encryptJsonWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
@@ -16,58 +16,9 @@ function humanizeError(msg) {
   return s;
 }
 
-/* ---------- ZK decrypt helper used across Settings tabs ---------- */
-function b64ToBytes(b64) {
-  const s = String(b64 || "")
-    .replace(/-/g, "+")
-    .replace(/_/g, "/")
-    .replace(/\s+/g, "");
-  if (!s) return null;
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  const bin = atob(s + pad);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-async function getOrgKeyBytes(orgId) {
-  if (!orgId) return null;
-  const k = await getCachedOrgKey(orgId);
-  if (!k) return null;
-  if (k instanceof Uint8Array) return k;
-  if (Array.isArray(k)) return new Uint8Array(k);
-  if (typeof k === "string") {
-    // Some old builds cached base64url strings.
-    const bytes = b64ToBytes(k);
-    return bytes;
-  }
-  return null;
-}
-
-async function tryDecryptList(orgId, rows) {
-  const list = Array.isArray(rows) ? rows : [];
-  if (list.length === 0) return [];
-
-  const keyBytes = await getOrgKeyBytes(orgId);
-  if (!keyBytes) return list;
-
-  const out = [];
-  for (const row of list) {
-    const enc = row?.encrypted_blob;
-    if (!enc) {
-      out.push(row);
-      continue;
-    }
-    try {
-      const dec = await decryptWithOrgKey(keyBytes, enc);
-      // Convention: encrypted blob is JSON.
-      const obj = typeof dec === "string" ? JSON.parse(dec) : dec;
-      out.push({ ...row, ...obj, _decrypted: true });
-    } catch {
-      out.push(row);
-    }
-  }
-  return out;
+function isEncPlaceholder(v) {
+  const s = String(v || "").trim().toLowerCase();
+  return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
 }
 
 
@@ -333,6 +284,50 @@ export default function Settings() {
       }
     }
   }, [orgId]);
+
+  const repairMemberProfile = async (m) => {
+    if (!orgId) return;
+    const userId = String(m?.userId || m?.user_id || "").trim();
+    if (!userId) return;
+
+    const orgKey = getCachedOrgKey(orgId);
+    if (!orgKey) {
+      setMembersMsg("Load org key first (Security tab) so we can encrypt member profiles.");
+      return;
+    }
+
+    // The backend stores PII in encrypted_blob for org memberships.
+    // This is a repair tool for legacy rows where the blob is missing or wrong.
+    const defaultName = !isEncPlaceholder(m?.name) && m?.name ? String(m.name) : "Ben";
+    const defaultEmail = !isEncPlaceholder(m?.email) && m?.email ? String(m.email) : "bjgarr@gmail.com";
+
+    const nextName = prompt("Member name", defaultName);
+    if (nextName == null) return;
+    const nextEmail = prompt("Member email", defaultEmail);
+    if (nextEmail == null) return;
+
+    const payload = {
+      name: String(nextName || "").trim(),
+      email: String(nextEmail || "").trim(),
+    };
+
+    try {
+      setMembersBusy(true);
+      setMembersMsg("");
+      const encrypted_blob = await encryptJsonWithOrgKey(orgKey, payload);
+      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+        method: "PUT",
+        body: { userId, encrypted_blob, key_version: m?.key_version ?? null },
+      });
+      setMembersMsg("Saved encrypted profile.");
+      setTimeout(() => setMembersMsg(""), 1200);
+      await loadMembers();
+    } catch (e) {
+      setMembersMsg(e?.message || "Failed to save encrypted profile");
+    } finally {
+      setMembersBusy(false);
+    }
+  };
 
   const setMemberRole = async (userId, nextRole, currentRole, email) => {
     if (!orgId) return;
@@ -631,30 +626,6 @@ React.useEffect(() => {
       setNlBusy(false);
     }
   }, [orgId]);
-
-  const deleteSubscriber = async (id) => {
-    if (!orgId) return;
-    const sid = String(id || "").trim();
-    if (!sid) return;
-    const ok = confirm("Delete this subscriber?");
-    if (!ok) return;
-
-    setNlMsg("");
-    setNlBusy(true);
-    try {
-      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`, {
-        method: "DELETE",
-        body: { id: sid },
-      });
-      setSubscribers((prev) => (prev || []).filter((s) => String(s?.id || "") !== sid));
-      setNlMsg("Deleted.");
-      setTimeout(() => setNlMsg(""), 900);
-    } catch (e) {
-      setNlMsg(e.message || "Failed to delete subscriber");
-    } finally {
-      setNlBusy(false);
-    }
-  };
 
   const saveNewsletter = async () => {
     if (!orgId) return;
@@ -1015,7 +986,20 @@ React.useEffect(() => {
                                 <td>
                                   <code>{m.email || m.userId}</code>
                                 </td>
-                                <td>{m.name || ""}</td>
+                                <td style={{ whiteSpace: "nowrap" }}>
+                                  <span>{m.name || ""}</span>
+                                  {(isEncPlaceholder(m?.name) || isEncPlaceholder(m?.email) || m?.needs_encryption) ? (
+                                    <button
+                                      className="btn"
+                                      type="button"
+                                      style={{ marginLeft: 10 }}
+                                      onClick={() => repairMemberProfile(m)}
+                                      disabled={membersBusy}
+                                    >
+                                      Fix
+                                    </button>
+                                  ) : null}
+                                </td>
                                 <td>
                                   <select
                                     className="input"
@@ -1047,14 +1031,26 @@ React.useEffect(() => {
                             <div key={m.userId || m.email} className="bf-rowcard">
                               <div className="bf-rowcard-top">
                                 <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-                                <button
-                                  className="btn"
-                                  type="button"
-                                  onClick={() => removeMember(m.userId, m.email)}
-                                  disabled={membersBusy || m.role === "owner"}
-                                >
-                                  Remove
-                                </button>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  {(isEncPlaceholder(m?.name) || isEncPlaceholder(m?.email) || m?.needs_encryption) ? (
+                                    <button
+                                      className="btn"
+                                      type="button"
+                                      onClick={() => repairMemberProfile(m)}
+                                      disabled={membersBusy}
+                                    >
+                                      Fix
+                                    </button>
+                                  ) : null}
+                                  <button
+                                    className="btn"
+                                    type="button"
+                                    onClick={() => removeMember(m.userId, m.email)}
+                                    disabled={membersBusy || m.role === "owner"}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="bf-two">
@@ -1254,7 +1250,6 @@ React.useEffect(() => {
                           <th>Email</th>
                           <th>Name</th>
                           <th>Joined</th>
-                          <th></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1265,16 +1260,6 @@ React.useEffect(() => {
                             </td>
                             <td>{s.name || ""}</td>
                             <td>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
-                            <td style={{ textAlign: "right" }}>
-                              <button
-                                className="btn"
-                                type="button"
-                                onClick={() => deleteSubscriber(s.id)}
-                                disabled={nlBusy}
-                              >
-                                Delete
-                              </button>
-                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1295,17 +1280,6 @@ React.useEffect(() => {
                             <div className="bf-field-label">email</div>
                             <div style={{ overflowWrap: "anywhere" }}>{s.email || ""}</div>
                           </div>
-                        </div>
-
-                        <div className="row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() => deleteSubscriber(s.id)}
-                            disabled={nlBusy}
-                          >
-                            Delete
-                          </button>
                         </div>
 
                         <div className="bf-field">
