@@ -158,7 +158,7 @@ export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
 }
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
-  const blob = (typeof blobStr === \"string\") ? JSON.parse(blobStr) : (blobStr || {});
+  const blob = (typeof blobStr === "string") ? JSON.parse(blobStr) : (blobStr || {});
   const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
   const iv = unb64(blob.iv);
   const ct = unb64(blob.ct);
