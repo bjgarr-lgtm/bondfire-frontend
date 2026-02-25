@@ -14,46 +14,6 @@ const DEVICE_KEY_ID = "device_keypair_v1";
 const LS_PUB = "bf_device_public_jwk_v1";
 const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
 
-// Stable-ish identifier for a device public key.
-// Used for UX/debug only (detecting mismatches), not as a security primitive.
-export async function kidFromJwk(jwk) {
-  const s = JSON.stringify(jwk);
-  const bytes = new TextEncoder().encode(s);
-  const h = await crypto.subtle.digest("SHA-256", bytes);
-  const u8 = new Uint8Array(h);
-  // short, URL-safe
-  return b64(u8.slice(0, 12));
-}
-
-async function getServerPublicKey() {
-  try {
-    const d = await api("/api/auth/keys", { method: "GET" });
-    const pk = d?.public_key;
-    if (!pk) return null;
-    const jwk = typeof pk === "string" ? JSON.parse(pk) : pk;
-    return jwk || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function syncDevicePublicKeyToServer({ force = false } = {}) {
-  const device = await ensureDeviceKeypair({ skipServerSync: true });
-  const localKid = await kidFromJwk(device.pubJwk);
-  const serverJwk = await getServerPublicKey();
-  const serverKid = serverJwk ? await kidFromJwk(serverJwk) : null;
-
-  const same = !!serverKid && serverKid === localKid;
-  if (same && !force) return { ok: true, synced: false, localKid, serverKid };
-
-  await api("/api/auth/keys", {
-    method: "POST",
-    body: JSON.stringify({ public_key: JSON.stringify(device.pubJwk) }),
-  });
-
-  return { ok: true, synced: true, localKid, serverKid };
-}
-
 function b64(bytes) {
   let s = "";
   bytes.forEach((b) => (s += String.fromCharCode(b)));
@@ -111,25 +71,10 @@ async function hkdfAesKey(sharedBits, saltBytes, infoStr) {
   );
 }
 
-export async function ensureDeviceKeypair({ skipServerSync = false } = {}) {
+export async function ensureDeviceKeypair() {
   const existing = await idbGet(DEVICE_KEY_ID);
   if (existing?.privJwk && existing?.pubJwk) {
     if (!localStorage.getItem(LS_PUB)) localStorage.setItem(LS_PUB, JSON.stringify(existing.pubJwk));
-    if (!skipServerSync) {
-      try {
-        const localKid = await kidFromJwk(existing.pubJwk);
-        const serverJwk = await getServerPublicKey();
-        const serverKid = serverJwk ? await kidFromJwk(serverJwk) : null;
-        if (!serverKid || serverKid !== localKid) {
-          await api("/api/auth/keys", {
-            method: "POST",
-            body: JSON.stringify({ public_key: JSON.stringify(existing.pubJwk) }),
-          });
-        }
-      } catch {
-        // We'll surface this via explicit UI actions where needed.
-      }
-    }
     return existing;
   }
 
@@ -141,16 +86,7 @@ export async function ensureDeviceKeypair({ skipServerSync = false } = {}) {
   localStorage.setItem(LS_PUB, JSON.stringify(pubJwk));
 
   // register public key with server
-  if (!skipServerSync) {
-    try {
-      await api("/api/auth/keys", {
-        method: "POST",
-        body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }),
-      });
-    } catch {
-      // If this fails, org key wrapping for this user will break until they sync.
-    }
-  }
+  try { await api("/api/auth/keys", { method: "POST", body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }) }); } catch {}
   return { pubJwk, privJwk };
 }
 
@@ -209,10 +145,13 @@ export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
 }
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
-  const blob = JSON.parse(blobStr);
+  // Be forgiving: callers sometimes pass an already-parsed object.
+  const blob = typeof blobStr === "string" ? JSON.parse(blobStr) : blobStr;
+  if (!blob || typeof blob !== "object") throw new Error("BAD_CIPHERTEXT_BLOB");
   const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
-  const iv = unb64(blob.iv);
-  const ct = unb64(blob.ct);
+  if (!blob.iv || !blob.ct) throw new Error("BAD_CIPHERTEXT_FIELDS");
+  const iv = unb64(String(blob.iv));
+  const ct = unb64(String(blob.ct));
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
   return new TextDecoder().decode(pt);
 }
