@@ -29,18 +29,33 @@ function fromLocalDateTimeInput(s) {
 
 export default function MeetingDetail() {
   const nav = useNavigate();
-  const params = useParams();
-  const meetingId = params?.meetingId;
-  const orgId = params?.orgId || getOrgId();
+  const { meetingId, orgId: orgIdParam } = useParams();
+  const orgId = orgIdParam || getOrgId();
 
   const [m, setM] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [myRsvp, setMyRsvp] = useState(null);
+  const [rsvpBusy, setRsvpBusy] = useState(false);
+  const [rsvpMsg, setRsvpMsg] = useState("");
+
   async function refresh() {
     if (!orgId || !meetingId) return;
     const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}`);
     setM(data.meeting || null);
+
+    // Load current user's RSVP (members can read their own RSVP; admins can read lists).
+    try {
+      const r = await api(
+        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`
+      );
+      // For member GET, backend returns { rsvp }. For admin GET, it returns { rsvps }.
+      if (r && Object.prototype.hasOwnProperty.call(r, "rsvp")) setMyRsvp(r.rsvp);
+      else setMyRsvp(null);
+    } catch {
+      setMyRsvp(null);
+    }
   }
 
   useEffect(() => {
@@ -85,6 +100,27 @@ export default function MeetingDetail() {
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
   if (!m) return <div style={{ padding: 16 }}>{err ? `Error: ${err}` : "Loading..."}</div>;
 
+  async function setRsvp(status) {
+    if (!orgId || !meetingId) return;
+    setRsvpMsg("");
+    setRsvpBusy(true);
+    try {
+      const note = myRsvp?.note || "";
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, note }),
+      });
+      setRsvpMsg("Saved.");
+      await refresh();
+      setTimeout(() => setRsvpMsg(""), 900);
+    } catch (e) {
+      setRsvpMsg(e?.message || "RSVP failed");
+    } finally {
+      setRsvpBusy(false);
+    }
+  }
+
   return (
     <div className="card" style={{ margin: 16, padding: 12 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -106,6 +142,30 @@ export default function MeetingDetail() {
       )}
 
       <div className="grid" style={{ gap: 10, marginTop: 12 }}>
+        <div className="card" style={{ padding: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 800 }}>Your RSVP</div>
+            <div className="helper" style={{ opacity: 0.9 }}>
+              {myRsvp?.status ? String(myRsvp.status) : "none"}
+            </div>
+            <div style={{ flex: 1 }} />
+            {rsvpMsg ? (
+              <div className={String(rsvpMsg).toLowerCase().includes("fail") ? "error" : "helper"}>{rsvpMsg}</div>
+            ) : null}
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <button className="btn" type="button" onClick={() => setRsvp("yes")} disabled={busy || rsvpBusy}>
+              Yes
+            </button>
+            <button className="btn" type="button" onClick={() => setRsvp("maybe")} disabled={busy || rsvpBusy}>
+              Maybe
+            </button>
+            <button className="btn" type="button" onClick={() => setRsvp("no")} disabled={busy || rsvpBusy}>
+              No
+            </button>
+          </div>
+        </div>
+
         <input
           className="input"
           defaultValue={m.title || ""}

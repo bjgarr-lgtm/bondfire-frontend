@@ -7,15 +7,13 @@ import { registerSW } from "virtual:pwa-register";
 // PWA: single registration path.
 // IMPORTANT: do NOT also call navigator.serviceWorker.register() manually.
 // Double-registration can strand users on stale caches until they "unregister the SW".
-const updateSW = registerSW({
-  immediate: true,
+// NOTE: Do NOT auto-reload the page when a new Service Worker is available.
+// It nukes in-progress forms (sign-in) and feels like the app is "blinking".
+// New SW will activate on the next navigation/reload.
+registerSW({
+  immediate: false,
   onNeedRefresh() {
-    // Prefer self-healing over leaving the UI half-updated.
-    try {
-      updateSW(true);
-    } finally {
-      window.location.reload();
-    }
+    // Intentionally noop. If we later add a toast/UI prompt, it can live here.
   },
 });
 

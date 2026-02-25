@@ -16,6 +16,66 @@ function humanizeError(msg) {
   return s;
 }
 
+function b64urlToBytes(s) {
+  // Accept base64url or base64.
+  try {
+    let v = String(s || "").trim();
+    if (!v) return null;
+    v = v.replace(/-/g, "+").replace(/_/g, "/");
+    while (v.length % 4) v += "=";
+    const bin = atob(v);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function coerceOrgKeyBytes(orgKeyMaybe) {
+  if (!orgKeyMaybe) return null;
+  if (orgKeyMaybe instanceof Uint8Array) return orgKeyMaybe;
+  if (Array.isArray(orgKeyMaybe)) {
+    try {
+      return new Uint8Array(orgKeyMaybe.map((x) => Number(x) & 255));
+    } catch {
+      return null;
+    }
+  }
+  // common case: stored as base64url string
+  if (typeof orgKeyMaybe === "string") {
+    // It might be JSON of byte array (ancient builds)
+    try {
+      const parsed = JSON.parse(orgKeyMaybe);
+      if (Array.isArray(parsed)) return new Uint8Array(parsed.map((x) => Number(x) & 255));
+    } catch {}
+    return b64urlToBytes(orgKeyMaybe);
+  }
+  return null;
+}
+
+async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
+  const arr = Array.isArray(rows) ? rows : [];
+  const orgKeyRaw = getCachedOrgKey(orgId);
+  const orgKey = coerceOrgKeyBytes(orgKeyRaw);
+  if (!orgKey) return arr;
+
+  const out = [];
+  for (const r of arr) {
+    if (r && r[blobField]) {
+      try {
+        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        out.push({ ...r, ...dec });
+        continue;
+      } catch {
+        // fall through
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 
 async function authFetch(path, opts = {}) {
   const relative = path.startsWith("/") ? path : `/${path}`;
@@ -645,7 +705,10 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      setNeeds(Array.isArray(r.needs) ? r.needs : []);
+      const raw = Array.isArray(r.needs) ? r.needs : [];
+      const dec = await tryDecryptList(orgId, raw, "encrypted_blob");
+      // Ensure dropdown has a stable display label even if decrypted payload is missing.
+      setNeeds(dec.map((n) => ({ ...n, title: n.title || n.name || n.id })));
     } catch {
       setNeeds([]);
     }
