@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       includeAssets: ["favicon.svg", "robots.txt", "apple-touch-icon.png"],
       manifest: {
         name: "Bondfire",
@@ -30,8 +30,8 @@ export default defineConfig({
         // This keeps the SW from trying to be "helpful" and breaking routing.
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
         // Ensure updates replace older SW versions promptly.
-        clientsClaim: true,
-        skipWaiting: true,
+        clientsClaim: false,
+        skipWaiting: false,
         cleanupOutdatedCaches: true,
       }
     })

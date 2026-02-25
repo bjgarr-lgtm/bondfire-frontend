@@ -30,7 +30,7 @@ if (isSignInRoute() && "serviceWorker" in navigator) {
 		// Never auto-reload. If there is an update, it will apply on the next navigation/reload.
 		immediate: false,
 		onNeedRefresh() {
-			console.log("BOND🔥 update available; will apply on next reload.");
+			console.log("Bondfire update available; will apply on next reload.");
 			window.__BF_NEED_REFRESH = true;
 		},
 	});
@@ -39,7 +39,7 @@ if (isSignInRoute() && "serviceWorker" in navigator) {
 
 // === CANARY: proves a new build is running ===
 const __BUILD_STAMP__ = new Date().toISOString() + ' #' + Math.floor(Math.random()*1e6);
-console.log('BOND🔥 build:', __BUILD_STAMP__);
+console.log('BONDFIRE build:', __BUILD_STAMP__);
 window.__BF_BUILD = __BUILD_STAMP__;
 
 createRoot(document.getElementById('root')).render(
