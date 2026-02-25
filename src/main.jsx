@@ -13,7 +13,7 @@ const updateSW = registerSW({
   immediate: false,
   onNeedRefresh() {
     console.log("BOND🔥 update available; will apply on next reload.");
-    window.__BF_NEED_REFRESH = true;
+    window.__BF_NEED_REFRESH = false;
   },
 });
 
