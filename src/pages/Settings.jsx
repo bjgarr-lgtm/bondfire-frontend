@@ -26,12 +26,33 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   const orgKey = getCachedOrgKey(orgId);
   if (!orgKey) return arr;
 
+  const KEEP_FROM_ROW = new Set([
+    // Server-authoritative / non-encrypted fields that must not be clobbered by decrypted defaults.
+    "id","org_id","orgId","created_at","updated_at",
+    "status","priority","urgency","is_public","is_pub","starts_at","ends_at",
+    "qty","unit"
+  ]);
+
   const out = [];
   for (const r of arr) {
     if (r && r[blobField]) {
       try {
         const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        out.push({ ...r, ...dec });
+        // Merge with guardrails: decrypted fills blanks, but never overwrites server fields.
+        const merged = { ...r };
+        for (const [k, v] of Object.entries(dec || {})) {
+          if (KEEP_FROM_ROW.has(k) && (k in r)) continue;
+          const curr = r?.[k];
+          const currIsPlaceholder =
+            curr == null ||
+            curr === "" ||
+            curr === "__encrypted__" ||
+            curr === "__ENCRYPTED__" ||
+            curr === "_encrypted_" ||
+            curr === "__ENCRYPTED__";
+          if (!(k in r) || currIsPlaceholder) merged[k] = v;
+        }
+        out.push(merged);
         continue;
       } catch {
         // fall through
@@ -40,18 +61,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
     out.push(r);
   }
   return out;
-}
-
-// In case an older cached chunk somehow loads without the helper above,
-// avoid a hard runtime crash and just return rows unchanged.
-function getTryDecryptList() {
-  try {
-    // eslint-disable-next-line no-undef
-    if (typeof tryDecryptList === "function") return tryDecryptList;
-  } catch {
-    // ignore
-  }
-  return async (_orgId, rows) => (Array.isArray(rows) ? rows : []);
 }
 
 
@@ -302,8 +311,7 @@ export default function Settings() {
         method: "GET",
       });
       const _mem = Array.isArray(r.members) ? r.members : [];
-      const decryptList = getTryDecryptList();
-      setMembers(await decryptList(orgId, _mem));
+      setMembers(await tryDecryptList(orgId, _mem));
       setMembersAllowed(true);
     } catch (e) {
       const msg = String(e?.message || "");
@@ -570,48 +578,31 @@ React.useEffect(() => {
     setNlBusy(true);
 
     try {
-      const token = getToken();
       const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
 
-      const headers = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      // Same origin first (Pages Functions), then API_BASE
-      let res = await fetch(path, { method: "GET", headers });
+      // Same origin first (Pages Functions), then API_BASE. Use cookies/session auth.
+      let res = await fetch(path, { method: "GET", credentials: "include" });
       if (!res.ok && API_BASE) {
-        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
+        res = await fetch(`${API_BASE}${path}`, { method: "GET", credentials: "include" });
       }
 
       if (!res.ok) {
-        // backend might return JSON errors sometimes
-        const ct = res.headers.get("content-type") || "";
-        if (ct.includes("application/json")) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(j.error || j.message || `HTTP ${res.status}`);
-        }
         const t = await res.text().catch(() => "");
-        throw new Error(t || `HTTP ${res.status}`);
+        throw new Error(t || `Export failed (${res.status})`);
       }
 
       const blob = await res.blob();
-
-      // Try to use server filename if present
-      const dispo = res.headers.get("content-disposition") || "";
-      const m = dispo.match(/filename="([^"]+)"/i);
-      const filename = m?.[1] || `subscribers-${orgId}.csv`;
-
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename;
+      a.download = `bondfire-newsletter-subscribers-${orgId}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
-
+      setTimeout(() => URL.revokeObjectURL(url), 2500);
       setNlMsg("Exported.");
-      setTimeout(() => setNlMsg(""), 1200);
     } catch (e) {
+      console.error(e);
       setNlMsg(e?.message || "Export failed");
     } finally {
       setNlBusy(false);
@@ -646,8 +637,7 @@ React.useEffect(() => {
         { method: "GET" }
       );
       const _subs = Array.isArray(r.subscribers) ? r.subscribers : [];
-      const decryptList = getTryDecryptList();
-      setSubscribers(await decryptList(orgId, _subs));
+      setSubscribers(await tryDecryptList(orgId, _subs));
     } catch (e) {
       setSubscribers([]);
       setNlMsg(e.message || "Failed to load subscribers");
@@ -723,7 +713,8 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      setNeeds(Array.isArray(r.needs) ? r.needs : []);
+      const dec = await tryDecryptList(orgId, Array.isArray(r.needs) ? r.needs : [], "encrypted_blob");
+      setNeeds(Array.isArray(dec) ? dec : []);
     } catch {
       setNeeds([]);
     }

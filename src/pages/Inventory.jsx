@@ -16,6 +16,18 @@ function getOrgId() {
 
 function safeStr(v) {
 	return String(v ?? "");
+
+function readParMap(orgId) {
+  try { return JSON.parse(localStorage.getItem(`bf_inv_par_items_${orgId}`) || "{}") || {}; } catch { return {}; }
+}
+function writeParMap(orgId, map) {
+  try { localStorage.setItem(`bf_inv_par_items_${orgId}`, JSON.stringify(map || {})); } catch {}
+}
+function getItemPar(orgId, itemId) {
+  const m = readParMap(orgId);
+  const v = Number(m?.[itemId]);
+  return Number.isFinite(v) ? v : 0;
+}
 }
 
 export default function Inventory() {
@@ -31,7 +43,7 @@ export default function Inventory() {
 	const [selected, setSelected] = useState(null);
 	const [edit, setEdit] = useState(null);
 
-	const [form, setForm] = useState({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", is_public: false });
+	const [form, setForm] = useState({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", par: "", is_public: false });
 
 	async function refresh() {
 		if (!orgId) return;
@@ -43,8 +55,11 @@ export default function Inventory() {
 
 			const orgKey = getCachedOrgKey(orgId);
 			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
+			const parMap = readParMap(orgId);
 			const out = dec.map((it) => {
 				if (it?.encrypted_blob && !it?.name) return { ...it, name: "(encrypted)", category: "", location: "", notes: "" };
+				const par = Number(parMap?.[it?.id]);
+				if (Number.isFinite(par)) it = { ...it, par };
 				return it;
 			});
 			setItems(out);
@@ -90,13 +105,24 @@ export default function Inventory() {
 			payload = { name: "__encrypted__", qty, unit, category: "", location: "", notes: "", is_public, encrypted_blob: enc };
 		}
 
-		await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+		const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(payload),
 		});
 
-		setForm({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", is_public: false });
+		// Store per-item PAR locally (no DB schema changes).
+		try {
+			const id = created?.id;
+			const parNum = Number(form.par);
+			if (id && Number.isFinite(parNum) && parNum >= 0) {
+				const m = readParMap(orgId);
+				m[id] = parNum;
+				writeParMap(orgId, m);
+			}
+		} catch {}
+
+		setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
 		setTimeout(() => refresh().catch(console.error), 300);
 	}
 
@@ -155,6 +181,7 @@ export default function Inventory() {
 			id: it.id,
 			name: it.name || "",
 			qty: it.qty ?? 0,
+			par: String(it.par ?? getItemPar(orgId, it.id) ?? ""),
 			unit: it.unit || "",
 			category: it.category || "",
 			location: it.location || "",
@@ -258,6 +285,7 @@ export default function Inventory() {
 							<tr>
 								<th>Name</th>
 								<th>Qty</th>
+								<th>Par</th>
 								<th>Unit</th>
 								<th>Public</th>
 								<th></th>
@@ -268,6 +296,7 @@ export default function Inventory() {
 								<tr key={it.id}>
 									<td style={{ fontWeight: 700 }}>{it.name || "(unnamed)"}</td>
 									<td>{it.qty ?? 0}</td>
+									<td>{(it.par ?? "")}</td>
 									<td>{it.unit || ""}</td>
 									<td>{it.is_public ? "Yes" : "No"}</td>
 									<td style={{ textAlign: "right" }}><button className="btn" type="button" onClick={() => openItem(it)}>Details</button></td>
@@ -305,6 +334,7 @@ export default function Inventory() {
 						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 							<input className="input" placeholder="Name" value={edit.name} onChange={(e) => setEdit((p) => ({ ...p, name: e.target.value }))} />
 							<input className="input" type="number" placeholder="Qty" value={edit.qty} onChange={(e) => setEdit((p) => ({ ...p, qty: e.target.value }))} />
+							<input className="input" type="number" placeholder="Par" value={edit.par} onChange={(e) => setEdit((p) => ({ ...p, par: e.target.value }))} />
 							<input className="input" placeholder="Unit" value={edit.unit} onChange={(e) => setEdit((p) => ({ ...p, unit: e.target.value }))} />
 							<input className="input" placeholder="Category" value={edit.category} onChange={(e) => setEdit((p) => ({ ...p, category: e.target.value }))} />
 							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />

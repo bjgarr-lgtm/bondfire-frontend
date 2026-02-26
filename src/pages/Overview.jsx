@@ -46,12 +46,33 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   const orgKey = getCachedOrgKey(orgId);
   if (!orgKey) return arr;
 
+  const KEEP_FROM_ROW = new Set([
+    // Server-authoritative / non-encrypted fields that must not be clobbered by decrypted defaults.
+    "id","org_id","orgId","created_at","updated_at",
+    "status","priority","urgency","is_public","is_pub","starts_at","ends_at",
+    "qty","unit"
+  ]);
+
   const out = [];
   for (const r of arr) {
     if (r && r[blobField]) {
       try {
         const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        out.push({ ...r, ...dec });
+        // Merge with guardrails: decrypted fills blanks, but never overwrites server fields.
+        const merged = { ...r };
+        for (const [k, v] of Object.entries(dec || {})) {
+          if (KEEP_FROM_ROW.has(k) && (k in r)) continue;
+          const curr = r?.[k];
+          const currIsPlaceholder =
+            curr == null ||
+            curr === "" ||
+            curr === "__encrypted__" ||
+            curr === "__ENCRYPTED__" ||
+            curr === "_encrypted_" ||
+            curr === "__ENCRYPTED__";
+          if (!(k in r) || currIsPlaceholder) merged[k] = v;
+        }
+        out.push(merged);
         continue;
       } catch {
         // fall through
@@ -101,14 +122,6 @@ function pill(text, tone) {
       {text}
     </span>
   );
-}
-
-function readInvPar(orgId) {
-  try {
-    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
-  } catch {
-    return {};
-  }
 }
 
 function writeInvPar(orgId, obj) {
@@ -183,7 +196,26 @@ export default function Overview() {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
-      writePrevCounts(orgId, rawCounts);
+      // Snapshot counts once per session (to compute deltas since last login).
+      try {
+        const sk = `bf_dash_session_seen_${orgId}`;
+        const firstThisSession = !sessionStorage.getItem(sk);
+        if (firstThisSession) {
+          sessionStorage.setItem(sk, "1");
+          writePrevCounts(orgId, rawCounts);
+
+          // Track subscriber history for sparkline (also once per session).
+          try {
+            const hk = `bf_dash_subhist_${orgId}`;
+            const hist = JSON.parse(localStorage.getItem(hk) || "[]");
+            const count = Number(rawCounts?.subscribers || rawCounts?.subs || rawCounts?.subsTotal || 0) || 0;
+            hist.push({ t: Date.now(), v: count });
+            // keep last 24 points
+            const trimmed = hist.slice(-24);
+            localStorage.setItem(hk, JSON.stringify(trimmed));
+          } catch {}
+        }
+      } catch {}
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -245,8 +277,8 @@ export default function Overview() {
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -284,24 +316,29 @@ export default function Overview() {
 
   const invByCat = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
+    let parMap = {};
+    try { parMap = JSON.parse(localStorage.getItem(`bf_inv_par_items_${orgId}`) || "{}") || {}; } catch {}
     const map = new Map();
     for (const it of arr) {
-      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
+      const catRaw = safeStr(it?.category || it?.cat || "uncategorized").trim();
+      const cat = (catRaw || "uncategorized").toLowerCase();
       const qty = Number(it?.qty);
-      map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
+      const itPar = Number(parMap?.[it?.id]);
+      const prev = map.get(cat) || { category: cat, qty: 0, par: 0 };
+      prev.qty += (Number.isFinite(qty) ? qty : 0);
+      prev.par += (Number.isFinite(itPar) ? itPar : 0);
+      map.set(cat, prev);
     }
-    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
-    out.sort((a, b) => b.qty - a.qty);
+    const out = Array.from(map.values());
+    out.sort((a, b) => (b.qty - a.qty) || (b.par - a.par));
     return out.slice(0, 6);
-  }, [inventory]);
-
-  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+  }, [inventory, orgId]);
 
   const invMax = useMemo(() => {
     let m = 1;
-    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
+    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(x.par) || 0);
     return m;
-  }, [invByCat, invPar]);
+  }, [invByCat]);
 
   const lowCats = useMemo(() => {
     const lows = [];
@@ -312,7 +349,7 @@ export default function Overview() {
       if (pct < 0.25) lows.push({ ...x, par });
     }
     return lows;
-  }, [invByCat, invPar]);
+  }, [invByCat]);
 
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
@@ -334,6 +371,31 @@ export default function Overview() {
     }
   }
 
+
+  function getSubHist() {
+    try { return JSON.parse(localStorage.getItem(`bf_dash_subhist_${orgId}`) || "[]") || []; } catch { return []; }
+  }
+
+  function Sparkline({ points }) {
+    const arr = Array.isArray(points) ? points : [];
+    if (arr.length < 2) return null;
+    const w = 120, h = 32, pad = 2;
+    const vals = arr.map(p => Number(p?.v)).filter(v => Number.isFinite(v));
+    if (vals.length < 2) return null;
+    const minV = Math.min(...vals);
+    const maxV = Math.max(...vals);
+    const span = Math.max(1, maxV - minV);
+    const pts = vals.map((v, i) => {
+      const x = pad + (i * (w - pad*2)) / (vals.length - 1);
+      const y = pad + (h - pad*2) * (1 - ((v - minV) / span));
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+        <polyline fill="none" stroke="currentColor" strokeWidth="2" points={pts} />
+      </svg>
+    );
+  }
   const cardBtnStyle = {
     width: "100%",
     textAlign: "left",
@@ -542,13 +604,14 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
-            <button className="btn" type="button" onClick={() => go("settings")}>
+            <button className="btn" type="button" onClick={() => go("settings?tab=newsletter")}>
               View all
             </button>
           </div>
 
-          <div className="helper" style={{ marginTop: 10 }}>
-            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
+          <div className="helper" style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <span>{subs.length} subscriber{subs.length === 1 ? "" : "s"}</span>
+            <span style={{ opacity: 0.8 }}><Sparkline points={getSubHist()} /></span>
           </div>
 
           {subsSorted.length ? (
