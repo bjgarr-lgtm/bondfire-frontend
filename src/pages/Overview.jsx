@@ -4,6 +4,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
+// Failsafe: prevent runtime crashes if a patched build references invPar before it's declared.
+const invPar = {};
+
+
 function readOrgInfo(orgId) {
   try {
     const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
@@ -245,9 +249,8 @@ export default function Overview() {
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      // Pledges + Newsletter live under Settings tabs (no standalone /pledges route)
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
     ];
   }, [countsNormalized, deltas]);
 
