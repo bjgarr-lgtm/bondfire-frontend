@@ -46,42 +46,12 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   const orgKey = getCachedOrgKey(orgId);
   if (!orgKey) return arr;
 
-  const mergeDecryptedRow = (row, dec) => {
-    const out = { ...(row || {}) };
-    const d = dec && typeof dec === "object" ? dec : {};
-    for (const [k, v] of Object.entries(d)) {
-      if (v == null) continue;
-      const curr = out[k];
-      const currStr = typeof curr === "string" ? curr.trim() : null;
-      const currEmpty = curr == null || currStr === "";
-      const currEncryptedLike = typeof curr === "string" && isEncryptedNameLike(curr);
-
-      // Only overwrite when the current value is empty or a placeholder.
-      // Never clobber server-side fields like priority/status/etc unless they are missing.
-      if (currEmpty || currEncryptedLike) {
-        out[k] = v;
-        continue;
-      }
-
-      // Special cases: allow filling some known fields if server returns blanks.
-      if (k === "category" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "location" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "notes" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "description" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "urgency" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "title" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "name" && (currEmpty || currEncryptedLike)) out[k] = v;
-      if (k === "agenda" && (currEmpty || currEncryptedLike)) out[k] = v;
-    }
-    return out;
-  };
-
   const out = [];
   for (const r of arr) {
     if (r && r[blobField]) {
       try {
         const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        out.push(mergeDecryptedRow(r, dec));
+        out.push({ ...r, ...dec });
         continue;
       } catch {
         // fall through
@@ -91,7 +61,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   }
   return out;
 }
-
 
 function readPrevCounts(orgId) {
   try {
@@ -134,7 +103,7 @@ function pill(text, tone) {
   );
 }
 
-function readParMap(orgId) {
+function readInvPar(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
   } catch {
@@ -142,18 +111,10 @@ function readParMap(orgId) {
   }
 }
 
-function writeParMap(orgId, obj) {
+function writeInvPar(orgId, obj) {
   try {
     localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
   } catch {}
-}
-
-function itemKey(it) {
-  const name = safeStr(it?.name).trim().toLowerCase();
-  const unit = safeStr(it?.unit).trim().toLowerCase();
-  const cat = safeStr(it?.category || it?.cat).trim().toLowerCase();
-  const loc = safeStr(it?.location).trim().toLowerCase();
-  return `${name}|${unit}|${cat}|${loc}`;
 }
 
 export default function Overview() {
@@ -200,16 +161,8 @@ export default function Overview() {
 
       // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
-      let invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
-      let needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
-
-      // Some dashboard endpoints return scrubbed previews without priority/urgency.
-      // If so, pull the full needs list so urgency + priority render correctly.
-      const needsLooksScrubbed =
-        Array.isArray(needsRaw) && needsRaw.length && needsRaw.every((n) => n?.priority == null);
-      if (needsLooksScrubbed) {
-        needsRaw = (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
-      }
+      const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
       // These live under Settings pages, so fetch directly.
@@ -246,9 +199,7 @@ export default function Overview() {
 
   if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
 
-  const basePath = `/org/${encodeURIComponent(orgId)}`;
-  const goTab = (tab) => nav(`${basePath}/${tab}`);
-  const goPath = (path) => nav(path);
+  const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
   // ----- derived -----
   const countsNormalized = useMemo(() => {
@@ -289,16 +240,15 @@ export default function Overview() {
         badge: db,
       };
     };
-    const base = `/org/${encodeURIComponent(orgId)}`;
     return [
-      mk("people", "People", "👥", countsNormalized.people, "members", `${base}/people`),
-      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", `${base}/inventory`),
-      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", `${base}/needs`),
-      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", `${base}/meetings`),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", `${base}/settings?tab=pledges`),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", `${base}/settings?tab=newsletter`),
+      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
+      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
+      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
+      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
     ];
-  }, [countsNormalized, deltas, orgId]);
+  }, [countsNormalized, deltas]);
 
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
@@ -334,60 +284,54 @@ export default function Overview() {
 
   const invByCat = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
-    const map = new Map(); // cat -> { qty, par }
+    const map = new Map();
     for (const it of arr) {
-      const catRaw = safeStr(it?.category || it?.cat || "uncategorized").trim();
-      const cat = catRaw ? catRaw.toLowerCase() : "uncategorized";
+      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
       const qty = Number(it?.qty);
-      const id = it?.id;
-      const par = id != null ? Number(parMap?.[String(id)]) : NaN;
-
-      if (!map.has(cat)) map.set(cat, { qty: 0, par: 0 });
-      const cur = map.get(cat);
-      cur.qty += Number.isFinite(qty) ? qty : 0;
-      cur.par += Number.isFinite(par) ? par : 0;
+      map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
     }
-    const out = Array.from(map.entries()).map(([category, v]) => ({ category, qty: v.qty, par: v.par }));
+    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
     out.sort((a, b) => b.qty - a.qty);
     return out.slice(0, 6);
-  }, [inventory, parMap]);
+  }, [inventory]);
 
-  const parMap = useMemo(() => readParMap(orgId), [orgId]);
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
   const invMax = useMemo(() => {
     let m = 1;
-    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(x.par) || 0);
+    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
     return m;
-  }, [invByCat]);
+  }, [invByCat, invPar]);
 
   const lowCats = useMemo(() => {
     const lows = [];
     for (const x of invByCat) {
-      const par = Number(x.par) || 0;
-      if (!par) continue;
-      const pct = (Number(x.qty || 0) / par);
-      if (pct < 0.25) lows.push(x);
+      const par = Number(invPar?.[x.category]);
+      if (!Number.isFinite(par) || par <= 0) continue;
+      const pct = par ? (Number(x.qty || 0) / par) : 1;
+      if (pct < 0.25) lows.push({ ...x, par });
     }
     return lows;
-  }, [invByCat]);
+  }, [invByCat, invPar]);
 
-  async function rsvp(meeting, status = "yes") {
+  async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      // Canonical RSVP endpoint: /meetings/:meetingId/rsvp
+      await api(
+        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
+          body: JSON.stringify({ status: "yes" }),
+        }
+      );
       setRsvpMsg("RSVP saved.");
-      // Pull fresh data so the dashboard reflects it.
-      refresh().catch(() => {});
     } catch (e) {
       console.error(e);
       setRsvpMsg(e?.message || "Failed to RSVP");
     }
-  }
   }
 
   const cardBtnStyle = {
@@ -404,7 +348,155 @@ export default function Overview() {
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0, flex: 1, minWidth: 180 }}>{orgInfo?.name || "Dashboard"}</h1>
-          
+          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
+        {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
+      </div>
+
+      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        {topCards.map((c) => (
+          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+            <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+              {c.badge ? (
+                <div style={{ position: "absolute", top: 12, right: 12 }}>
+                  <span style={c.badge.style}>{c.badge.txt}</span>
+                </div>
+              ) : null}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 18 }}>{c.icon}</div>
+                <div style={{ fontWeight: 900 }}>{c.title}</div>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+              <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Main grid */}
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 12,
+          alignItems: "start",
+        }}
+      >
+        {/* Next meetings */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
+            <button className="btn" type="button" onClick={() => go("meetings")}>
+              View all
+            </button>
+          </div>
+          {meetingsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {meetingsSorted.map((m) => (
+                <div key={m.id} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                      {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                    </div>
+                    <button
+                      className="btn-red"
+                      type="button"
+                      onClick={(e) => {
+                        e?.preventDefault?.();
+                        e?.stopPropagation?.();
+                        rsvp(m);
+                      }}
+                    >
+                      RSVP
+                    </button>
+                  </div>
+                  <div className="helper" style={{ marginTop: 6 }}>
+                    {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
+          )}
+        </div>
+
+        {/* Inventory glance */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
+            <button className="btn" type="button" onClick={() => go("inventory")}>
+              Manage
+            </button>
+          </div>
+
+          {invByCat.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {invByCat.map((x) => {
+                const par = Number(invPar?.[x.category]) || 0;
+                const pct = Math.max(0, Math.min(1, (Number(x.qty) || 0) / invMax));
+                const label = x.category;
+                return (
+                  <div key={label} style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                        {Number(x.qty) || 0}{par ? ` / ${par}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+                <div className="helper">
+                  {lowCats.length ? (
+                    <span>{lowCats.length} low categorie{lowCats.length === 1 ? "y" : "s"} flagged.</span>
+                  ) : (
+                    <span>No low items flagged.</span>
+                  )}
+                </div>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    // quick and dirty, but it works: "medical=200,food=100"
+                    const curr = Object.entries(invPar || {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(",");
+                    const next = window.prompt("Set par targets (category=number, comma-separated). Example: medical=200,food=100", curr);
+                    if (next == null) return;
+                    const obj = {};
+                    String(next)
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .forEach((pair) => {
+                        const [k, v] = pair.split("=").map((x) => x.trim());
+                        const n = Number(v);
+                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
+                      });
+                    writeInvPar(orgId, obj);
+                    // force rerender
+                    setCounts((c) => ({ ...(c || {}) }));
+                  }}
+                >
+                  Set par
+                </button>
               </div>
             </div>
           ) : (
@@ -416,7 +508,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-            <button className="btn" type="button" onClick={() => goTab("needs")}>
+            <button className="btn" type="button" onClick={() => go("needs")}>
               View all
             </button>
           </div>
@@ -429,7 +521,7 @@ export default function Overview() {
                 const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
                 const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
                 return (
-                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => goTab("needs")}>
+                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       {pill(tone.toUpperCase(), tone)}
                       <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
@@ -450,7 +542,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
-            <button className="btn" type="button" onClick={() => goTab("settings")}>
+            <button className="btn" type="button" onClick={() => go("settings")}>
               View all
             </button>
           </div>
@@ -481,7 +573,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" type="button" onClick={() => goPath(`${basePath}/settings?tab=pledges`)}>
+            <button className="btn" type="button" onClick={() => go("pledges")}>
               View all
             </button>
           </div>
