@@ -1,7 +1,7 @@
 // src/pages/Settings.jsx
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import { decryptWithOrgKey, encryptJsonWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
@@ -14,53 +14,6 @@ function humanizeError(msg) {
   if (s === "NOT_A_MEMBER") return "You must be a member of this org to do that.";
   if (s === "INSUFFICIENT_ROLE") return "You do not have permission for that action.";
   return s;
-}
-
-function isEncryptedNameLike(v) {
-  const s = String(v || "").trim().toLowerCase();
-  return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
-}
-
-async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
-  const arr = Array.isArray(rows) ? rows : [];
-  const orgKey = getCachedOrgKey(orgId);
-  if (!orgKey) return arr;
-
-  const KEEP_FROM_ROW = new Set([
-    // Server-authoritative / non-encrypted fields that must not be clobbered by decrypted defaults.
-    "id","org_id","orgId","created_at","updated_at",
-    "status","priority","urgency","is_public","is_pub","starts_at","ends_at",
-    "qty","unit"
-  ]);
-
-  const out = [];
-  for (const r of arr) {
-    if (r && r[blobField]) {
-      try {
-        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        // Merge with guardrails: decrypted fills blanks, but never overwrites server fields.
-        const merged = { ...r };
-        for (const [k, v] of Object.entries(dec || {})) {
-          if (KEEP_FROM_ROW.has(k) && (k in r)) continue;
-          const curr = r?.[k];
-          const currIsPlaceholder =
-            curr == null ||
-            curr === "" ||
-            curr === "__encrypted__" ||
-            curr === "__ENCRYPTED__" ||
-            curr === "_encrypted_" ||
-            curr === "__ENCRYPTED__";
-          if (!(k in r) || currIsPlaceholder) merged[k] = v;
-        }
-        out.push(merged);
-        continue;
-      } catch {
-        // fall through
-      }
-    }
-    out.push(r);
-  }
-  return out;
 }
 
 
@@ -382,44 +335,6 @@ export default function Settings() {
     }
   };
 
-  // One-off fix utility: set encrypted profile fields (name/email) for a member.
-  // This writes to org_memberships.encrypted_blob, not users table.
-  const setMemberProfile = async (m) => {
-    if (!orgId || !m?.userId) return;
-    const orgKey = getCachedOrgKey(orgId);
-    if (!orgKey) {
-      setMembersMsg("Org key not loaded yet. Open Security and load org keys first.");
-      return;
-    }
-
-    const curName = isEncryptedNameLike(m.name) ? "" : String(m.name || "");
-    const curEmail = isEncryptedNameLike(m.email) ? "" : String(m.email || "");
-    const name = prompt("Member name:", curName);
-    if (name == null) return;
-    const email = prompt("Member email:", curEmail);
-    if (email == null) return;
-
-    setMembersBusy(true);
-    setMembersMsg("");
-    try {
-      const encrypted_blob = await encryptJsonWithOrgKey(orgKey, {
-        name: String(name || "").trim(),
-        email: String(email || "").trim(),
-      });
-      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
-        method: "PUT",
-        body: { userId: m.userId, encrypted_blob },
-      });
-      setMembersMsg("Profile updated.");
-      setTimeout(() => setMembersMsg(""), 900);
-      await loadMembers();
-    } catch (e) {
-      setMembersMsg(e?.message || "Failed to update profile");
-    } finally {
-      setMembersBusy(false);
-    }
-  };
-
   React.useEffect(() => {
     loadInvites();
     loadMembers();
@@ -580,29 +495,46 @@ React.useEffect(() => {
     try {
       const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
 
-      // Same origin first (Pages Functions), then API_BASE. Use cookies/session auth.
-      let res = await fetch(path, { method: "GET", credentials: "include" });
+      // Cookie-session auth: include credentials. Legacy Bearer tokens are handled globally by api() for JSON endpoints,
+      // but CSV export is a raw fetch.
+      const headers = {};
+
+      // Same origin first (Pages Functions), then API_BASE
+      let res = await fetch(path, { method: "GET", headers, credentials: "include" });
       if (!res.ok && API_BASE) {
-        res = await fetch(`${API_BASE}${path}`, { method: "GET", credentials: "include" });
+        res = await fetch(`${API_BASE}${path}`, { method: "GET", headers, credentials: "include" });
       }
 
       if (!res.ok) {
+        // backend might return JSON errors sometimes
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error || j.message || `HTTP ${res.status}`);
+        }
         const t = await res.text().catch(() => "");
-        throw new Error(t || `Export failed (${res.status})`);
+        throw new Error(t || `HTTP ${res.status}`);
       }
 
       const blob = await res.blob();
+
+      // Try to use server filename if present
+      const dispo = res.headers.get("content-disposition") || "";
+      const m = dispo.match(/filename="([^"]+)"/i);
+      const filename = m?.[1] || `subscribers-${orgId}.csv`;
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bondfire-newsletter-subscribers-${orgId}.csv`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2500);
+      URL.revokeObjectURL(url);
+
       setNlMsg("Exported.");
+      setTimeout(() => setNlMsg(""), 1200);
     } catch (e) {
-      console.error(e);
       setNlMsg(e?.message || "Export failed");
     } finally {
       setNlBusy(false);
@@ -713,8 +645,7 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      const dec = await tryDecryptList(orgId, Array.isArray(r.needs) ? r.needs : [], "encrypted_blob");
-      setNeeds(Array.isArray(dec) ? dec : []);
+      setNeeds(Array.isArray(r.needs) ? r.needs : []);
     } catch {
       setNeeds([]);
     }
@@ -997,7 +928,6 @@ React.useEffect(() => {
                               <th>Email</th>
                               <th>Name</th>
                               <th>Role</th>
-                              <th>Profile</th>
                               <th>Remove</th>
                             </tr>
                           </thead>
@@ -1022,15 +952,6 @@ React.useEffect(() => {
                                   </select>
                                 </td>
                                 <td style={{ whiteSpace: "nowrap" }}>
-                                  {isEncryptedNameLike(m.name) || isEncryptedNameLike(m.email) ? (
-                                    <button className="btn" type="button" onClick={() => setMemberProfile(m)} disabled={membersBusy}>
-                                      Fix
-                                    </button>
-                                  ) : (
-                                    <span className="helper">ok</span>
-                                  )}
-                                </td>
-                                <td style={{ whiteSpace: "nowrap" }}>
                                   {m.role === "owner" ? (
                                     <span className="helper">owner</span>
                                   ) : (
@@ -1048,17 +969,6 @@ React.useEffect(() => {
                             <div key={m.userId || m.email} className="bf-rowcard">
                               <div className="bf-rowcard-top">
                                 <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-                                {(isEncryptedNameLike(m.name) || isEncryptedNameLike(m.email)) ? (
-                                  <button
-                                    className="btn"
-                                    type="button"
-                                    onClick={() => setMemberProfile(m)}
-                                    disabled={membersBusy}
-                                    title="Set encrypted profile fields"
-                                  >
-                                    Fix
-                                  </button>
-                                ) : null}
                                 <button
                                   className="btn"
                                   type="button"
