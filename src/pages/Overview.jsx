@@ -4,10 +4,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
-// Failsafe: prevent runtime crashes if a patched build references invPar before it's declared.
-const invPar = {};
-
-
 function readOrgInfo(orgId) {
   try {
     const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
@@ -55,7 +51,20 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
     if (r && r[blobField]) {
       try {
         const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
-        out.push({ ...r, ...dec });
+        // IMPORTANT: do NOT blindly spread decrypted values over server fields.
+        // Server fields like priority/status/urgency must remain authoritative.
+        // Only fill in presentation fields that are commonly encrypted.
+        const merged = { ...r };
+        const allow = ["title", "name", "description", "location", "notes", "category", "email"]; // small + safe
+        for (const k of allow) {
+          if (dec && Object.prototype.hasOwnProperty.call(dec, k)) {
+            const v = dec[k];
+            const cur = merged[k];
+            // Only replace if the current field is missing or placeholder-encrypted.
+            if (cur == null || cur === "" || isEncryptedNameLike(cur)) merged[k] = v;
+          }
+        }
+        out.push(merged);
         continue;
       } catch {
         // fall through
@@ -148,6 +157,7 @@ export default function Overview() {
   const [pledges, setPledges] = useState([]);
 
   const [rsvpMsg, setRsvpMsg] = useState("");
+  const [invParTick, setInvParTick] = useState(0);
 
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
 
@@ -205,6 +215,9 @@ export default function Overview() {
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
+  // Settings tabs live under Settings page.
+  const goSettingsTab = (tab) => nav(`/org/${encodeURIComponent(orgId)}/settings?tab=${encodeURIComponent(tab)}`);
+
   // ----- derived -----
   const countsNormalized = useMemo(() => {
     const c = counts || {};
@@ -249,8 +262,9 @@ export default function Overview() {
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+      // These live under Settings tabs.
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -286,53 +300,78 @@ export default function Overview() {
       .slice(0, 6);
   }, [pledges]);
 
+  // Per-item par map lives in Inventory page and is stored locally.
+  function readInvItemPar(orgId) {
+    try {
+      return JSON.parse(localStorage.getItem(`bf_inv_par_items_${orgId}`) || "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  useEffect(() => {
+    function onParChanged(e) {
+      try {
+        if (e?.detail?.orgId && String(e.detail.orgId) !== String(orgId)) return;
+      } catch {}
+      setInvParTick((x) => x + 1);
+    }
+    window.addEventListener("bf:inv_par_changed", onParChanged);
+    return () => window.removeEventListener("bf:inv_par_changed", onParChanged);
+  }, [orgId]);
+
+  const invItemPar = useMemo(() => readInvItemPar(orgId), [orgId, invParTick]);
+
   const invByCat = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const map = new Map();
     for (const it of arr) {
-      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
+      // Prefer decrypted category if present.
+      const rawCat = safeStr(it?.category || it?.cat || "");
+      const cat = (rawCat && !isEncryptedNameLike(rawCat) ? rawCat : "uncategorized").trim().toLowerCase() || "uncategorized";
       const qty = Number(it?.qty);
-      map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
+      const id = it?.id;
+      const par = id != null ? Number(invItemPar?.[String(id)]) : 0;
+      const cur = map.get(cat) || { category: cat, qty: 0, par: 0 };
+      cur.qty += Number.isFinite(qty) ? qty : 0;
+      cur.par += Number.isFinite(par) ? par : 0;
+      map.set(cat, cur);
     }
-    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
-    out.sort((a, b) => b.qty - a.qty);
+    const out = Array.from(map.values());
+    out.sort((a, b) => (b.qty || 0) - (a.qty || 0));
     return out.slice(0, 6);
-  }, [inventory]);
-
-  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+  }, [inventory, invItemPar]);
 
   const invMax = useMemo(() => {
     let m = 1;
-    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
+    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(x.par) || 0);
     return m;
-  }, [invByCat, invPar]);
+  }, [invByCat]);
 
   const lowCats = useMemo(() => {
     const lows = [];
     for (const x of invByCat) {
-      const par = Number(invPar?.[x.category]);
+      const par = Number(x?.par);
       if (!Number.isFinite(par) || par <= 0) continue;
       const pct = par ? (Number(x.qty || 0) / par) : 1;
       if (pct < 0.25) lows.push({ ...x, par });
     }
     return lows;
-  }, [invByCat, invPar]);
+  }, [invByCat]);
 
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: meeting.id }),
+        body: JSON.stringify({ status: "yes" }),
       });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
+      console.error(e);
+      setRsvpMsg(e?.message || "RSVP failed");
     }
   }
 
@@ -368,7 +407,19 @@ export default function Overview() {
         }}
       >
         {topCards.map((c) => (
-          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+          <button
+            key={c.key}
+            type="button"
+            style={cardBtnStyle}
+            onClick={() => {
+              if (String(c.to || "").startsWith("settings?tab=")) {
+                const tab = String(c.to).split("settings?tab=")[1] || "";
+                goSettingsTab(tab);
+              } else {
+                go(c.to);
+              }
+            }}
+          >
             <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
               {c.badge ? (
                 <div style={{ position: "absolute", top: 12, right: 12 }}>
@@ -411,7 +462,15 @@ export default function Overview() {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                    <button
+                      className="btn-red"
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        rsvp(m);
+                      }}
+                    >
                       RSVP
                     </button>
                   </div>
@@ -438,7 +497,7 @@ export default function Overview() {
           {invByCat.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {invByCat.map((x) => {
-                const par = Number(invPar?.[x.category]) || 0;
+                const par = Number(x?.par) || 0;
                 const pct = Math.max(0, Math.min(1, (Number(x.qty) || 0) / invMax));
                 const label = x.category;
                 return (
@@ -464,33 +523,7 @@ export default function Overview() {
                     <span>No low items flagged.</span>
                   )}
                 </div>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => {
-                    // quick and dirty, but it works: "medical=200,food=100"
-                    const curr = Object.entries(invPar || {})
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(",");
-                    const next = window.prompt("Set par targets (category=number, comma-separated). Example: medical=200,food=100", curr);
-                    if (next == null) return;
-                    const obj = {};
-                    String(next)
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .forEach((pair) => {
-                        const [k, v] = pair.split("=").map((x) => x.trim());
-                        const n = Number(v);
-                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
-                      });
-                    writeInvPar(orgId, obj);
-                    // force rerender
-                    setCounts((c) => ({ ...(c || {}) }));
-                  }}
-                >
-                  Set par
-                </button>
+                {/* PAR is now per-item and set on Inventory page. */}
               </div>
             </div>
           ) : (
@@ -510,7 +543,8 @@ export default function Overview() {
           {needsOpen.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {needsOpen.map((n) => {
-                const pr = Number(n?.priority || 0);
+                // Priority/urgency are server fields; do not let decrypted blobs overwrite.
+                const pr = Number.isFinite(Number(n?.priority)) ? Number(n.priority) : 0;
                 const urgency = String(n?.urgency || "").toLowerCase();
                 const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
                 const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");

@@ -1,9 +1,7 @@
 // src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
-import { decryptRows } from "../utils/decryptRow.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 
 function getOrgId() {
 	try {
@@ -16,24 +14,13 @@ function getOrgId() {
 
 function safeStr(v) {
 	return String(v ?? "");
-
-function readParMap(orgId) {
-  try { return JSON.parse(localStorage.getItem(`bf_inv_par_items_${orgId}`) || "{}") || {}; } catch { return {}; }
-}
-function writeParMap(orgId, map) {
-  try { localStorage.setItem(`bf_inv_par_items_${orgId}`, JSON.stringify(map || {})); } catch {}
-}
-function getItemPar(orgId, itemId) {
-  const m = readParMap(orgId);
-  const v = Number(m?.[itemId]);
-  return Number.isFinite(v) ? v : 0;
-}
 }
 
 export default function Inventory() {
-	const params = useParams();
-	const orgId = params?.orgId || getOrgId();
+	const orgId = getOrgId();
 	const [items, setItems] = useState([]);
+	// Per-item PAR targets are stored client-side (no backend schema impact).
+	const [parMap, setParMap] = useState({});
 	const [q, setQ] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [err, setErr] = useState("");
@@ -43,7 +30,40 @@ export default function Inventory() {
 	const [selected, setSelected] = useState(null);
 	const [edit, setEdit] = useState(null);
 
-	const [form, setForm] = useState({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", par: "", is_public: false });
+	const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+
+	function readParMap(id) {
+		try {
+			if (!id) return {};
+			return JSON.parse(localStorage.getItem(`bf_inv_par_items_${id}`) || "{}");
+		} catch {
+			return {};
+		}
+	}
+
+	function writeParMap(id, next) {
+		try {
+			if (!id) return;
+			localStorage.setItem(`bf_inv_par_items_${id}`, JSON.stringify(next || {}));
+		} catch {}
+	}
+
+	function getParForItem(itemId) {
+		if (itemId == null) return 0;
+		const n = Number(parMap?.[String(itemId)]);
+		return Number.isFinite(n) ? n : 0;
+	}
+
+	function setParForItem(itemId, n) {
+		if (!orgId || itemId == null) return;
+		const num = Number(n);
+		const next = { ...(parMap || {}) };
+		if (!Number.isFinite(num) || num <= 0) delete next[String(itemId)];
+		else next[String(itemId)] = num;
+		setParMap(next);
+		writeParMap(orgId, next);
+		try { window.dispatchEvent(new CustomEvent("bf:inv_par_changed", { detail: { orgId } })); } catch {}
+	}
 
 	async function refresh() {
 		if (!orgId) return;
@@ -54,15 +74,25 @@ export default function Inventory() {
 			const raw = Array.isArray(data.inventory) ? data.inventory : [];
 
 			const orgKey = getCachedOrgKey(orgId);
-			const dec = orgKey ? await decryptRows(orgKey, raw) : raw;
-			const parMap = readParMap(orgId);
-			const out = dec.map((it) => {
-				if (it?.encrypted_blob && !it?.name) return { ...it, name: "(encrypted)", category: "", location: "", notes: "" };
-				const par = Number(parMap?.[it?.id]);
-				if (Number.isFinite(par)) it = { ...it, par };
-				return it;
-			});
-			setItems(out);
+			if (orgKey) {
+				const out = [];
+				for (const it of raw) {
+					if (it?.encrypted_blob) {
+						try {
+							const dec = JSON.parse(await decryptWithOrgKey(orgKey, it.encrypted_blob));
+							out.push({ ...it, ...dec });
+							continue;
+						} catch {
+							out.push({ ...it, name: "(encrypted)", category: "", location: "", notes: "" });
+							continue;
+						}
+					}
+					out.push(it);
+				}
+				setItems(out.map((it) => ({ ...it, par: getParForItem(it?.id) })));
+			} else {
+				setItems(raw.map((it) => ({ ...it, par: getParForItem(it?.id) })));
+			}
 		} catch (e) {
 			console.error(e);
 			setErr(e?.message || String(e));
@@ -72,6 +102,7 @@ export default function Inventory() {
 	}
 
 	useEffect(() => {
+		setParMap(readParMap(orgId));
 		refresh().catch(console.error);
 	}, [orgId]);
 
@@ -111,15 +142,11 @@ export default function Inventory() {
 			body: JSON.stringify(payload),
 		});
 
-		// Store per-item PAR locally (no DB schema changes).
+		// Persist PAR locally.
 		try {
-			const id = created?.id;
-			const parNum = Number(form.par);
-			if (id && Number.isFinite(parNum) && parNum >= 0) {
-				const m = readParMap(orgId);
-				m[id] = parNum;
-				writeParMap(orgId, m);
-			}
+			const newId = created?.id || created?.item?.id;
+			const n = Number(form?.par);
+			if (newId != null && Number.isFinite(n) && n > 0) setParForItem(newId, n);
 		} catch {}
 
 		setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
@@ -181,7 +208,7 @@ export default function Inventory() {
 			id: it.id,
 			name: it.name || "",
 			qty: it.qty ?? 0,
-			par: String(it.par ?? getItemPar(orgId, it.id) ?? ""),
+			par: String(getParForItem(it?.id) || ""),
 			unit: it.unit || "",
 			category: it.category || "",
 			location: it.location || "",
@@ -244,6 +271,7 @@ export default function Inventory() {
 			});
 
 			closeModal();
+			try { setParForItem(edit?.id, Number(edit?.par)); } catch {}
 			setTimeout(() => refresh().catch(console.error), 250);
 		} catch (e) {
 			console.error(e);
@@ -296,7 +324,7 @@ export default function Inventory() {
 								<tr key={it.id}>
 									<td style={{ fontWeight: 700 }}>{it.name || "(unnamed)"}</td>
 									<td>{it.qty ?? 0}</td>
-									<td>{(it.par ?? "")}</td>
+									<td>{getParForItem(it.id) || ""}</td>
 									<td>{it.unit || ""}</td>
 									<td>{it.is_public ? "Yes" : "No"}</td>
 									<td style={{ textAlign: "right" }}><button className="btn" type="button" onClick={() => openItem(it)}>Details</button></td>
@@ -334,7 +362,7 @@ export default function Inventory() {
 						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 							<input className="input" placeholder="Name" value={edit.name} onChange={(e) => setEdit((p) => ({ ...p, name: e.target.value }))} />
 							<input className="input" type="number" placeholder="Qty" value={edit.qty} onChange={(e) => setEdit((p) => ({ ...p, qty: e.target.value }))} />
-							<input className="input" type="number" placeholder="Par" value={edit.par} onChange={(e) => setEdit((p) => ({ ...p, par: e.target.value }))} />
+							<input className="input" type="number" placeholder="Par" value={edit.par ?? ""} onChange={(e) => setEdit((p) => ({ ...p, par: e.target.value }))} />
 							<input className="input" placeholder="Unit" value={edit.unit} onChange={(e) => setEdit((p) => ({ ...p, unit: e.target.value }))} />
 							<input className="input" placeholder="Category" value={edit.category} onChange={(e) => setEdit((p) => ({ ...p, category: e.target.value }))} />
 							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />
@@ -370,6 +398,7 @@ export default function Inventory() {
 					<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 						<input className="input" placeholder="Name" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
 						<input className="input" type="number" placeholder="Qty" value={form.qty} onChange={(e) => setForm((p) => ({ ...p, qty: e.target.value }))} />
+						<input className="input" type="number" placeholder="Par" value={form.par} onChange={(e) => setForm((p) => ({ ...p, par: e.target.value }))} />
 						<input className="input" placeholder="Unit" value={form.unit} onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))} />
 						<input className="input" placeholder="Category" value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} />
 						<input className="input" placeholder="Location" value={form.location} onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))} />

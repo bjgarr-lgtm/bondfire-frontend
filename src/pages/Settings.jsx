@@ -95,6 +95,41 @@ function safeMailto(s) {
   return encodeURIComponent(String(s || ""));
 }
 
+function isEncryptedNameLike(v) {
+  const s = String(v || "");
+  return s === "__encrypted__" || s === "_encrypted_" || s === "[encrypted]" || s === "(encrypted)";
+}
+
+async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
+  if (!orgId) return Array.isArray(rows) ? rows : [];
+  const arr = Array.isArray(rows) ? rows : [];
+  const orgKey = await getCachedOrgKey(orgId);
+  if (!orgKey) return arr;
+
+  const out = [];
+  for (const r of arr) {
+    if (r && r[blobField]) {
+      try {
+        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        const merged = { ...r };
+        const allow = ["title", "name", "description", "location", "notes", "category", "email"]; // keep tight
+        for (const k of allow) {
+          if (dec && Object.prototype.hasOwnProperty.call(dec, k)) {
+            const cur = merged[k];
+            if (cur == null || cur === "" || isEncryptedNameLike(cur)) merged[k] = dec[k];
+          }
+        }
+        out.push(merged);
+        continue;
+      } catch {
+        // fall through
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 
 export default function Settings() {
   const { orgId } = useParams();
@@ -495,9 +530,8 @@ React.useEffect(() => {
     try {
       const path = `/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers?format=csv`;
 
-      // Cookie-session auth: include credentials. Legacy Bearer tokens are handled globally by api() for JSON endpoints,
-      // but CSV export is a raw fetch.
-      const headers = {};
+      // Cookie-auth fetch (credentials: include). Avoid undefined getToken.
+      const headers = { Accept: "text/csv" };
 
       // Same origin first (Pages Functions), then API_BASE
       let res = await fetch(path, { method: "GET", headers, credentials: "include" });
@@ -645,7 +679,9 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      setNeeds(Array.isArray(r.needs) ? r.needs : []);
+      let list = Array.isArray(r.needs) ? r.needs : [];
+      list = await tryDecryptList(orgId, list);
+      setNeeds(list);
     } catch {
       setNeeds([]);
     }
