@@ -16,11 +16,36 @@ function safeStr(v) {
 	return String(v ?? "");
 }
 
+function readParMap(orgId) {
+	try {
+		return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+	} catch {
+		return {};
+	}
+}
+
+function writeParMap(orgId, obj) {
+	try {
+		localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
+	} catch {}
+}
+
+function itemKeyFromFields({ name, unit, category, location }) {
+	const n = safeStr(name).trim().toLowerCase();
+	const u = safeStr(unit).trim().toLowerCase();
+	const c = safeStr(category).trim().toLowerCase();
+	const l = safeStr(location).trim().toLowerCase();
+	return `${n}|${u}|${c}|${l}`;
+}
+
+
 export default function Inventory() {
 	const orgId = getOrgId();
+	const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
+	useEffect(() => {
+		setParMap(orgId ? readParMap(orgId) : {});
+	}, [orgId]);
 	const [items, setItems] = useState([]);
-	// Per-item PAR targets are stored client-side (no backend schema impact).
-	const [parMap, setParMap] = useState({});
 	const [q, setQ] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [err, setErr] = useState("");
@@ -31,39 +56,6 @@ export default function Inventory() {
 	const [edit, setEdit] = useState(null);
 
 	const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
-
-	function readParMap(id) {
-		try {
-			if (!id) return {};
-			return JSON.parse(localStorage.getItem(`bf_inv_par_items_${id}`) || "{}");
-		} catch {
-			return {};
-		}
-	}
-
-	function writeParMap(id, next) {
-		try {
-			if (!id) return;
-			localStorage.setItem(`bf_inv_par_items_${id}`, JSON.stringify(next || {}));
-		} catch {}
-	}
-
-	function getParForItem(itemId) {
-		if (itemId == null) return 0;
-		const n = Number(parMap?.[String(itemId)]);
-		return Number.isFinite(n) ? n : 0;
-	}
-
-	function setParForItem(itemId, n) {
-		if (!orgId || itemId == null) return;
-		const num = Number(n);
-		const next = { ...(parMap || {}) };
-		if (!Number.isFinite(num) || num <= 0) delete next[String(itemId)];
-		else next[String(itemId)] = num;
-		setParMap(next);
-		writeParMap(orgId, next);
-		try { window.dispatchEvent(new CustomEvent("bf:inv_par_changed", { detail: { orgId } })); } catch {}
-	}
 
 	async function refresh() {
 		if (!orgId) return;
@@ -83,15 +75,32 @@ export default function Inventory() {
 							out.push({ ...it, ...dec });
 							continue;
 						} catch {
-							out.push({ ...it, name: "(encrypted)", category: "", location: "", notes: "" });
+							out.push({ ...it, name: "(encrypted)", category: it.category || "", location: "", notes: "" });
 							continue;
 						}
 					}
 					out.push(it);
 				}
-				setItems(out.map((it) => ({ ...it, par: getParForItem(it?.id) })));
+				setItems(out);
+				// Migrate any pending par values stored under a tmp key into real item ids.
+				const pm = readParMap(orgId);
+				let changed = false;
+				for (const it of out) {
+					if (it?.id == null) continue;
+					const id = String(it.id);
+					if (pm[id] != null) continue;
+					const tmpKey = `tmp:${itemKeyFromFields(it)}`;
+					if (pm[tmpKey] != null) {
+						pm[id] = pm[tmpKey];
+						delete pm[tmpKey];
+						changed = true;
+					}
+				}
+				if (changed) writeParMap(orgId, pm);
+				setParMap(pm);
 			} else {
-				setItems(raw.map((it) => ({ ...it, par: getParForItem(it?.id) })));
+				setItems(raw);
+				setParMap(readParMap(orgId));
 			}
 		} catch (e) {
 			console.error(e);
@@ -102,7 +111,6 @@ export default function Inventory() {
 	}
 
 	useEffect(() => {
-		setParMap(readParMap(orgId));
 		refresh().catch(console.error);
 	}, [orgId]);
 
@@ -125,6 +133,13 @@ export default function Inventory() {
 		const qty = Number(form.qty) || 0;
 		const unit = safeStr(form.unit).trim();
 		const category = safeStr(form.category).trim();
+		const parNum = form.par === "" ? null : Number(form.par);
+		if (parNum != null && Number.isFinite(parNum) && orgId) {
+			const pm = { ...(readParMap(orgId) || {}) };
+			pm[`tmp:${itemKeyFromFields({ ...form, category })}`] = parNum;
+			writeParMap(orgId, pm);
+			setParMap(pm);
+		}
 		const location = safeStr(form.location).trim();
 		const notes = safeStr(form.notes).trim();
 		const is_public = !!form.is_public;
@@ -133,23 +148,16 @@ export default function Inventory() {
 		let payload = { name, qty, unit, category, location, notes, is_public };
 		if (orgKey && !is_public) {
 			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, category, location, notes }));
-			payload = { name: "__encrypted__", qty, unit, category: "", location: "", notes: "", is_public, encrypted_blob: enc };
+			payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
 		}
 
-		const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+		await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(payload),
 		});
 
-		// Persist PAR locally.
-		try {
-			const newId = created?.id || created?.item?.id;
-			const n = Number(form?.par);
-			if (newId != null && Number.isFinite(n) && n > 0) setParForItem(newId, n);
-		} catch {}
-
-		setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+		setForm({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", is_public: false });
 		setTimeout(() => refresh().catch(console.error), 300);
 	}
 
@@ -182,7 +190,7 @@ export default function Inventory() {
 						name: "__encrypted__",
 						qty: it.qty ?? 0,
 						unit: it.unit || "",
-						category: "",
+						category: it.category || "",
 						location: "",
 						notes: "",
 						is_public: 0,
@@ -208,7 +216,7 @@ export default function Inventory() {
 			id: it.id,
 			name: it.name || "",
 			qty: it.qty ?? 0,
-			par: String(getParForItem(it?.id) || ""),
+			par: parMap?.[String(it.id)] ?? "",
 			unit: it.unit || "",
 			category: it.category || "",
 			location: it.location || "",
@@ -256,7 +264,7 @@ export default function Inventory() {
 					name: "__encrypted__",
 					qty,
 					unit: payload.unit,
-					category: "",
+					category,
 					location: "",
 					notes: "",
 					is_public,
@@ -271,7 +279,6 @@ export default function Inventory() {
 			});
 
 			closeModal();
-			try { setParForItem(edit?.id, Number(edit?.par)); } catch {}
 			setTimeout(() => refresh().catch(console.error), 250);
 		} catch (e) {
 			console.error(e);
@@ -324,7 +331,23 @@ export default function Inventory() {
 								<tr key={it.id}>
 									<td style={{ fontWeight: 700 }}>{it.name || "(unnamed)"}</td>
 									<td>{it.qty ?? 0}</td>
-									<td>{getParForItem(it.id) || ""}</td>
+									<td>
+										<input
+											className="input"
+											type="number"
+											value={parMap?.[String(it.id)] ?? ""}
+											onChange={(e) => {
+												const v = e.target.value;
+												setParMap((prev) => {
+													const next = { ...(prev || {}) };
+													next[String(it.id)] = v === "" ? "" : Number(v);
+													writeParMap(orgId, next);
+													return next;
+												});
+											}}
+											style={{ width: 90 }}
+										/>
+									</td>
 									<td>{it.unit || ""}</td>
 									<td>{it.is_public ? "Yes" : "No"}</td>
 									<td style={{ textAlign: "right" }}><button className="btn" type="button" onClick={() => openItem(it)}>Details</button></td>
