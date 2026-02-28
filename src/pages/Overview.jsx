@@ -622,7 +622,7 @@ const countsNormalized = useMemo(() => {
                     </div>
                   ) : (
                     <span>No low items below par.</span>
-                  ))}
+                  )}
                 </div>
 </div>
             </div>
