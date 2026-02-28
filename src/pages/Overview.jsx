@@ -48,14 +48,10 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
 
   const out = [];
   for (const r of arr) {
-    // Endpoints have historically returned either encrypted_blob (snake) or encryptedBlob (camel).
-    const blob =
-      (r && (r[blobField] ?? r.encrypted_blob ?? r.encryptedBlob ?? r.encrypted)) ?? null;
-
+    const blob = (r && (r[blobField] ?? r.encryptedBlob ?? r.encrypted_blob ?? r.encrypted_blob_json ?? r.encrypted_json));
     if (r && blob) {
       try {
-        const decStr = await decryptWithOrgKey(orgKey, blob);
-        const dec = JSON.parse(decStr);
+        const dec = JSON.parse(await decryptWithOrgKey(orgKey, blob));
         out.push({ ...r, ...dec });
         continue;
       } catch {
@@ -136,6 +132,23 @@ function writeInvPar(orgId, obj) {
     localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
   } catch {}
 }
+function readParItemsMap(orgId) {
+  try {
+    return JSON.parse(localStorage.getItem(`bf_inv_par_items_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function getItemPar(it, parMap) {
+  const id = it?.id ?? it?.item_id ?? it?.inventory_id;
+  const fromMap = id != null ? Number(parMap?.[String(id)]) : NaN;
+  const direct = Number(it?.par ?? it?.Par ?? it?.PAR);
+  if (Number.isFinite(fromMap)) return fromMap;
+  if (Number.isFinite(direct)) return direct;
+  return 0;
+}
+
 
 export default function Overview() {
   const nav = useNavigate();
@@ -377,21 +390,15 @@ const countsNormalized = useMemo(() => {
       .slice(0, 6);
   }, [pledges]);
 
+  const invParItems = useMemo(() => readParItemsMap(orgId), [orgId]);
+
   const invByCat = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
+    const parMap = invParItems || {};
     const map = new Map();
     for (const it of arr) {
-            const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
+      const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
       let cat = safeStr(catRaw).trim();
-      // Treat placeholders as blank so we can fall back to decrypted payload fields.
-      if (cat === "__encrypted__" || cat === "_encrypted_" || cat === "__ENCRYPTED__") cat = "";
-      // Some inventory rows store the category only inside the decrypted blob.
-      if (!cat && it && typeof it === "object") {
-        try {
-          const maybe = it.category_name ?? it.categoryName ?? it.cat_name ?? it.catName;
-          if (maybe) cat = safeStr(maybe).trim();
-        } catch {}
-      }
       if (!cat) {
         try {
           for (const k of Object.keys(it || {})) {
@@ -403,13 +410,30 @@ const countsNormalized = useMemo(() => {
         } catch {}
       }
       cat = (cat || "uncategorized").toLowerCase();
-      const qty = Number(it?.qty);
-      map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
+      const qtyNum = Number(it?.qty);
+      const qty = Number.isFinite(qtyNum) ? qtyNum : 0;
+      const par = getItemPar(it, parMap);
+
+      const cur = map.get(cat) || { category: cat, qty: 0, par: 0 };
+      cur.qty += qty;
+      cur.par += Number.isFinite(par) ? par : 0;
+      map.set(cat, cur);
     }
-    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
+    const out = Array.from(map.values());
     out.sort((a, b) => b.qty - a.qty);
     return out.slice(0, 6);
-  }, [inventory]);
+  }, [inventory, invParItems]);
+
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+
+  const invMax = useMemo(() => {
+    let m = 1;
+    for (const x of invByCat) {
+      m = Math.max(m, Number(x.qty) || 0, Number(x.par) || 0);
+    }
+    return m;
+  }, [invByCat]);
+
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
@@ -422,30 +446,53 @@ const countsNormalized = useMemo(() => {
   const lowCats = useMemo(() => {
     const lows = [];
     for (const x of invByCat) {
-      const par = Number(invPar?.[x.category]);
+      const par = Number(x.par);
       if (!Number.isFinite(par) || par <= 0) continue;
-      const pct = par ? (Number(x.qty || 0) / par) : 1;
+      const pct = (Number(x.qty || 0) / par);
       if (pct < 0.25) lows.push({ ...x, par });
     }
     return lows;
-  }, [invByCat, invPar]);
+  }, [invByCat]);
 
-  async function rsvp(meeting) {
-    if (!orgId || !meeting?.id) return;
-    setRsvpMsg("");
-    try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: meeting.id }),
-      });
-      setRsvpMsg("RSVP saved.");
-    } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
+  const lowItems = useMemo(() => {
+    const arr = Array.isArray(inventory) ? inventory : [];
+    const parMap = invParItems || {};
+    const lows = [];
+    for (const it of arr) {
+      const par = getItemPar(it, parMap);
+      if (!Number.isFinite(par) || par <= 0) continue;
+      const qtyNum = Number(it?.qty);
+      const qty = Number.isFinite(qtyNum) ? qtyNum : 0;
+      const pct = qty / par;
+      if (pct < 0.25) {
+        lows.push({
+          id: it?.id ?? it?.item_id ?? it?.inventory_id ?? safeStr(it?.name) + ":" + safeStr(it?.category),
+          name: safeStr(it?.name || it?.title || it?.label || it?.item_name) || "(unnamed)",
+          qty,
+          par,
+          pct,
+        });
+      }
     }
+    lows.sort((a, b) => a.pct - b.pct);
+    return lows.slice(0, 4);
+  }, [inventory, invParItems]);
+
+
+  async function rsvp(meeting, status = "yes") {
+  if (!orgId || !meeting?.id) return;
+  setRsvpMsg("");
+  try {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    setRsvpMsg("RSVP saved.");
+  } catch (e) {
+    setRsvpMsg(e?.message || "Failed to RSVP");
+  }
+}
   }
 
   const cardBtnStyle = {
@@ -523,7 +570,7 @@ const countsNormalized = useMemo(() => {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                    <button className="btn-red" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); rsvp(m); }}>
                       RSVP
                     </button>
                   </div>
@@ -550,8 +597,8 @@ const countsNormalized = useMemo(() => {
           {invByCat.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {invByCat.map((x) => {
-                const par = Number(invPar?.[x.category]) || 0;
-                const pct = Math.max(0, Math.min(1, (Number(x.qty) || 0) / invMax));
+                const par = Number(x.par) || 0;
+                const pct = Math.max(0, Math.min(1, par > 0 ? (Number(x.qty) || 0) / par : (Number(x.qty) || 0) / invMax));
                 const label = x.category;
                 return (
                   <div key={label} style={{ display: "grid", gap: 6 }}>
@@ -570,12 +617,23 @@ const countsNormalized = useMemo(() => {
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                 <div className="helper">
-                  {lowCats.length ? (
-                    <span>{lowCats.length} low categorie{lowCats.length === 1 ? "y" : "s"} flagged.</span>
+                  {lowItems.length ? (
+                    <span>{lowItems.length} low item{lowItems.length === 1 ? "" : "s"} flagged.</span>
                   ) : (
                     <span>No low items flagged.</span>
                   )}
                 </div>
+
+                {lowItems.length ? (
+                  <div className="helper" style={{ marginTop: 6 }}>
+                    <span style={{ fontWeight: 700 }}>Lowest:</span>{" "}
+                    {lowItems.map((it, idx) => (
+                      <span key={it.id}>
+                        {idx ? ", " : ""}{it.name} {Math.round(it.qty)} / {Math.round(it.par)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
 </div>
             </div>
           ) : (
