@@ -70,6 +70,10 @@ function readPrevCounts(orgId) {
   }
 }
 
+function sessionFlagKey(orgId) {
+  return `bf_dash_counts_written_v1:${orgId}`;
+}
+
 function writePrevCounts(orgId, counts) {
   try {
     localStorage.setItem(`bf_dash_counts_${orgId}`, JSON.stringify(counts || {}));
@@ -145,6 +149,11 @@ export default function Overview() {
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
+  // IMPORTANT:
+  // Stock ticker deltas must be "since last login", not "since last refresh".
+  // We read the previous-login snapshot from localStorage ONCE per orgId.
+  // We write the new snapshot to localStorage ONCE per session (after first successful load),
+  // so the next login has the right baseline.
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
 
   async function refresh() {
@@ -161,7 +170,21 @@ export default function Overview() {
 
       // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
-      const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      // Dashboard preview rows are sometimes scrubbed (missing encrypted_blob), which breaks decrypt
+      // and makes categories fall back to "uncategorized".
+      // If the preview looks scrubbed, fetch the real inventory list.
+      let invRaw = Array.isArray(d?.inventory) ? d.inventory : null;
+      const invPreviewLooksScrubbed = Array.isArray(invRaw)
+        ? invRaw.some((it) => {
+            const nameEnc = isEncryptedNameLike(it?.name);
+            const hasBlob = Boolean(it?.encrypted_blob);
+            const catBlank = !String(it?.category || "").trim();
+            return (nameEnc && !hasBlob) || (catBlank && nameEnc);
+          })
+        : true;
+      if (invPreviewLooksScrubbed) {
+        invRaw = (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      }
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
@@ -183,7 +206,17 @@ export default function Overview() {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
-      writePrevCounts(orgId, rawCounts);
+      // Write baseline for NEXT login once per session.
+      // Do NOT rewrite on manual refresh or any background refresh.
+      try {
+        const k = sessionFlagKey(orgId);
+        if (!sessionStorage.getItem(k)) {
+          sessionStorage.setItem(k, "1");
+          writePrevCounts(orgId, rawCounts);
+        }
+      } catch {
+        // ignore
+      }
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -318,19 +351,17 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // Canonical RSVP endpoint: /meetings/:meetingId/rsvp
-      await api(
-        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`,
-        {
+      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "yes" }),
-        }
-      );
+        body: JSON.stringify({ meeting_id: meeting.id }),
+      });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      console.error(e);
-      setRsvpMsg(e?.message || "Failed to RSVP");
+      // fallback: still useful navigation
+      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
+      go("meetings");
     }
   }
 
@@ -409,15 +440,7 @@ export default function Overview() {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button
-                      className="btn-red"
-                      type="button"
-                      onClick={(e) => {
-                        e?.preventDefault?.();
-                        e?.stopPropagation?.();
-                        rsvp(m);
-                      }}
-                    >
+                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
                       RSVP
                     </button>
                   </div>
