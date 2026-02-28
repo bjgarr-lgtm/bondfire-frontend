@@ -132,70 +132,6 @@ function writeInvPar(orgId, obj) {
   } catch {}
 }
 
-function normalizeCategoryValue(v) {
-	const s = String(v || "").trim();
-	const low = s.toLowerCase();
-	if (!low) return "uncategorized";
-	if (low === "__encrypted__" || low === "_encrypted_" || low === "(encrypted)" || low === "encrypted") return "uncategorized";
-	return low;
-}
-
-function getCategoryFromItem(it) {
-	if (!it || typeof it !== "object") return "uncategorized";
-	// Common fields
-	const direct = it.category ?? it.cat ?? it.Category ?? it.Cat;
-	if (direct != null) return normalizeCategoryValue(direct);
-	// Decrypted blobs often merge fields onto the row. Try a case-insensitive scan.
-	for (const k of Object.keys(it)) {
-		if (String(k).toLowerCase() === "category") return normalizeCategoryValue(it[k]);
-	}
-	// Some schemas nest the decrypted payload.
-	const nested = it.data || it.payload || it.item;
-	if (nested && typeof nested === "object") {
-		const v = nested.category ?? nested.cat ?? nested.Category;
-		if (v != null) return normalizeCategoryValue(v);
-	}
-	return "uncategorized";
-}
-
-function readSubHistory(orgId) {
-	try {
-		const v = JSON.parse(localStorage.getItem(`bf_news_sub_hist_${orgId}`) || "[]");
-		return Array.isArray(v) ? v.filter((n) => Number.isFinite(Number(n))).map((n) => Number(n)) : [];
-	} catch {
-		return [];
-	}
-}
-
-function writeSubHistory(orgId, arr) {
-	try {
-		localStorage.setItem(`bf_news_sub_hist_${orgId}`, JSON.stringify(arr || []));
-	} catch {}
-}
-
-function Sparkline({ points }) {
-	const arr = Array.isArray(points) ? points : [];
-	if (arr.length < 2) return null;
-	const w = 120;
-	const h = 28;
-	const min = Math.min(...arr);
-	const max = Math.max(...arr);
-	const span = Math.max(1, max - min);
-	const step = w / (arr.length - 1);
-	const pts = arr
-		.map((v, i) => {
-			const x = i * step;
-			const y = h - ((v - min) / span) * (h - 4) - 2;
-			return `${x.toFixed(1)},${y.toFixed(1)}`;
-		})
-		.join(" ");
-	return (
-		<svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }} aria-hidden="true">
-			<polyline points={pts} fill="none" stroke="rgba(255,255,255,0.60)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-		</svg>
-	);
-}
-
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -264,6 +200,24 @@ if (invLooksScrubbed) {
 }
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
+
+      // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
+      let needsRawFinal = needsRaw;
+      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
+        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
+        const blob = n && (n.encrypted_blob || n.encryptedBlob);
+        const title = String(n && (n.title || "")).toLowerCase();
+        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
+      });
+      if (needsLooksScrubbed) {
+        try {
+          const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+          needsRawFinal = Array.isArray(needsFull?.needs) ? needsFull.needs : needsRaw;
+        } catch {
+          needsRawFinal = needsRaw;
+        }
+      }
+
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
       // These live under Settings pages, so fetch directly.
@@ -272,7 +226,7 @@ if (invLooksScrubbed) {
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
       const invDec = await tryDecryptList(orgId, invRawFinal, "encrypted_blob");
-      const needsDec = await tryDecryptList(orgId, needsRaw, "encrypted_blob");
+      const needsDec = await tryDecryptList(orgId, needsRawFinal, "encrypted_blob");
       const meetsDec = await tryDecryptList(orgId, meetsRaw, "encrypted_blob");
       const subsDec = await tryDecryptList(orgId, subsResp?.subscribers || [], "encrypted_blob");
       const pledgesDec = await tryDecryptList(orgId, pledgesResp?.pledges || [], "encrypted_blob");
@@ -282,19 +236,6 @@ if (invLooksScrubbed) {
       setNeeds(Array.isArray(needsDec) ? needsDec : []);
       setMeetings(Array.isArray(meetsDec) ? meetsDec : []);
       setSubs(Array.isArray(subsDec) ? subsDec : []);
-
-		// Update newsletter subscriber sparkline once per session ("each login").
-		try {
-			const flagKey = `bf_news_sub_hist_updated_${orgId}`;
-			if (!sessionStorage.getItem(flagKey)) {
-				const hist = readSubHistory(orgId);
-				const cur = Number((subsResp?.subscribers || subsDec || []).length || 0);
-				const next = hist.slice(-19);
-				if (next.length === 0 || next[next.length - 1] !== cur) next.push(cur);
-				writeSubHistory(orgId, next);
-				sessionStorage.setItem(flagKey, "1");
-			}
-		} catch {}
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
 
@@ -395,7 +336,7 @@ const countsNormalized = useMemo(() => {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -435,7 +376,19 @@ const countsNormalized = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const map = new Map();
     for (const it of arr) {
-		const cat = getCategoryFromItem(it);
+            const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
+      let cat = safeStr(catRaw).trim();
+      if (!cat) {
+        try {
+          for (const k of Object.keys(it || {})) {
+            if (String(k).toLowerCase() === "category") {
+              cat = safeStr(it[k]).trim();
+              break;
+            }
+          }
+        } catch {}
+      }
+      cat = (cat || "uncategorized").toLowerCase();
       const qty = Number(it?.qty);
       map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
     }
@@ -467,19 +420,17 @@ const countsNormalized = useMemo(() => {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-			// Real endpoint: /meetings/:meetingId/rsvp
-			const resp = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ status: "yes" }),
+        body: JSON.stringify({ meeting_id: meeting.id }),
       });
-			// Update local preview so it doesn't look like it "did nothing".
-			setMeetings((prev) => (Array.isArray(prev)
-				? prev.map((m) => (m?.id === meeting.id ? { ...m, my_rsvp: resp?.my_rsvp || { status: "yes" } } : m))
-				: prev));
-			setRsvpMsg("RSVP saved.");
+      setRsvpMsg("RSVP saved.");
     } catch (e) {
-			setRsvpMsg(e?.message || "Failed to RSVP");
+      // fallback: still useful navigation
+      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
+      go("meetings");
     }
   }
 
@@ -611,29 +562,7 @@ const countsNormalized = useMemo(() => {
                     <span>No low items flagged.</span>
                   )}
                 </div>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => {
-                    // quick and dirty, but it works: "medical=200,food=100"
-                    const obj = {};
-                    String(next)
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .forEach((pair) => {
-                        const [k, v] = pair.split("=").map((x) => x.trim());
-                        const n = Number(v);
-                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
-                      });
-                    writeInvPar(orgId, obj);
-                    // force rerender
-                    setCounts((c) => ({ ...(c || {}) }));
-                  }}
-                >
-                  Set par
-                </button>
-              </div>
+</div>
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
@@ -683,11 +612,8 @@ const countsNormalized = useMemo(() => {
             </button>
           </div>
 
-          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div className="helper">
-              {subs.length} subscriber{subs.length === 1 ? "" : "s"}
-            </div>
-            <Sparkline points={readSubHistory(orgId)} />
+          <div className="helper" style={{ marginTop: 10 }}>
+            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
           </div>
 
           {subsSorted.length ? (

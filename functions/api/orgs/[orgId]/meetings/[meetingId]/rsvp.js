@@ -184,6 +184,5 @@ export async function onRequest(ctx) {
       .run();
   }
 
-  // Return a consistent shape the UI can rely on.
-  return ok({ my_rsvp: { status, note, updated_at: ts }, meeting_id: meetingId });
+  return ok({ meeting_id: meetingId, status });
 }

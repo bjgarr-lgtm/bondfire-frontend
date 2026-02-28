@@ -46,6 +46,9 @@ export default function Meetings() {
 
 	const [edit, setEdit] = useState(null);
 
+	const [myRsvp, setMyRsvp] = useState(null);
+	const [rsvpBusy, setRsvpBusy] = useState(false);
+
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
 		title: "",
@@ -222,7 +225,7 @@ async function loadMyRsvp(meetingId) {
 		const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
 			method: "GET",
 		});
-		setMyRsvp(r?.my_rsvp || r?.rsvp || null);
+		setMyRsvp(r?.rsvp || null);
 	} catch {
 		setMyRsvp(null);
 	}
@@ -238,10 +241,7 @@ async function saveMyRsvp(status) {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status }),
 		});
-		// Backend returns { my_rsvp: { status, ... } }
-		setMyRsvp(r?.my_rsvp || r?.rsvp || { status });
-		// Defensive: re-read so legacy schemas still reflect immediately.
-		setTimeout(() => loadMyRsvp(edit.id), 0);
+		setMyRsvp(r?.rsvp || { status });
 	} catch (e) {
 		setErr(e?.message || "Failed to RSVP");
 	} finally {
