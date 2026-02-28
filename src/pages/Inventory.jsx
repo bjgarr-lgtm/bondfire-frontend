@@ -47,6 +47,8 @@ export default function Inventory() {
 	}, [orgId]);
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
+  const [sortMode, setSortMode] = useState("low");
+	const [catFilter, setCatFilter] = useState("all");
 	const [loading, setLoading] = useState(false);
 	const [err, setErr] = useState("");
 	const [busyZk, setBusyZk] = useState(false);
@@ -116,13 +118,55 @@ export default function Inventory() {
 
 	const filtered = useMemo(() => {
 		const needle = q.toLowerCase();
-		return items.filter((it) =>
+		let arr = items;
+		if (catFilter && catFilter !== "all") {
+			arr = arr.filter((it) => safeStr(it.category).toLowerCase() === catFilter);
+		}
+		return arr.filter((it) =>
 			[safeStr(it.name), safeStr(it.category), safeStr(it.location), safeStr(it.notes)]
 				.join(" ")
 				.toLowerCase()
 				.includes(needle)
 		);
-	}, [items, q]);
+	}, [items, q, catFilter]);
+
+	const categoryOptions = useMemo(() => {
+		const set = new Set();
+		for (const it of items || []) {
+			const c = safeStr(it.category).trim().toLowerCase();
+			if (c) set.add(c);
+		}
+		return Array.from(set.values()).sort();
+	}, [items]);
+
+	const sorted = useMemo(() => {
+		const arr = Array.isArray(filtered) ? [...filtered] : [];
+		const pm = parMap || {};
+		const meta = (it) => {
+			const id = it?.id != null ? String(it.id) : "";
+			const parV = Number(pm?.[id]);
+			const par = Number.isFinite(parV) && parV > 0 ? parV : null;
+			const qtyV = Number(it?.qty);
+			const qty = Number.isFinite(qtyV) ? qtyV : 0;
+			const pct = par ? qty / par : null;
+			return { id, qty, par, pct, cat: safeStr(it?.category).toLowerCase(), name: safeStr(it?.name).toLowerCase() };
+		};
+		arr.sort((a, b) => {
+			const A = meta(a);
+			const B = meta(b);
+			if (sortMode === "name") return A.name.localeCompare(B.name);
+			if (sortMode === "category") return A.cat.localeCompare(B.cat) || A.name.localeCompare(B.name);
+			if (sortMode === "qty") return (A.qty - B.qty) || A.name.localeCompare(B.name);
+			if (sortMode === "par") return ((A.par || 999999) - (B.par || 999999)) || A.name.localeCompare(B.name);
+			// default: lowest stock ratio first (items without par go last)
+			const ap = A.pct == null ? 999 : A.pct;
+			const bp = B.pct == null ? 999 : B.pct;
+			if (ap !== bp) return ap - bp;
+			return A.name.localeCompare(B.name);
+		});
+		return arr;
+	}, [filtered, parMap, sortMode]);
+
 
 	async function onAdd(e) {
 		e.preventDefault();
@@ -312,6 +356,23 @@ export default function Inventory() {
 
 				{zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
 				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search inventory" style={{ marginTop: 12 }} />
+				<div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+					<div className="helper">Sort</div>
+					<select className="input" value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ width: 180 }}>
+						<option value="low">Lowest stock first</option>
+						<option value="name">Name</option>
+						<option value="category">Category</option>
+						<option value="qty">Qty</option>
+						<option value="par">Par</option>
+					</select>
+					<div className="helper">Category</div>
+					<select className="input" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ width: 200 }}>
+						<option value="all">All</option>
+						{categoryOptions.map((c) => (
+							<option key={c} value={c}>{c}</option>
+						))}
+					</select>
+				</div>
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
 				<div style={{ marginTop: 12, overflowX: "auto" }}>
@@ -321,13 +382,14 @@ export default function Inventory() {
 								<th>Name</th>
 								<th>Qty</th>
 								<th>Par</th>
+								<th>Stock</th>
 								<th>Unit</th>
 								<th>Public</th>
 								<th></th>
 							</tr>
 						</thead>
 						<tbody>
-							{filtered.map((it) => (
+							{sorted.map((it) => (
 								<tr key={it.id}>
 									<td style={{ fontWeight: 700 }}>{it.name || "(unnamed)"}</td>
 									<td>{it.qty ?? 0}</td>
@@ -347,6 +409,25 @@ export default function Inventory() {
 											}}
 											style={{ width: 90 }}
 										/>
+									</td>
+									<td>
+										{(() => {
+											const id = String(it.id);
+											const parV = Number(parMap?.[id]);
+											const par = Number.isFinite(parV) && parV > 0 ? parV : null;
+											const qtyV = Number(it?.qty);
+											const qty = Number.isFinite(qtyV) ? qtyV : 0;
+											if (!par) return <span className="helper">no par</span>;
+											const pct = Math.max(0, Math.min(1, qty / par));
+											return (
+												<div style={{ display: "grid", gap: 4, minWidth: 160 }}>
+													<div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+														<div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+													</div>
+													<div className="helper">{Math.round(qty)} / {Math.round(par)}</div>
+												</div>
+											);
+										})()}
 									</td>
 									<td>{it.unit || ""}</td>
 									<td>{it.is_public ? "Yes" : "No"}</td>
