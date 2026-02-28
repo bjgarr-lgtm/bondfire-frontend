@@ -41,6 +41,8 @@ function isEncryptedNameLike(v) {
   return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
 }
 
+// NOTE: some endpoints return encrypted_blob (snake) while others return encryptedBlob (camel).
+// This helper accepts either without forcing page-specific hacks.
 async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   const arr = Array.isArray(rows) ? rows : [];
   const orgKey = getCachedOrgKey(orgId);
@@ -48,9 +50,17 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
 
   const out = [];
   for (const r of arr) {
-    if (r && r[blobField]) {
+    const blob =
+      (r && r[blobField]) ||
+      (r && r.encrypted_blob) ||
+      (r && r.encryptedBlob) ||
+      (r && r.encrypted_description) ||
+      (r && r.encryptedDescription);
+
+    if (r && blob) {
       try {
-        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        const decStr = await decryptWithOrgKey(orgKey, blob);
+        const dec = JSON.parse(decStr);
         out.push({ ...r, ...dec });
         continue;
       } catch {
@@ -61,8 +71,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   }
   return out;
 }
-
-
 
 function readSessionDeltas(orgId) {
   try {
@@ -166,6 +174,18 @@ export default function Overview() {
     if (orgId) setTickerDeltas(readSessionDeltas(orgId));
   }, [orgId]);
 
+  function countsNormalizedRef(c) {
+    const cc = c || {};
+    return {
+      people: Number(cc.people || 0),
+      inventory: Number(cc.inventory || 0),
+      needsOpen: Number(cc.needsOpen || cc.needs || 0),
+      meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
+      pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
+      subsTotal: Number(cc.subscribers || cc.subs || 0),
+    };
+  }
+
   async function refresh() {
     if (!orgId) return;
     setLoading(true);
@@ -182,22 +202,22 @@ export default function Overview() {
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
       const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
 
-// Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
-let invRawFinal = invRaw;
-const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
-  const cat = (it && (it.category || it.cat)) || "";
-  const blob = it && (it.encrypted_blob || it.encryptedBlob);
-  const nm = String(it && (it.name || it.title || "")).toLowerCase();
-  return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
-});
-if (invLooksScrubbed) {
-  try {
-    const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-    invRawFinal = Array.isArray(invFull?.items) ? invFull.items : invRaw;
-  } catch {
-    invRawFinal = invRaw;
-  }
-}
+      // Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
+      let invRawFinal = invRaw;
+      const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
+        const cat = (it && (it.category || it.cat)) || "";
+        const blob = it && (it.encrypted_blob || it.encryptedBlob);
+        const nm = String(it && (it.name || it.title || "")).toLowerCase();
+        return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
+      });
+      if (invLooksScrubbed) {
+        try {
+          const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
+          invRawFinal = Array.isArray(invFull?.items) ? invFull.items : invRaw;
+        } catch {
+          invRawFinal = invRaw;
+        }
+      }
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
 
@@ -238,28 +258,27 @@ if (invLooksScrubbed) {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
+      // Persist ticker deltas for this session so they don't disappear after refresh.
+      try {
+        const existing = readSessionDeltas(orgId);
+        if (!existing || Object.keys(existing).length === 0) {
+          const pc = prevCounts || {};
+          const cn = countsNormalizedRef(rawCounts);
+          const nextDeltas = {
+            people: cn.people - Number(pc.people || 0),
+            inventory: cn.inventory - Number(pc.inventory || 0),
+            needsOpen: cn.needsOpen - Number(pc.needsOpen || 0),
+            meetingsUpcoming: cn.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
+            pledgesActive: cn.pledgesActive - Number(pc.pledgesActive || 0),
+            subsTotal: cn.subsTotal - Number(pc.subsTotal || 0),
+          };
+          writeSessionDeltas(orgId, nextDeltas);
+          setTickerDeltas(nextDeltas);
+        }
+      } catch {}
 
-// Persist ticker deltas for this session so they don't disappear after refresh.
-try {
-  const existing = readSessionDeltas(orgId);
-  if (!existing || Object.keys(existing).length === 0) {
-    const pc = prevCounts || {};
-    const nextDeltas = {
-      people: countsNormalizedRef(rawCounts).people - Number(pc.people || 0),
-      inventory: countsNormalizedRef(rawCounts).inventory - Number(pc.inventory || 0),
-      needsOpen: countsNormalizedRef(rawCounts).needsOpen - Number(pc.needsOpen || 0),
-      meetingsUpcoming: countsNormalizedRef(rawCounts).meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
-      pledgesActive: countsNormalizedRef(rawCounts).pledgesActive - Number(pc.pledgesActive || 0),
-      subsTotal: countsNormalizedRef(rawCounts).subsTotal - Number(pc.subsTotal || 0),
-    };
-    writeSessionDeltas(orgId, nextDeltas);
-    setTickerDeltas(nextDeltas);
-  }
-} catch {}
-
-// Save latest counts for the *next login* baseline.
-writePrevCounts(orgId, rawCounts);
-
+      // Save latest counts for the *next login* baseline.
+      writePrevCounts(orgId, rawCounts);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -277,21 +296,7 @@ writePrevCounts(orgId, rawCounts);
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
-  // ----- derived -----
-  
-
-function countsNormalizedRef(c) {
-  const cc = c || {};
-  return {
-    people: Number(cc.people || 0),
-    inventory: Number(cc.inventory || 0),
-    needsOpen: Number(cc.needsOpen || cc.needs || 0),
-    meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
-    pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
-    subsTotal: Number(cc.subscribers || cc.subs || 0),
-  };
-}
-const countsNormalized = useMemo(() => {
+  const countsNormalized = useMemo(() => {
     const c = counts || {};
     return {
       people: Number(c.people || 0),
@@ -437,7 +442,10 @@ const countsNormalized = useMemo(() => {
 
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
-      const parV = Number(parMap?.[id]);
+      const raw = parMap?.[id];
+      // treat "" as unset
+      if (raw === "" || raw == null) continue;
+      const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
       if (!par) continue;
 
@@ -624,7 +632,7 @@ const countsNormalized = useMemo(() => {
                     <span>No low items below par.</span>
                   )}
                 </div>
-</div>
+              </div>
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
