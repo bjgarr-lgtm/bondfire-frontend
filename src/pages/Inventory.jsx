@@ -40,6 +40,13 @@ function itemKeyFromFields({ name, unit, category, location }) {
 
 export default function Inventory() {
   const orgId = getOrgId();
+  const isNarrow = useMemo(() => {
+    try {
+      return !!(window && window.matchMedia && window.matchMedia("(max-width: 720px)").matches);
+    } catch {
+      return false;
+    }
+  }, []);
   const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
   useEffect(() => {
     setParMap(orgId ? readParMap(orgId) : {});
@@ -317,7 +324,7 @@ export default function Inventory() {
 
         {zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search inventory" style={{ marginTop: 12 }} />
-        <div className="bf-inv-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
           <div className="helper">Sort</div>
           <select className="input" value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ width: 180 }}>
             <option value="low">Lowest stock first</option>
@@ -336,8 +343,93 @@ export default function Inventory() {
         </div>
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
-        <div className="bf-table-scroll" style={{ marginTop: 12, overflowX: "auto" }}>
-          <table className="table" style={{ width: "100%", minWidth: 760 }}>
+        {isNarrow ? (
+          loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={`skel-invrow-${i}`} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <div className="bfSkel" style={{ height: 14, width: "60%", borderRadius: 8 }} />
+                      <div className="bfSkel" style={{ height: 12, width: "40%", borderRadius: 8, marginTop: 8 }} />
+                    </div>
+                    <div className="bfSkel" style={{ height: 34, width: 84, borderRadius: 10 }} />
+                  </div>
+                  <div className="bfSkel" style={{ height: 10, width: "100%", borderRadius: 999, marginTop: 12 }} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {sorted.map((it) => {
+                const idStr = String(it.id);
+                const raw = parMap?.[idStr];
+                const parV = raw === "" || raw == null ? NaN : Number(raw);
+                const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
+                const qtyV = Number(it?.qty);
+                const qty = Number.isFinite(qtyV) ? qtyV : 0;
+                const pct = par > 0 ? qty / par : null;
+                const tone = pct == null ? "neutral" : pct <= 0.25 ? "danger" : pct <= 0.5 ? "warn" : "success";
+                const barColor = tone === "danger" ? "#ff4d4d" : tone === "warn" ? "#ff9a3c" : tone === "success" ? "#39d98a" : "rgba(255,255,255,0.18)";
+                return (
+                  <div key={it.id} className="card" style={{ padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 900, fontSize: 16, lineHeight: 1.15, wordBreak: "break-word" }}>{it.name || "(unnamed)"}</div>
+                        <div className="helper" style={{ marginTop: 4, wordBreak: "break-word" }}>{it.category || "uncategorized"}</div>
+                      </div>
+                      <button className="btn" type="button" onClick={() => openItem(it)} style={{ whiteSpace: "nowrap" }}>
+                        Details
+                      </button>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                      <div>
+                        <div className="helper">Qty</div>
+                        <div style={{ fontWeight: 900 }}>{qty}</div>
+                      </div>
+                      <div>
+                        <div className="helper">Par</div>
+                        <input
+                          className="input"
+                          type="number"
+                          value={parMap?.[idStr] ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setParMap((prev) => {
+                              const next = { ...(prev || {}) };
+                              next[idStr] = v === "" ? "" : Number(v);
+                              writeParMap(orgId, next);
+                              return next;
+                            });
+                          }}
+                          style={{ width: "100%" }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <div className="helper" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <span>Stock</span>
+                        <span style={{ whiteSpace: "nowrap" }}>{par ? `${Math.round(qty)} / ${Math.round(par)}` : "no par"}</span>
+                      </div>
+                      <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden", marginTop: 6 }}>
+                        <div style={{ height: "100%", width: `${par ? Math.min(100, (qty / par) * 100) : 0}%`, background: barColor }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+                      <div className="helper">Unit: <span style={{ color: "white" }}>{it.unit || ""}</span></div>
+                      <div className="helper">Public: <span style={{ color: "white" }}>{it.is_public ? "Yes" : "No"}</span></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            <table className="table" style={{ width: "100%" }}>
             <thead>
               <tr>
                 <th>Name</th>
@@ -384,7 +476,7 @@ export default function Inventory() {
                       return (
                         <div style={{ display: "grid", gap: 4, minWidth: 160 }}>
                           <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                            <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a" }} />
                           </div>
                           <div className="helper">{Math.round(qty)} / {Math.round(par)}</div>
                         </div>
@@ -398,7 +490,8 @@ export default function Inventory() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        )}
       </div>
 
       {edit ? (

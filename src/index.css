@@ -1035,63 +1035,38 @@ html, body {
 }
 
 
-/* --- Bondfire polish: responsive dashboard + subtle hover glow --- */
 
-.card.bf-hoverglow{
-  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
-}
-.card.bf-hoverglow:hover{
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 10px 28px rgba(0,0,0,0.55), 0 0 18px rgba(255, 40, 40, 0.20);
-  border-color: rgba(255,255,255,0.14);
-}
-.card.bf-hoverglow:active{
-  transform: translateY(1px);
+/* Bondfire dashboard responsive + skeletons */
+.bfTopMetricsRow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.bf-skel{
-  position: relative;
-  overflow: hidden;
-}
-.bf-skel::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  background: linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 35%, rgba(255,255,255,0.03) 70%);
-  transform: translateX(-100%);
-  animation: bfShimmer 1.2s infinite;
-}
-@keyframes bfShimmer{
-  0%{ transform: translateX(-100%); }
-  100%{ transform: translateX(100%); }
-}
-
-/* Top metrics: prevent mobile spill by allowing horizontal scroll */
-.bf-top-metrics{
-  overflow-x: hidden;
-}
-@media (max-width: 720px){
-  .bf-top-metrics{
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(160px, 1fr);
-    grid-template-columns: unset !important;
-    overflow-x: auto;
-    padding-bottom: 6px;
-    scroll-snap-type: x mandatory;
-  }
-  .bf-top-metrics > *{
-    scroll-snap-align: start;
+@media (max-width: 720px) {
+  .bfTopMetricsRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* Inventory: mobile controls + table */
-@media (max-width: 520px){
-  .bf-inv-controls{
-    align-items: stretch !important;
-  }
-  .bf-inv-controls .input,
-  .bf-inv-controls select{
-    width: 100% !important;
-    flex: 1 1 auto;
-  }
+.bfHoverGlow {
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+
+.bfHoverGlow:hover {
+  box-shadow: 0 0 0 1px rgba(255, 80, 80, 0.22), 0 10px 26px rgba(0, 0, 0, 0.45);
+  transform: translateY(-1px);
+}
+
+.bfSkel {
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  background-size: 200% 100%;
+  animation: bfSkelShimmer 1.1s linear infinite;
+}
+
+@keyframes bfSkelShimmer {
+  0% { background-position: 0% 0%; }
+  100% { background-position: -200% 0%; }
 }
 

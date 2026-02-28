@@ -101,28 +101,12 @@ function writePrevCounts(orgId, counts) {
   } catch {}
 }
 
-function readTopCardOrder(orgId) {
-  try {
-    const v = JSON.parse(localStorage.getItem(`bf_overview_topcard_order_${orgId}`) || "[]");
-    return Array.isArray(v) ? v.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeTopCardOrder(orgId, order) {
-  try {
-    localStorage.setItem(`bf_overview_topcard_order_${orgId}`, JSON.stringify(Array.isArray(order) ? order : []));
-  } catch {}
-}
-
-
 function deltaBadge(delta) {
   if (!Number.isFinite(delta) || delta === 0) return null;
   const up = delta > 0;
   const txt = up ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`;
-  const bg = up ? "rgba(0, 200, 120, 0.18)" : "rgba(255, 80, 80, 0.18)";
-  const bd = up ? "rgba(0, 200, 120, 0.35)" : "rgba(255, 80, 80, 0.35)";
+  const bg = up ? "rgba(57, 217, 138, 0.18)" : "rgba(255, 77, 77, 0.18)";
+  const bd = up ? "rgba(57, 217, 138, 0.35)" : "rgba(255, 77, 77, 0.35)";
   const fg = up ? "#b8ffe4" : "#ffd0d0";
   return { txt, style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: bg, border: `1px solid ${bd}`, color: fg } };
 }
@@ -144,6 +128,29 @@ function pill(text, tone) {
   );
 }
 
+// ADD near the top (helpers/components), e.g. after pill() or before readInvPar()
+
+
+// Unified palette (used for badges, bars, sparklines)
+const BF_COLORS = {
+  success: "#39d98a",
+  warn: "#ff9a3c",
+  danger: "#ff4d4d",
+  info: "#78b4ff",
+  neutral: "rgba(255,255,255,0.18)",
+};
+
+function pctTone(pct) {
+  if (!Number.isFinite(pct)) return "neutral";
+  if (pct <= 0.25) return "danger";
+  if (pct <= 0.5) return "warn";
+  return "success";
+}
+
+// Tiny skeleton bits (used while loading)
+function Skel({ h = 12, w = "100%", r = 8, style }) {
+  return <div className="bfSkel" style={{ height: h, width: w, borderRadius: r, ...style }} />;
+}
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -179,10 +186,13 @@ function Sparkline({ values, width = 120, height = 32 }) {
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
-      <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={d} fill="none" stroke={trendUp ? BF_COLORS.success : BF_COLORS.danger} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
+
+
+
 
 function readInvPar(orgId) {
   try {
@@ -232,14 +242,6 @@ export default function Overview() {
     // New org, new baseline.
     setTickerDeltas({});
   }, [orgId]);
-
-  const [topCardOrder, setTopCardOrder] = useState(() => readTopCardOrder(orgId));
-  const [draggingTopKey, setDraggingTopKey] = useState("");
-  useEffect(() => {
-    setTopCardOrder(readTopCardOrder(orgId));
-    setDraggingTopKey("");
-  }, [orgId]);
-
 
   function countsNormalizedRef(c) {
     const cc = c || {};
@@ -414,37 +416,6 @@ export default function Overview() {
     ];
   }, [countsNormalized, deltas]);
 
-  const topCardsOrdered = useMemo(() => {
-    const arr = Array.isArray(topCards) ? topCards.slice() : [];
-    const ord = Array.isArray(topCardOrder) ? topCardOrder : [];
-    if (!ord.length) return arr;
-
-    const byKey = new Map(arr.map((c) => [c.key, c]));
-    const out = [];
-    for (const k of ord) {
-      if (byKey.has(k)) out.push(byKey.get(k));
-    }
-    for (const c of arr) {
-      if (!ord.includes(c.key)) out.push(c);
-    }
-    return out;
-  }, [topCards, topCardOrder]);
-
-  function moveTopCard(dragKey, dropKey) {
-    if (!dragKey || !dropKey || dragKey === dropKey) return;
-    const keys = topCardsOrdered.map((c) => c.key);
-    const from = keys.indexOf(dragKey);
-    const to = keys.indexOf(dropKey);
-    if (from < 0 || to < 0) return;
-
-    const next = keys.slice();
-    const [k] = next.splice(from, 1);
-    next.splice(to, 0, k);
-    setTopCardOrder(next);
-    writeTopCardOrder(orgId, next);
-  }
-
-
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
     return arr
@@ -479,7 +450,9 @@ export default function Overview() {
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  const newsletterSpark = useMemo(() => {
+  // ADD inside Overview() near other useMemos
+
+const newsletterSpark = useMemo(() => {
   const arr = Array.isArray(subs) ? subs : [];
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -512,22 +485,6 @@ export default function Overview() {
   }
   return cum;
 }, [subs]);
-
-  const newsletterPct14d = useMemo(() => {
-    const arr = Array.isArray(subs) ? subs : [];
-    if (!arr.length) return { pct: 0, joins: 0, prev: 0 };
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-    const since = now - 14 * dayMs;
-    const joins = arr.filter((s) => {
-      const t = Number(s?.joined || s?.created_at || 0);
-      return Number.isFinite(t) && t >= since;
-    }).length;
-    const prev = Math.max(0, arr.length - joins);
-    const pct = prev > 0 ? (joins / prev) * 100 : joins > 0 ? 100 : 0;
-    return { pct, joins, prev };
-  }, [subs]);
-
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
@@ -658,42 +615,20 @@ export default function Overview() {
         {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
       </div>
 
-      {/* Top metrics row: ONE row on desktop; on mobile it scrolls instead of spilling off-screen */}
-      <div
-        className="bf-top-metrics"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        {loading && !topCardsOrdered.length ? (
+      {/* Top metrics row */}
+      <div className="bfTopMetricsRow">
+        {loading ? (
           Array.from({ length: 6 }).map((_, i) => (
-            <div key={`sk-top-${i}`} className="card bf-skel" style={{ padding: 14, minHeight: 98 }} />
+            <div key={`skel-top-${i}`} className="card" style={{ padding: 14, minHeight: 98 }}>
+              <Skel h={14} w="60%" r={8} />
+              <Skel h={34} w="40%" r={10} style={{ marginTop: 12 }} />
+              <Skel h={12} w="45%" r={8} style={{ marginTop: 10 }} />
+            </div>
           ))
         ) : (
-          topCardsOrdered.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              style={cardBtnStyle}
-              onClick={() => go(c.to)}
-              draggable
-              onDragStart={() => setDraggingTopKey(c.key)}
-              onDragEnd={() => setDraggingTopKey("")}
-              onDragOver={(e) => {
-                if (!draggingTopKey) return;
-                e.preventDefault();
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                moveTopCard(draggingTopKey, c.key);
-                setDraggingTopKey("");
-              }}
-              title="drag to reorder"
-            >
-              <div className="card bf-hoverglow" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+          topCards.map((c) => (
+            <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+              <div className="card bfHoverGlow" style={{ padding: 14, position: "relative", minHeight: 98 }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -708,8 +643,7 @@ export default function Overview() {
               </div>
             </button>
           ))
-        )}
-      </div>
+        )}      </div>
 
       {/* Main grid */}
       <div
@@ -728,7 +662,16 @@ export default function Overview() {
               View all
             </button>
           </div>
-          {meetingsSorted.length ? (
+          {loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={`skel-meet-${i}`} className="card" style={{ padding: 12 }}>
+                  <Skel h={14} w="70%" />
+                  <Skel h={12} w="90%" style={{ marginTop: 10 }} />
+                </div>
+              ))}
+            </div>
+          ) : meetingsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {meetingsSorted.map((m) => (
                 <div key={m.id} className="card" style={{ padding: 12 }}>
@@ -760,7 +703,20 @@ export default function Overview() {
             </button>
           </div>
 
-          {invCatStats.length ? (
+          {loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={`skel-inv-${i}`} style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Skel h={12} w="55%" />
+                    <Skel h={12} w="25%" />
+                  </div>
+                  <Skel h={10} w="100%" r={999} />
+                </div>
+              ))}
+              <Skel h={12} w="60%" style={{ marginTop: 10 }} />
+            </div>
+          ) : invCatStats.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {invCatStats.map((x) => {
                 const pct = x.par > 0 ? x.pctClamped : 0;
@@ -774,7 +730,7 @@ export default function Overview() {
                       </div>
                     </div>
                     <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                      <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? BF_COLORS.danger : pct <= 0.5 ? BF_COLORS.warn : BF_COLORS.success }} />
                     </div>
                   </div>
                 );
@@ -815,10 +771,10 @@ export default function Overview() {
                                 width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
                                 background:
                                   item.qty <= item.par * 0.25
-                                    ? "#e11d48"
+                                    ? BF_COLORS.danger
                                     : item.qty <= item.par * 0.5
-                                    ? "#f97316"
-                                    : "#22c55e",
+                                    ? BF_COLORS.warn
+                                    : BF_COLORS.success,
                                 height: "100%",
                               }}
                             />
@@ -846,7 +802,17 @@ export default function Overview() {
             </button>
           </div>
 
-          {needsOpen.length ? (
+          {loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={`skel-need-${i}`} className="card" style={{ padding: 12 }}>
+                  <Skel h={12} w="30%" />
+                  <Skel h={14} w="80%" style={{ marginTop: 10 }} />
+                  <Skel h={12} w="55%" style={{ marginTop: 8 }} />
+                </div>
+              ))}
+            </div>
+          ) : needsOpen.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {needsOpen.map((n) => {
                 const pr = Number(n?.priority || 0);
@@ -873,27 +839,8 @@ export default function Overview() {
 
           {/* Newsletter */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, flex: 1, minWidth: 160 }}>Newsletter</h2>
-
-            <div
-              className="bf-spark-wrap"
-              style={{
-                width: 160,
-                height: 34,
-                borderRadius: 10,
-                padding: "2px 8px",
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.10)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              title="subscriber trend (last 14 days)"
-            >
-              <Sparkline values={newsletterSpark} width={140} height={24} />
-            </div>
-
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
             <button className="btn" type="button" onClick={() => go("settings")}>
               View all
             </button>
@@ -901,40 +848,61 @@ export default function Overview() {
 
           <div className="helper" style={{ marginTop: 10 }}>
             {subs.length} subscriber{subs.length === 1 ? "" : "s"}
-            {subs.length ? (
-              <span style={{ marginLeft: 10, opacity: 0.95 }}>
-                {newsletterPct14d.joins ? `+${newsletterPct14d.joins} in 14d · ` : ""}
-                {Math.round(newsletterPct14d.pct)}%
-              </span>
-            ) : null}
           </div>
 
-          {loading && !subsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={`sk-sub-${i}`} className="card bf-skel" style={{ padding: 12, height: 56 }} />
+                <div key={`skel-sub-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <Skel h={12} w="45%" />
+                  <Skel h={12} w="35%" />
+                </div>
               ))}
             </div>
           ) : subsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {subsSorted.map((s) => {
-                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "");
-                const email = safeStr(s?.email || s?.email_address || s?.addr || "");
+              {subsSorted.map((s, idx) => {
+                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
                 const joined = Number(s?.joined || s?.created_at || 0);
 
                 return (
-                  <div key={s.id || `${email}-${joined}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {name || email || "subscriber"}
+                  <div
+                    key={s.id || `${name}-${joined}`}
+                    style={{
+                      display: "grid",
+                      gap: 6,
+                      padding: "6px 0",
+                    }}
+                  >
+                    {/* Row 1: name + date */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {name}
                       </div>
-                      {email ? (
-                        <div className="helper" style={{ marginTop: 2, overflowWrap: "anywhere" }}>
-                          {email}
-                        </div>
-                      ) : null}
+                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                        {fmtDT(joined)}
+                      </div>
                     </div>
-                    <div className="helper" style={{ whiteSpace: "nowrap" }}>{fmtDT(joined)}</div>
+
+                    {/* Row 2: sparkline (only on first row) */}
+                    {idx === 0 ? (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 30,
+                          borderRadius: 10,
+                          padding: "2px 8px",
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-start",
+                        }}
+                        title="subscriber trend (last 14 days)"
+                      >
+                        <Sparkline values={newsletterSpark} width={260} height={24} />
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -953,7 +921,19 @@ export default function Overview() {
             </button>
           </div>
 
-          {pledgesSorted.length ? (
+          {loading ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={`skel-pledge-${i}`} style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <Skel h={18} w={70} r={999} />
+                    <Skel h={14} w="60%" />
+                  </div>
+                  <Skel h={12} w="70%" />
+                </div>
+              ))}
+            </div>
+          ) : pledgesSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {pledgesSorted.map((p) => {
                 const status = String(p?.status || "").toLowerCase();
