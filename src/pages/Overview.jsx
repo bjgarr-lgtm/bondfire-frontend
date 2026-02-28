@@ -434,6 +434,7 @@ export default function Overview() {
   }, [inventory, invPar]);
 
   // Low items list: up to 4 items that are below par (qty/par < 1).
+  const lowItems = invLowItems
   const invLowItems = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const parMap = invPar || {};
