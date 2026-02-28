@@ -792,7 +792,7 @@ const newsletterSpark = useMemo(() => {
           </div>
 
           {subsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {subsSorted.map((s, idx) => {
                 const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
                 const joined = Number(s?.joined || s?.created_at || 0);
@@ -802,41 +802,39 @@ const newsletterSpark = useMemo(() => {
                     key={s.id || `${name}-${joined}`}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr auto",
-                      gap: 10,
-                      alignItems: "center",
+                      gap: 6,
+                      padding: "6px 0",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <div style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {/* Row 1: name + date */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {name}
                       </div>
-
-                      {/* sparkline lives on the same row as the first subscriber */}
-                      {idx === 0 ? (
-                        <div
-                          style={{
-                            width: 130,
-                            height: 30,
-                            borderRadius: 10,
-                            padding: "2px 6px",
-                            background: "rgba(255,255,255,0.05)",
-                            border: "1px solid rgba(255,255,255,0.10)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flex: "0 0 auto",
-                          }}
-                          title="subscriber trend (last 14 days)"
-                        >
-                          <Sparkline values={newsletterSpark} width={118} height={24} />
-                        </div>
-                      ) : null}
+                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                        {fmtDT(joined)}
+                      </div>
                     </div>
 
-                    <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                      {fmtDT(joined)}
-                    </div>
+                    {/* Row 2: sparkline (only on first row) */}
+                    {idx === 0 ? (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 30,
+                          borderRadius: 10,
+                          padding: "2px 8px",
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-start",
+                        }}
+                        title="subscriber trend (last 14 days)"
+                      >
+                        <Sparkline values={newsletterSpark} width={260} height={24} />
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
