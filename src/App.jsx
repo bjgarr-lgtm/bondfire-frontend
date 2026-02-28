@@ -25,6 +25,8 @@ import SignIn from "./pages/SignIn.jsx";
 import Security from "./pages/Security.jsx";
 
 // COMPONENTS
+import HelpWidget from "./help/HelpWidget.jsx";
+
 import AppHeader from "./components/AppHeader.jsx";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 
@@ -207,6 +209,8 @@ function Shell() {
 
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
+
+			{!hideHeader && state.authed ? <HelpWidget /> : null}
 		</AuthCtx.Provider>
 	);
 }

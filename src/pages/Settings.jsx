@@ -8,6 +8,13 @@ import Security from "./Security.jsx";
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
+function getToken() {
+  // Back-compat: older builds stored a JWT in storage.
+  // Newer cookie-session builds won\'t have this, and that\'s OK.
+  return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
+}
+
+
 function humanizeError(msg) {
   const s = String(msg || "").trim();
   if (!s) return "";
