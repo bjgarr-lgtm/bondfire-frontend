@@ -778,40 +778,7 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-        {/* Newsletter */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
-
-            {/* ADD this sparkline block */}
-            <div
-              style={{
-                width: 130,
-                height: 34,
-                borderRadius: 10,
-                padding: "2px 6px",
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.10)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              title="subscriber trend (last 14 days)"
-            >
-              <Sparkline values={newsletterSpark} width={118} height={28} />
-            </div>
-
-            <button className="btn" type="button" onClick={() => go("settings")}>
-              View all
-            </button>
-          </div>
-
-          <div className="helper" style={{ marginTop: 10 }}>
-            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
-          </div>
-
-          {/* ...rest unchanged */}
-        </div>        
+          {/* Newsletter */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
@@ -826,13 +793,50 @@ const newsletterSpark = useMemo(() => {
 
           {subsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              {subsSorted.map((s) => {
+              {subsSorted.map((s, idx) => {
                 const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
                 const joined = Number(s?.joined || s?.created_at || 0);
+
                 return (
-                  <div key={s.id || `${name}-${joined}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ fontWeight: 800 }}>{name}</div>
-                    <div className="helper" style={{ whiteSpace: "nowrap" }}>{fmtDT(joined)}</div>
+                  <div
+                    key={s.id || `${name}-${joined}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {name}
+                      </div>
+
+                      {/* sparkline lives on the same row as the first subscriber */}
+                      {idx === 0 ? (
+                        <div
+                          style={{
+                            width: 130,
+                            height: 30,
+                            borderRadius: 10,
+                            padding: "2px 6px",
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: "0 0 auto",
+                          }}
+                          title="subscriber trend (last 14 days)"
+                        >
+                          <Sparkline values={newsletterSpark} width={118} height={24} />
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                      {fmtDT(joined)}
+                    </div>
                   </div>
                 );
               })}
