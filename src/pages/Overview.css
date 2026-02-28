@@ -1,0 +1,64 @@
+/* Dashboard polish: responsive top metrics row + hover glow + skeletons */
+
+.bfTopMetricsRow {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
+}
+
+/* Mobile: stop spilloff. Use horizontal snap-scroll instead of overflowing the viewport. */
+@media (max-width: 760px) {
+  .bfTopMetricsRow {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(160px, 1fr);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+  .bfTopMetricsRow > * {
+    scroll-snap-align: start;
+  }
+}
+
+/* Hover glow for dashboard cards */
+.bfDashCard {
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.bfDashCard:hover {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    0 0 22px rgba(255, 0, 80, 0.10);
+  transform: translateY(-1px);
+}
+
+/* Drag hint */
+.bfDashCard[draggable="true"] {
+  cursor: grab;
+}
+.bfDashCard[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Skeleton blocks */
+.bfSkel {
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  position: relative;
+}
+.bfSkel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+  animation: bfShimmer 1.15s infinite;
+}
+@keyframes bfShimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}

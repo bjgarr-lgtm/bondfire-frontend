@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import "./Overview.css";
 
 function readOrgInfo(orgId) {
   try {
@@ -128,12 +129,6 @@ function pill(text, tone) {
   );
 }
 
-// ADD near the top (helpers/components), e.g. after pill() or before readInvPar()
-
-function clamp(n, a, b) {
-  return Math.max(a, Math.min(b, n));
-}
-
 function Sparkline({ values, width = 120, height = 32 }) {
   const v = Array.isArray(values) ? values.map((x) => Number(x || 0)) : [];
   if (!v.length) return null;
@@ -183,6 +178,25 @@ function writeInvPar(orgId, obj) {
   } catch {}
 }
 
+function readDashCardOrder(orgId) {
+  try {
+    const v = JSON.parse(localStorage.getItem(`bf_dash_card_order_${orgId}`) || "null");
+    return Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashCardOrder(orgId, order) {
+  try {
+    localStorage.setItem(`bf_dash_card_order_${orgId}`, JSON.stringify(Array.isArray(order) ? order : []));
+  } catch {}
+}
+
+function SkeletonCard({ h = 98 }) {
+  return <div className="card bfSkel" style={{ padding: 14, minHeight: h }} />;
+}
+
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -218,6 +232,12 @@ export default function Overview() {
     setTickerDeltas({});
   }, [orgId]);
 
+  const [dashOrder, setDashOrder] = useState(() => readDashCardOrder(orgId) || []);
+
+  useEffect(() => {
+    setDashOrder(readDashCardOrder(orgId) || []);
+  }, [orgId]);
+
   function countsNormalizedRef(c) {
     const cc = c || {};
     return {
@@ -248,15 +268,12 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
       let invRawFinal = invRaw;
-      const invLooksScrubbed =
-        Array.isArray(invRaw) &&
-        invRaw.length > 0 &&
-        invRaw.some((it) => {
-          const cat = (it && (it.category || it.cat)) || "";
-          const blob = it && (it.encrypted_blob || it.encryptedBlob);
-          const nm = String(it && (it.name || it.title || "")).toLowerCase();
-          return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
-        });
+      const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
+        const cat = (it && (it.category || it.cat)) || "";
+        const blob = it && (it.encrypted_blob || it.encryptedBlob);
+        const nm = String(it && (it.name || it.title || "")).toLowerCase();
+        return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
+      });
       if (invLooksScrubbed) {
         try {
           const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
@@ -270,15 +287,12 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
       let needsRawFinal = needsRaw;
-      const needsLooksScrubbed =
-        Array.isArray(needsRaw) &&
-        needsRaw.length > 0 &&
-        needsRaw.some((n) => {
-          const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
-          const blob = n && (n.encrypted_blob || n.encryptedBlob);
-          const title = String(n && (n.title || "")).toLowerCase();
-          return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
-        });
+      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
+        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
+        const blob = n && (n.encrypted_blob || n.encryptedBlob);
+        const title = String(n && (n.title || "")).toLowerCase();
+        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
+      });
       if (needsLooksScrubbed) {
         try {
           const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
@@ -371,15 +385,7 @@ export default function Overview() {
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
       const db = deltaBadge(deltas[key]);
-      return {
-        key,
-        title,
-        icon,
-        value,
-        sub,
-        to,
-        badge: db,
-      };
+      return { key, title, icon, value, sub, to, badge: db };
     };
     return [
       mk("people", "People", "👥", countsNormalized.people, "members", "people"),
@@ -391,75 +397,82 @@ export default function Overview() {
     ];
   }, [countsNormalized, deltas]);
 
+  const topCardsOrdered = useMemo(() => {
+    const order = Array.isArray(dashOrder) && dashOrder.length ? dashOrder : topCards.map((c) => c.key);
+    const map = new Map(topCards.map((c) => [c.key, c]));
+    const out = [];
+    for (const k of order) {
+      const v = map.get(k);
+      if (v) out.push(v);
+    }
+    for (const c of topCards) {
+      if (!out.some((x) => x.key === c.key)) out.push(c);
+    }
+    return out;
+  }, [dashOrder, topCards]);
+
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
-    return arr
-      .filter((m) => Number(m?.starts_at) > 0)
-      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
-      .slice(0, 3);
+    return arr.filter((m) => Number(m?.starts_at) > 0).sort((a, b) => Number(a.starts_at) - Number(b.starts_at)).slice(0, 3);
   }, [meetings]);
 
   const needsOpen = useMemo(() => {
     const arr = Array.isArray(needs) ? needs : [];
-    return arr
-      .filter((n) => String(n?.status || "").toLowerCase() === "open")
-      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
-      .slice(0, 6);
+    return arr.filter((n) => String(n?.status || "").toLowerCase() === "open").sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0)).slice(0, 6);
   }, [needs]);
 
   const subsSorted = useMemo(() => {
     const arr = Array.isArray(subs) ? subs : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
-      .slice(0, 6);
+    return arr.slice().sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0)).slice(0, 6);
   }, [subs]);
 
   const pledgesSorted = useMemo(() => {
     const arr = Array.isArray(pledges) ? pledges : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
-      .slice(0, 6);
+    return arr.slice().sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0)).slice(0, 6);
   }, [pledges]);
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  // ADD inside Overview() near other useMemos
+  // Newsletter sparkline data + percent change (last 14 days)
+  const newsletterSpark = useMemo(() => {
+    const arr = Array.isArray(subs) ? subs : [];
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
 
-const newsletterSpark = useMemo(() => {
-  const arr = Array.isArray(subs) ? subs : [];
-  const now = Date.now();
-  const dayMs = 24 * 60 * 60 * 1000;
+    const buckets = [];
+    for (let i = 13; i >= 0; i--) {
+      const start = now - i * dayMs;
+      const end = start + dayMs;
+      const count = arr.filter((s) => {
+        const t = Number(s?.joined || s?.created_at || 0);
+        return Number.isFinite(t) && t >= start && t < end;
+      }).length;
+      buckets.push(count);
+    }
 
-  // last 14 days, oldest -> newest
-  const buckets = [];
-  for (let i = 13; i >= 0; i--) {
-    const start = now - i * dayMs;
-    const end = start + dayMs;
-    const count = arr.filter((s) => {
-      const t = Number(s?.joined || s?.created_at || 0);
-      return Number.isFinite(t) && t >= start && t < end;
-    }).length;
-    buckets.push(count);
-  }
+    const cum = [];
+    let run = 0;
+    for (const c of buckets) {
+      run += c;
+      cum.push(run);
+    }
 
-  // cumulative looks nicer than spiky daily counts
-  const cum = [];
-  let run = 0;
-  for (const c of buckets) {
-    run += c;
-    cum.push(run);
-  }
+    const any = buckets.some((x) => x > 0);
+    if (!any) {
+      const total = arr.length;
+      return new Array(14).fill(total);
+    }
+    return cum;
+  }, [subs]);
 
-  // If there were no joins in 14d but we have subs, keep a flat line at total
-  const any = buckets.some((x) => x > 0);
-  if (!any) {
-    const total = arr.length;
-    return new Array(14).fill(total);
-  }
-  return cum;
-}, [subs]);
+  const newsletterPct = useMemo(() => {
+    const v = Array.isArray(newsletterSpark) ? newsletterSpark : [];
+    if (!v.length) return 0;
+    const first = Number(v[0] || 0);
+    const last = Number(v[v.length - 1] || 0);
+    if (first <= 0) return last > 0 ? 100 : 0;
+    return ((last - first) / first) * 100;
+  }, [newsletterSpark]);
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
@@ -498,14 +511,9 @@ const newsletterSpark = useMemo(() => {
 
     const out = Array.from(map.values()).map((x) => {
       const pct = x.par > 0 ? x.qty / x.par : null;
-      return {
-        ...x,
-        pct,
-        pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0,
-      };
+      return { ...x, pct, pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0 };
     });
 
-    // Prefer categories with a par set, ordered by how low they are.
     out.sort((a, b) => {
       const ap = a.pct == null ? 999 : a.pct;
       const bp = b.pct == null ? 999 : b.pct;
@@ -525,7 +533,6 @@ const newsletterSpark = useMemo(() => {
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
       const raw = parMap?.[id];
-      // treat "" as unset
       if (raw === "" || raw == null) continue;
       const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
@@ -534,16 +541,7 @@ const newsletterSpark = useMemo(() => {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const pct = qty / par;
-      if (pct < 1) {
-        lows.push({
-          id,
-          name: it?.name,
-          category: it?.category,
-          qty,
-          par,
-          pct,
-        });
-      }
+      if (pct < 1) lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
     }
 
     lows.sort((a, b) => a.pct - b.pct);
@@ -554,7 +552,6 @@ const newsletterSpark = useMemo(() => {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
       await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -562,7 +559,6 @@ const newsletterSpark = useMemo(() => {
       });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      // fallback: still useful navigation
       setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
       go("meetings");
     }
@@ -577,6 +573,41 @@ const newsletterSpark = useMemo(() => {
     cursor: "pointer",
   };
 
+  const [dragKey, setDragKey] = useState(null);
+
+  function onDragStart(key, e) {
+    setDragKey(key);
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", key);
+    } catch {}
+  }
+
+  function onDropKey(targetKey, e) {
+    e.preventDefault();
+    const fromKey = (() => {
+      try {
+        return e.dataTransfer.getData("text/plain") || dragKey;
+      } catch {
+        return dragKey;
+      }
+    })();
+    if (!fromKey || fromKey === targetKey) return;
+
+    const current = topCardsOrdered.map((c) => c.key);
+    const fromIdx = current.indexOf(fromKey);
+    const toIdx = current.indexOf(targetKey);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const next = current.slice();
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromKey);
+
+    setDashOrder(next);
+    writeDashCardOrder(orgId, next);
+    setDragKey(null);
+  }
+
   return (
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
@@ -590,32 +621,49 @@ const newsletterSpark = useMemo(() => {
         {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
       </div>
 
-      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        {topCards.map((c) => (
-          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-            <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
-              {c.badge ? (
-                <div style={{ position: "absolute", top: 12, right: 12 }}>
-                  <span style={c.badge.style}>{c.badge.txt}</span>
+      {/* Top metrics row: desktop one row, mobile snap-scroll (no spilloff). Drag to reorder. */}
+      <div className="bfTopMetricsRow">
+        {loading && !Object.keys(counts || {}).length ? (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        ) : (
+          topCardsOrdered.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              style={cardBtnStyle}
+              onClick={() => go(c.to)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => onDropKey(c.key, e)}
+            >
+              <div
+                className="card bfDashCard"
+                style={{ padding: 14, position: "relative", minHeight: 98 }}
+                draggable="true"
+                onDragStart={(e) => onDragStart(c.key, e)}
+                title="drag to reorder"
+              >
+                {c.badge ? (
+                  <div style={{ position: "absolute", top: 12, right: 12 }}>
+                    <span style={c.badge.style}>{c.badge.txt}</span>
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontSize: 18 }}>{c.icon}</div>
+                  <div style={{ fontWeight: 900 }}>{c.title}</div>
                 </div>
-              ) : null}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ fontSize: 18 }}>{c.icon}</div>
-                <div style={{ fontWeight: 900 }}>{c.title}</div>
+                <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+                <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
               </div>
-              <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
-              <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
-            </div>
-          </button>
-        ))}
+            </button>
+          ))
+        )}
       </div>
 
       {/* Main grid */}
@@ -635,7 +683,12 @@ const newsletterSpark = useMemo(() => {
               View all
             </button>
           </div>
-          {meetingsSorted.length ? (
+          {loading && !meetingsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              <div className="card bfSkel" style={{ padding: 12, minHeight: 64 }} />
+              <div className="card bfSkel" style={{ padding: 12, minHeight: 64 }} />
+            </div>
+          ) : meetingsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {meetingsSorted.map((m) => (
                 <div key={m.id} className="card" style={{ padding: 12 }}>
@@ -778,7 +831,7 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-          {/* Newsletter */}
+        {/* Newsletter */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
@@ -788,13 +841,14 @@ const newsletterSpark = useMemo(() => {
           </div>
 
           <div className="helper" style={{ marginTop: 10 }}>
-            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
+            {subs.length} subscriber{subs.length === 1 ? "" : "s"} · {newsletterPct >= 0 ? "+" : ""}{Math.round(newsletterPct)}% (14d)
           </div>
 
           {subsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
               {subsSorted.map((s, idx) => {
                 const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
+                const email = safeStr(s?.email || s?.Email || s?.subscriber_email || "").trim();
                 const joined = Number(s?.joined || s?.created_at || 0);
 
                 return (
@@ -806,17 +860,15 @@ const newsletterSpark = useMemo(() => {
                       padding: "6px 0",
                     }}
                   >
-                    {/* Row 1: name + date */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ fontWeight: 800, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {name}
+                        {name}{email ? ` · ${email}` : ""}
                       </div>
                       <div className="helper" style={{ whiteSpace: "nowrap" }}>
                         {fmtDT(joined)}
                       </div>
                     </div>
 
-                    {/* Row 2: sparkline (only on first row) */}
                     {idx === 0 ? (
                       <div
                         style={{
