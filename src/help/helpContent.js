@@ -1,4 +1,34 @@
-export const helpTopics = [
+// src/help/helpContent.js
+// Single source of truth for in-app help content.
+// IMPORTANT: HelpPanel.jsx imports HELP_TOPICS
+// HelpWidget.jsx imports guessTopicIdFromPath
+
+export function guessTopicIdFromPath(pathname) {
+  const p = String(pathname || "").toLowerCase();
+
+  // Settings / security areas
+  if (p.includes("security")) return "security";
+  if (p.includes("zk")) return "security";
+  if (p.includes("keys")) return "security";
+
+  // Chat areas
+  if (p.includes("chat")) return "chat";
+  if (p.includes("matrix")) return "chat";
+
+  // Inventory / needs / meetings
+  if (p.includes("inventory")) return "inventory";
+  if (p.includes("needs")) return "needs";
+  if (p.includes("meetings")) return "meetings";
+
+  // Newsletter / public pages
+  if (p.includes("newsletter")) return "newsletter";
+  if (p.includes("public")) return "newsletter";
+
+  // Default
+  return "getting-started";
+}
+
+export const HELP_TOPICS = [
   {
     id: "getting-started",
     title: "Getting Started",
@@ -11,9 +41,9 @@ Your dashboard shows a live snapshot of your org: members, inventory levels, ope
 You can drag and drop the top metric cards (People, Inventory, Needs, etc.) to reorder them however you like. The layout is saved per organization.
 
 If something feels overwhelming, start with:
-1. People – confirm members are added correctly.
-2. Needs – post what your org actually requires.
-3. Meetings – schedule your next coordination moment.
+1. People: confirm members are added correctly.
+2. Needs: post what your org actually requires.
+3. Meetings: schedule your next coordination moment.
 
 The rest builds naturally from there.
 `
@@ -23,26 +53,33 @@ The rest builds naturally from there.
     id: "security",
     title: "Security & Encryption",
     content: `
-Bondfire supports encrypted organization data. That means certain information can only be read by members who have the org key.
+Bondfire supports encrypted organization data. This is for information you do not want exposed if someone gains access to the server or database.
 
 What is an Org Key?
-An org key is a shared secret used to decrypt sensitive data like private notes, pledges, or inventory descriptions.
+An org key is a shared secret used to decrypt sensitive fields inside your org. If a field is encrypted, members need the org key in their browser to read it.
 
-Important:
-• The server does not store readable versions of encrypted data.
-• If you lose your org key and it is not backed up, encrypted data cannot be recovered.
+What this means in practice:
+• Encrypted fields are stored as unreadable blobs on the server.
+• Decryption happens in the browser for members who have the org key.
+• If you do not have the org key, encrypted content will look blank or “(encrypted)”.
 
-Rotating an Org Key:
-When you rotate the key, encrypted data is re-wrapped with a new key. Do this if:
-• A member leaves and should no longer access encrypted content.
-• You suspect key compromise.
+Key backup and recovery:
+If you lose the org key and it is not backed up anywhere, encrypted data cannot be recovered. There is no admin override. That is the point.
 
-Best Practices:
+Rotating the Org Key:
+Rotating creates a new org key and re-wraps existing encrypted data so it can be read with the new key.
+Do this when:
+• A member leaves and should no longer have access.
+• You suspect the key was shared too widely.
+• You want a clean reset after a security incident.
+
+Best practices:
 • Only share org keys with trusted members.
 • Rotate keys when membership changes.
-• Store backup keys securely offline.
+• Store a backup offline (password manager, encrypted note, printed and locked away).
+• Treat the org key like you would treat the password to your organization’s vault.
 
-Encryption is optional for some content but recommended for sensitive operational data.
+This is “strong safety” design: it protects you from platforms, leaks, and server compromise, but it requires you to manage the key responsibly.
 `
   },
 
@@ -50,29 +87,33 @@ Encryption is optional for some content but recommended for sensitive operationa
     id: "chat",
     title: "Chat (Matrix / Element)",
     content: `
-Bondfire chat is powered by Matrix, the same open protocol used by Element.
+Bondfire chat is powered by Matrix, the open protocol used by Element. Bondfire is not inventing a proprietary chat system. It is connecting you to Matrix.
 
-You will need a Matrix account to participate.
+What you need:
+A Matrix account. Most people use Element as the client.
 
-How to Get Started:
-1. Create an account at https://app.element.io or install the Element app.
-2. Choose a username (e.g., @yourname:matrix.org).
-3. Verify your email and complete device verification in Element.
+Create your Matrix account (Element):
+1. Go to https://app.element.io or install Element on mobile.
+2. Create an account. You will get an address like @yourname:matrix.org.
+3. Verify your email if your homeserver requires it.
 
-Connecting to Bondfire:
-Your org’s chat room is a standard Matrix room. You can:
-• Join via invite link.
-• Search for the room name.
-• Accept an invitation from another member.
+Connect chat to Bondfire:
+Your org chat is a normal Matrix room. Depending on how your org set it up, you may:
+• Join via an invite link.
+• Accept an invite from another member.
+• Search for the room in Element (room name or alias).
 
-Device Verification:
-Matrix supports end-to-end encryption. You should verify your session in Element to prevent impersonation.
-This usually involves confirming a security phrase or emoji sequence between devices.
+About verification and encryption:
+Matrix can use end-to-end encryption. If encryption is enabled for the room, you should verify your Element session to prevent account takeover confusion.
+Element will guide you through verifying using:
+• a security phrase, or
+• matching emoji between devices.
 
-What Bondfire Does:
-Bondfire does not store chat messages. Messages live on the Matrix network and are encrypted by Matrix itself.
+What Bondfire stores:
+Bondfire does not store your chat messages. Messages live on the Matrix network and are handled by your Matrix client (Element).
 
-If you are unfamiliar with Matrix, think of it as a decentralized Slack with stronger privacy guarantees.
+If you are new to Matrix:
+Think “decentralized Slack”, but with stronger privacy options and multiple independent servers instead of one company controlling everything.
 `
   },
 
@@ -80,18 +121,18 @@ If you are unfamiliar with Matrix, think of it as a decentralized Slack with str
     id: "inventory",
     title: "Managing Inventory",
     content: `
-Inventory tracks what your org physically has available.
+Inventory tracks what your org has available, in real quantities.
 
-You can:
-• Add items
-• Set par levels (minimum desired quantity)
-• Monitor items below par
+Par levels:
+Par is the minimum amount you want to keep on hand. It is not a maximum.
+If you set par for an item, the dashboard can flag it when stock drops below that threshold.
 
-The dashboard highlights categories that are running low and items that fall below target levels.
+How to use inventory well:
+• Use clear item names (“Canned beans”, not “Beans”).
+• Use consistent units when possible.
+• Set par only for things you truly want monitored.
 
-On mobile, inventory displays as stacked item cards for readability.
-
-Use par levels realistically. They are not maximums — they are minimum operating levels.
+The dashboard highlights categories and items below par so you can spot problems before you are out of supplies.
 `
   },
 
@@ -99,36 +140,35 @@ Use par levels realistically. They are not maximums — they are minimum operati
     id: "needs",
     title: "Posting & Managing Needs",
     content: `
-Needs represent real requests from your organization.
+Needs are the work your org is trying to get done, and the resources you are requesting.
 
-Each need includes:
-• Title
-• Priority
-• Status
-• Optional description
+Write needs so someone can act on them:
+• what is needed
+• where it should go
+• by when (if relevant)
+• who to contact (if relevant)
 
-Higher priority items surface more prominently.
+Priority:
+Higher priority needs rise to the top. Use priority to reflect urgency, not importance in a moral sense.
 
-Mark needs as resolved when fulfilled to maintain an accurate operational view.
-
-Use clear language. Needs should be actionable, not abstract.
+Close needs when fulfilled:
+Keeping old needs open makes the dashboard useless. Treat “open needs” as real operational truth.
 `
   },
 
   {
     id: "meetings",
-    title: "Meetings & RSVPs",
+    title: "Meetings",
     content: `
-Meetings coordinate your org.
+Meetings are for coordination. Chat is for discussion.
 
-Create a meeting with:
-• Date & time
-• Location (physical or virtual)
-• Optional notes
+Create meetings with:
+• date and time
+• location (address, link, or “call in chat”)
+• notes or agenda if you have one
 
-Members can RSVP so organizers know expected attendance.
-
-Use meetings for coordination, not discussion threads — that belongs in chat.
+RSVP:
+RSVP means “I am planning to attend.” It helps organizers estimate attendance. It is not a legal contract. No one is summoning the RSVP police.
 `
   },
 
@@ -136,16 +176,20 @@ Use meetings for coordination, not discussion threads — that belongs in chat.
     id: "newsletter",
     title: "Newsletter & Public Page",
     content: `
-The newsletter tool tracks subscribers tied to your org.
+Newsletter:
+Bondfire tracks subscribers tied to your org. You can view the latest signups and export subscribers as CSV for your email tool.
 
-Dashboard View:
-You will see subscriber totals and 14-day growth percentage.
+Dashboard trend:
+The dashboard sparkline shows subscription trend over the last 14 days, plus an overall percent change.
 
-Exporting:
-You can export subscribers as CSV for external email tools.
-
-Public Page:
-Each org can publish selected information publicly. Review carefully before making sensitive information public.
+Public page:
+Each org can publish selected information publicly. Before you publish:
+• double-check you are not exposing personal info
+• confirm needs and contact details are what you want visible
+• remember public pages are for the internet, not just your members
 `
   }
 ];
+
+// Backwards-compatible alias if anything imports helpTopics.
+export const helpTopics = HELP_TOPICS;
