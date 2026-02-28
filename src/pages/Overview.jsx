@@ -62,21 +62,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   return out;
 }
 
-
-
-function readSessionDeltas(orgId) {
-  try {
-    return JSON.parse(sessionStorage.getItem(`bf_dash_deltas_${orgId}`) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-function writeSessionDeltas(orgId, deltas) {
-  try {
-    sessionStorage.setItem(`bf_dash_deltas_${orgId}`, JSON.stringify(deltas || {}));
-  } catch {}
-}
 function readPrevCounts(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
@@ -91,8 +76,39 @@ function writePrevCounts(orgId, counts) {
   } catch {}
 }
 
+function authSessionKeyTail() {
+  try {
+    const t = localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
+    const tail = String(t).slice(-12);
+    return tail ? `_${tail}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function dashBaselineKey(orgId) {
+  return `bf_dash_baseline_${orgId}${authSessionKeyTail()}`;
+}
+
+function readDashBaseline(orgId) {
+  try {
+    return JSON.parse(sessionStorage.getItem(dashBaselineKey(orgId)) || "") || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashBaseline(orgId, baseline) {
+  try {
+    sessionStorage.setItem(dashBaselineKey(orgId), JSON.stringify(baseline || {}));
+  } catch {}
+}
+
 function deltaBadge(delta) {
-  if (!Number.isFinite(delta) || delta === 0) return null;
+  // Always show a badge so it doesn't pop in/out on refresh.
+  if (!Number.isFinite(delta) || delta === 0) {
+    return { txt: "• 0", style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: "rgba(255, 255, 255, 0.08)", border: "1px solid rgba(255, 255, 255, 0.18)", color: "#e9e9e9" } };
+  }
   const up = delta > 0;
   const txt = up ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`;
   const bg = up ? "rgba(0, 200, 120, 0.18)" : "rgba(255, 80, 80, 0.18)";
@@ -151,6 +167,10 @@ export default function Overview() {
   const [err, setErr] = useState("");
 
   const [counts, setCounts] = useState({});
+  const [dashBaseline, setDashBaseline] = useState(() => readDashBaseline(orgId));
+  useEffect(() => {
+    setDashBaseline(readDashBaseline(orgId));
+  }, [orgId]);
   const [people, setPeople] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [needs, setNeeds] = useState([]);
@@ -160,11 +180,7 @@ export default function Overview() {
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
-  const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
-  const [tickerDeltas, setTickerDeltas] = useState(() => (orgId ? readSessionDeltas(orgId) : {}));
-  useEffect(() => {
-    if (orgId) setTickerDeltas(readSessionDeltas(orgId));
-  }, [orgId]);
+  const prevCounts = useMemo(() => dashBaseline || readPrevCounts(orgId), [orgId, dashBaseline]);
 
   async function refresh() {
     if (!orgId) return;
@@ -181,43 +197,7 @@ export default function Overview() {
       // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
       const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
-
-// Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
-let invRawFinal = invRaw;
-const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
-  const cat = (it && (it.category || it.cat)) || "";
-  const blob = it && (it.encrypted_blob || it.encryptedBlob);
-  const nm = String(it && (it.name || it.title || "")).toLowerCase();
-  return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
-});
-if (invLooksScrubbed) {
-  try {
-    const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-    invRawFinal = Array.isArray(invFull?.items) ? invFull.items : invRaw;
-  } catch {
-    invRawFinal = invRaw;
-  }
-}
-
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
-
-      // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
-      let needsRawFinal = needsRaw;
-      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
-        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
-        const blob = n && (n.encrypted_blob || n.encryptedBlob);
-        const title = String(n && (n.title || "")).toLowerCase();
-        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
-      });
-      if (needsLooksScrubbed) {
-        try {
-          const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
-          needsRawFinal = Array.isArray(needsFull?.needs) ? needsFull.needs : needsRaw;
-        } catch {
-          needsRawFinal = needsRaw;
-        }
-      }
-
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
       // These live under Settings pages, so fetch directly.
@@ -225,8 +205,8 @@ if (invLooksScrubbed) {
       const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
-      const invDec = await tryDecryptList(orgId, invRawFinal, "encrypted_blob");
-      const needsDec = await tryDecryptList(orgId, needsRawFinal, "encrypted_blob");
+      const invDec = await tryDecryptList(orgId, invRaw, "encrypted_blob");
+      const needsDec = await tryDecryptList(orgId, needsRaw, "encrypted_blob");
       const meetsDec = await tryDecryptList(orgId, meetsRaw, "encrypted_blob");
       const subsDec = await tryDecryptList(orgId, subsResp?.subscribers || [], "encrypted_blob");
       const pledgesDec = await tryDecryptList(orgId, pledgesResp?.pledges || [], "encrypted_blob");
@@ -238,28 +218,15 @@ if (invLooksScrubbed) {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
+      // Stock tickers: baseline is captured once per login (session-scoped),
+      // so refreshes don't cause arrows to disappear.
+      if (!readDashBaseline(orgId)) {
+        const base = readPrevCounts(orgId);
+        writeDashBaseline(orgId, base);
+        setDashBaseline(base);
+      }
 
-// Persist ticker deltas for this session so they don't disappear after refresh.
-try {
-  const existing = readSessionDeltas(orgId);
-  if (!existing || Object.keys(existing).length === 0) {
-    const pc = prevCounts || {};
-    const nextDeltas = {
-      people: countsNormalizedRef(rawCounts).people - Number(pc.people || 0),
-      inventory: countsNormalizedRef(rawCounts).inventory - Number(pc.inventory || 0),
-      needsOpen: countsNormalizedRef(rawCounts).needsOpen - Number(pc.needsOpen || 0),
-      meetingsUpcoming: countsNormalizedRef(rawCounts).meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
-      pledgesActive: countsNormalizedRef(rawCounts).pledgesActive - Number(pc.pledgesActive || 0),
-      subsTotal: countsNormalizedRef(rawCounts).subsTotal - Number(pc.subsTotal || 0),
-    };
-    writeSessionDeltas(orgId, nextDeltas);
-    setTickerDeltas(nextDeltas);
-  }
-} catch {}
-
-// Save latest counts for the *next login* baseline.
-writePrevCounts(orgId, rawCounts);
-
+      writePrevCounts(orgId, rawCounts);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -278,20 +245,7 @@ writePrevCounts(orgId, rawCounts);
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
   // ----- derived -----
-  
-
-function countsNormalizedRef(c) {
-  const cc = c || {};
-  return {
-    people: Number(cc.people || 0),
-    inventory: Number(cc.inventory || 0),
-    needsOpen: Number(cc.needsOpen || cc.needs || 0),
-    meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
-    pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
-    subsTotal: Number(cc.subscribers || cc.subs || 0),
-  };
-}
-const countsNormalized = useMemo(() => {
+  const countsNormalized = useMemo(() => {
     const c = counts || {};
     return {
       people: Number(c.people || 0),
@@ -304,18 +258,17 @@ const countsNormalized = useMemo(() => {
   }, [counts]);
 
   const deltas = useMemo(() => {
-    const sd = tickerDeltas && Object.keys(tickerDeltas).length ? tickerDeltas : null;
-    if (sd) return sd;
     const pc = prevCounts || {};
-    return {
+    const d = {
       people: countsNormalized.people - Number(pc.people || 0),
       inventory: countsNormalized.inventory - Number(pc.inventory || 0),
       needsOpen: countsNormalized.needsOpen - Number(pc.needsOpen || 0),
       meetingsUpcoming: countsNormalized.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
-      pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || 0),
-      subsTotal: countsNormalized.subsTotal - Number(pc.subsTotal || 0),
+      pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || pc.pledges || 0),
+      subsTotal: countsNormalized.subsTotal - Number(pc.subscribers || pc.subs || 0),
     };
-  }, [countsNormalized, prevCounts, tickerDeltas]);
+    return d;
+  }, [countsNormalized, prevCounts]);
 
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
@@ -335,8 +288,8 @@ const countsNormalized = useMemo(() => {
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -372,93 +325,37 @@ const countsNormalized = useMemo(() => {
       .slice(0, 6);
   }, [pledges]);
 
+  const invByCat = useMemo(() => {
+    const arr = Array.isArray(inventory) ? inventory : [];
+    const map = new Map();
+    for (const it of arr) {
+      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
+      const qty = Number(it?.qty);
+      map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
+    }
+    const out = Array.from(map.entries()).map(([category, qty]) => ({ category, qty }));
+    out.sort((a, b) => b.qty - a.qty);
+    return out.slice(0, 6);
+  }, [inventory]);
+
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  // Category stats (Option C): show up to 6 categories with qty/par bars.
-  const invCatStats = useMemo(() => {
-    const arr = Array.isArray(inventory) ? inventory : [];
-    const parMap = invPar || {};
-    const map = new Map();
+  const invMax = useMemo(() => {
+    let m = 1;
+    for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
+    return m;
+  }, [invByCat, invPar]);
 
-    for (const it of arr) {
-      const qtyV = Number(it?.qty);
-      const qty = Number.isFinite(qtyV) ? qtyV : 0;
-
-      const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
-      let cat = safeStr(catRaw).trim();
-      if (!cat) {
-        try {
-          for (const k of Object.keys(it || {})) {
-            if (String(k).toLowerCase() === "category") {
-              cat = safeStr(it[k]).trim();
-              break;
-            }
-          }
-        } catch {}
-      }
-      cat = (cat || "uncategorized").toLowerCase();
-
-      const id = it?.id != null ? String(it.id) : "";
-      const parV = Number(parMap?.[id]);
-      const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
-
-      const cur = map.get(cat) || { category: cat, qty: 0, par: 0, items: 0 };
-      cur.qty += qty;
-      cur.par += par;
-      cur.items += 1;
-      map.set(cat, cur);
-    }
-
-    const out = Array.from(map.values()).map((x) => {
-      const pct = x.par > 0 ? x.qty / x.par : null;
-      return {
-        ...x,
-        pct,
-        pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0,
-      };
-    });
-
-    // Prefer categories with a par set, ordered by how low they are.
-    out.sort((a, b) => {
-      const ap = a.pct == null ? 999 : a.pct;
-      const bp = b.pct == null ? 999 : b.pct;
-      if (ap !== bp) return ap - bp;
-      return (b.qty || 0) - (a.qty || 0);
-    });
-
-    return out.slice(0, 6);
-  }, [inventory, invPar]);
-
-  // Low items list: up to 4 items that are below par (qty/par < 1).
-  const invLowItems = useMemo(() => {
-    const arr = Array.isArray(inventory) ? inventory : [];
-    const parMap = invPar || {};
+  const lowCats = useMemo(() => {
     const lows = [];
-
-    for (const it of arr) {
-      const id = it?.id != null ? String(it.id) : "";
-      const parV = Number(parMap?.[id]);
-      const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
-      if (!par) continue;
-
-      const qtyV = Number(it?.qty);
-      const qty = Number.isFinite(qtyV) ? qtyV : 0;
-      const pct = qty / par;
-      if (pct < 1) {
-        lows.push({
-          id,
-          name: it?.name,
-          category: it?.category,
-          qty,
-          par,
-          pct,
-        });
-      }
+    for (const x of invByCat) {
+      const par = Number(invPar?.[x.category]);
+      if (!Number.isFinite(par) || par <= 0) continue;
+      const pct = par ? (Number(x.qty || 0) / par) : 1;
+      if (pct < 0.25) lows.push({ ...x, par });
     }
-
-    lows.sort((a, b) => a.pct - b.pct);
-    return lows.slice(0, 4);
-  }, [inventory, invPar]);
+    return lows;
+  }, [invByCat, invPar]);
 
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
@@ -577,17 +474,18 @@ const countsNormalized = useMemo(() => {
             </button>
           </div>
 
-          {invCatStats.length ? (
+          {invByCat.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {invCatStats.map((x) => {
-                const pct = x.par > 0 ? x.pctClamped : 0;
+              {invByCat.map((x) => {
+                const par = Number(invPar?.[x.category]) || 0;
+                const pct = Math.max(0, Math.min(1, (Number(x.qty) || 0) / invMax));
                 const label = x.category;
                 return (
                   <div key={label} style={{ display: "grid", gap: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
                       <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                        {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                        {Number(x.qty) || 0}{par ? ` / ${par}` : ""}
                       </div>
                     </div>
                     <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
@@ -599,32 +497,40 @@ const countsNormalized = useMemo(() => {
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                 <div className="helper">
-                  {invLowItems.length ? (
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div className="helper" style={{ fontWeight: 800 }}>Low items</div>
-                      {invLowItems.map((it) => {
-                        const pct = Math.max(0, Math.min(1, it.pct));
-                        const nm = isEncryptedNameLike(it?.name) ? "(encrypted)" : safeStr(it?.name || "item");
-                        const cat = safeStr(it?.category || "uncategorized").toLowerCase();
-                        return (
-                          <div key={it.id} style={{ display: "grid", gap: 4 }}>
-                            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                              <div style={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nm}</div>
-                              <div className="helper" style={{ whiteSpace: "nowrap" }}>{Math.round(it.qty)} / {Math.round(it.par)}</div>
-                            </div>
-                            <div className="helper" style={{ marginTop: -2 }}>{cat}</div>
-                            <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                              <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  {lowCats.length ? (
+                    <span>{lowCats.length} low categorie{lowCats.length === 1 ? "y" : "s"} flagged.</span>
                   ) : (
-                    <span>No low items below par.</span>
+                    <span>No low items flagged.</span>
                   )}
                 </div>
-</div>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    // quick and dirty, but it works: "medical=200,food=100"
+                    const curr = Object.entries(invPar || {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(",");
+                    const next = window.prompt("Set par targets (category=number, comma-separated). Example: medical=200,food=100", curr);
+                    if (next == null) return;
+                    const obj = {};
+                    String(next)
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .forEach((pair) => {
+                        const [k, v] = pair.split("=").map((x) => x.trim());
+                        const n = Number(v);
+                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
+                      });
+                    writeInvPar(orgId, obj);
+                    // force rerender
+                    setCounts((c) => ({ ...(c || {}) }));
+                  }}
+                >
+                  Set par
+                </button>
+              </div>
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
@@ -700,7 +606,7 @@ const countsNormalized = useMemo(() => {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
+            <button className="btn" type="button" onClick={() => go("pledges")}>
               View all
             </button>
           </div>

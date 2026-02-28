@@ -16,39 +16,10 @@ function safeStr(v) {
 	return String(v ?? "");
 }
 
-function readParMap(orgId) {
-	try {
-		return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
-	} catch {
-		return {};
-	}
-}
-
-function writeParMap(orgId, obj) {
-	try {
-		localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
-	} catch {}
-}
-
-function itemKeyFromFields({ name, unit, category, location }) {
-	const n = safeStr(name).trim().toLowerCase();
-	const u = safeStr(unit).trim().toLowerCase();
-	const c = safeStr(category).trim().toLowerCase();
-	const l = safeStr(location).trim().toLowerCase();
-	return `${n}|${u}|${c}|${l}`;
-}
-
-
 export default function Inventory() {
 	const orgId = getOrgId();
-	const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
-	useEffect(() => {
-		setParMap(orgId ? readParMap(orgId) : {});
-	}, [orgId]);
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState("");
-  const [sortMode, setSortMode] = useState("low");
-	const [catFilter, setCatFilter] = useState("all");
 	const [loading, setLoading] = useState(false);
 	const [err, setErr] = useState("");
 	const [busyZk, setBusyZk] = useState(false);
@@ -57,7 +28,7 @@ export default function Inventory() {
 	const [selected, setSelected] = useState(null);
 	const [edit, setEdit] = useState(null);
 
-	const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+	const [form, setForm] = useState({ name: "", qty: 0, unit: "", category: "", location: "", notes: "", is_public: false });
 
 	async function refresh() {
 		if (!orgId) return;
@@ -77,32 +48,15 @@ export default function Inventory() {
 							out.push({ ...it, ...dec });
 							continue;
 						} catch {
-							out.push({ ...it, name: "(encrypted)", category: it.category || "", location: "", notes: "" });
+							out.push({ ...it, name: "(encrypted)", category: "", location: "", notes: "" });
 							continue;
 						}
 					}
 					out.push(it);
 				}
 				setItems(out);
-				// Migrate any pending par values stored under a tmp key into real item ids.
-				const pm = readParMap(orgId);
-				let changed = false;
-				for (const it of out) {
-					if (it?.id == null) continue;
-					const id = String(it.id);
-					if (pm[id] != null) continue;
-					const tmpKey = `tmp:${itemKeyFromFields(it)}`;
-					if (pm[tmpKey] != null) {
-						pm[id] = pm[tmpKey];
-						delete pm[tmpKey];
-						changed = true;
-					}
-				}
-				if (changed) writeParMap(orgId, pm);
-				setParMap(pm);
 			} else {
 				setItems(raw);
-				setParMap(readParMap(orgId));
 			}
 		} catch (e) {
 			console.error(e);
@@ -118,55 +72,13 @@ export default function Inventory() {
 
 	const filtered = useMemo(() => {
 		const needle = q.toLowerCase();
-		let arr = items;
-		if (catFilter && catFilter !== "all") {
-			arr = arr.filter((it) => safeStr(it.category).toLowerCase() === catFilter);
-		}
-		return arr.filter((it) =>
+		return items.filter((it) =>
 			[safeStr(it.name), safeStr(it.category), safeStr(it.location), safeStr(it.notes)]
 				.join(" ")
 				.toLowerCase()
 				.includes(needle)
 		);
-	}, [items, q, catFilter]);
-
-	const categoryOptions = useMemo(() => {
-		const set = new Set();
-		for (const it of items || []) {
-			const c = safeStr(it.category).trim().toLowerCase();
-			if (c) set.add(c);
-		}
-		return Array.from(set.values()).sort();
-	}, [items]);
-
-	const sorted = useMemo(() => {
-		const arr = Array.isArray(filtered) ? [...filtered] : [];
-		const pm = parMap || {};
-		const meta = (it) => {
-			const id = it?.id != null ? String(it.id) : "";
-			const parV = Number(pm?.[id]);
-			const par = Number.isFinite(parV) && parV > 0 ? parV : null;
-			const qtyV = Number(it?.qty);
-			const qty = Number.isFinite(qtyV) ? qtyV : 0;
-			const pct = par ? qty / par : null;
-			return { id, qty, par, pct, cat: safeStr(it?.category).toLowerCase(), name: safeStr(it?.name).toLowerCase() };
-		};
-		arr.sort((a, b) => {
-			const A = meta(a);
-			const B = meta(b);
-			if (sortMode === "name") return A.name.localeCompare(B.name);
-			if (sortMode === "category") return A.cat.localeCompare(B.cat) || A.name.localeCompare(B.name);
-			if (sortMode === "qty") return (A.qty - B.qty) || A.name.localeCompare(B.name);
-			if (sortMode === "par") return ((A.par || 999999) - (B.par || 999999)) || A.name.localeCompare(B.name);
-			// default: lowest stock ratio first (items without par go last)
-			const ap = A.pct == null ? 999 : A.pct;
-			const bp = B.pct == null ? 999 : B.pct;
-			if (ap !== bp) return ap - bp;
-			return A.name.localeCompare(B.name);
-		});
-		return arr;
-	}, [filtered, parMap, sortMode]);
-
+	}, [items, q]);
 
 	async function onAdd(e) {
 		e.preventDefault();
@@ -177,13 +89,6 @@ export default function Inventory() {
 		const qty = Number(form.qty) || 0;
 		const unit = safeStr(form.unit).trim();
 		const category = safeStr(form.category).trim();
-		const parNum = form.par === "" ? null : Number(form.par);
-		if (parNum != null && Number.isFinite(parNum) && orgId) {
-			const pm = { ...(readParMap(orgId) || {}) };
-			pm[`tmp:${itemKeyFromFields({ ...form, category })}`] = parNum;
-			writeParMap(orgId, pm);
-			setParMap(pm);
-		}
 		const location = safeStr(form.location).trim();
 		const notes = safeStr(form.notes).trim();
 		const is_public = !!form.is_public;
@@ -192,7 +97,7 @@ export default function Inventory() {
 		let payload = { name, qty, unit, category, location, notes, is_public };
 		if (orgKey && !is_public) {
 			const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, category, location, notes }));
-			payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
+			payload = { name: "__encrypted__", qty, unit, category: "", location: "", notes: "", is_public, encrypted_blob: enc };
 		}
 
 		await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
@@ -234,7 +139,7 @@ export default function Inventory() {
 						name: "__encrypted__",
 						qty: it.qty ?? 0,
 						unit: it.unit || "",
-						category: it.category || "",
+						category: "",
 						location: "",
 						notes: "",
 						is_public: 0,
@@ -260,7 +165,6 @@ export default function Inventory() {
 			id: it.id,
 			name: it.name || "",
 			qty: it.qty ?? 0,
-			par: parMap?.[String(it.id)] ?? "",
 			unit: it.unit || "",
 			category: it.category || "",
 			location: it.location || "",
@@ -308,7 +212,9 @@ export default function Inventory() {
 					name: "__encrypted__",
 					qty,
 					unit: payload.unit,
-					category,
+					// Category is NOT sensitive and is used for routing + aggregation.
+					// Keep it plaintext even when other fields are encrypted.
+					category: payload.category,
 					location: "",
 					notes: "",
 					is_public,
@@ -356,23 +262,6 @@ export default function Inventory() {
 
 				{zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
 				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search inventory" style={{ marginTop: 12 }} />
-				<div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
-					<div className="helper">Sort</div>
-					<select className="input" value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ width: 180 }}>
-						<option value="low">Lowest stock first</option>
-						<option value="name">Name</option>
-						<option value="category">Category</option>
-						<option value="qty">Qty</option>
-						<option value="par">Par</option>
-					</select>
-					<div className="helper">Category</div>
-					<select className="input" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ width: 200 }}>
-						<option value="all">All</option>
-						{categoryOptions.map((c) => (
-							<option key={c} value={c}>{c}</option>
-						))}
-					</select>
-				</div>
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
 				<div style={{ marginTop: 12, overflowX: "auto" }}>
@@ -381,54 +270,16 @@ export default function Inventory() {
 							<tr>
 								<th>Name</th>
 								<th>Qty</th>
-								<th>Par</th>
-								<th>Stock</th>
 								<th>Unit</th>
 								<th>Public</th>
 								<th></th>
 							</tr>
 						</thead>
 						<tbody>
-							{sorted.map((it) => (
+							{filtered.map((it) => (
 								<tr key={it.id}>
 									<td style={{ fontWeight: 700 }}>{it.name || "(unnamed)"}</td>
 									<td>{it.qty ?? 0}</td>
-									<td>
-										<input
-											className="input"
-											type="number"
-											value={parMap?.[String(it.id)] ?? ""}
-											onChange={(e) => {
-												const v = e.target.value;
-												setParMap((prev) => {
-													const next = { ...(prev || {}) };
-													next[String(it.id)] = v === "" ? "" : Number(v);
-													writeParMap(orgId, next);
-													return next;
-												});
-											}}
-											style={{ width: 90 }}
-										/>
-									</td>
-									<td>
-										{(() => {
-											const id = String(it.id);
-											const parV = Number(parMap?.[id]);
-											const par = Number.isFinite(parV) && parV > 0 ? parV : null;
-											const qtyV = Number(it?.qty);
-											const qty = Number.isFinite(qtyV) ? qtyV : 0;
-											if (!par) return <span className="helper">no par</span>;
-											const pct = Math.max(0, Math.min(1, qty / par));
-											return (
-												<div style={{ display: "grid", gap: 4, minWidth: 160 }}>
-													<div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-														<div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
-													</div>
-													<div className="helper">{Math.round(qty)} / {Math.round(par)}</div>
-												</div>
-											);
-										})()}
-									</td>
 									<td>{it.unit || ""}</td>
 									<td>{it.is_public ? "Yes" : "No"}</td>
 									<td style={{ textAlign: "right" }}><button className="btn" type="button" onClick={() => openItem(it)}>Details</button></td>
@@ -466,7 +317,6 @@ export default function Inventory() {
 						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 							<input className="input" placeholder="Name" value={edit.name} onChange={(e) => setEdit((p) => ({ ...p, name: e.target.value }))} />
 							<input className="input" type="number" placeholder="Qty" value={edit.qty} onChange={(e) => setEdit((p) => ({ ...p, qty: e.target.value }))} />
-							<input className="input" type="number" placeholder="Par" value={edit.par ?? ""} onChange={(e) => setEdit((p) => ({ ...p, par: e.target.value }))} />
 							<input className="input" placeholder="Unit" value={edit.unit} onChange={(e) => setEdit((p) => ({ ...p, unit: e.target.value }))} />
 							<input className="input" placeholder="Category" value={edit.category} onChange={(e) => setEdit((p) => ({ ...p, category: e.target.value }))} />
 							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />
@@ -502,7 +352,6 @@ export default function Inventory() {
 					<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 						<input className="input" placeholder="Name" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
 						<input className="input" type="number" placeholder="Qty" value={form.qty} onChange={(e) => setForm((p) => ({ ...p, qty: e.target.value }))} />
-						<input className="input" type="number" placeholder="Par" value={form.par} onChange={(e) => setForm((p) => ({ ...p, par: e.target.value }))} />
 						<input className="input" placeholder="Unit" value={form.unit} onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))} />
 						<input className="input" placeholder="Category" value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} />
 						<input className="input" placeholder="Location" value={form.location} onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))} />
