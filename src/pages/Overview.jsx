@@ -663,6 +663,7 @@ const newsletterSpark = useMemo(() => {
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {invCatStats.map((x) => {
                 const pct = x.par > 0 ? x.pctClamped : 0;
+                const frac = x.par > 0 ? (x.qty / x.par) : null;
                 const label = x.category;
                 return (
                   <div key={label} style={{ display: "grid", gap: 6 }}>
@@ -673,7 +674,7 @@ const newsletterSpark = useMemo(() => {
                       </div>
                     </div>
                     <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                      <div style={{ height: "100%", width: `${pct * 100}%`, background: frac == null ? "rgba(255,255,255,0.18)" : frac <= 0.25 ? "rgba(225,29,72,0.75)" : frac <= 0.5 ? "rgba(249,115,22,0.75)" : "rgba(34,197,94,0.65)" }} />
                     </div>
                   </div>
                 );

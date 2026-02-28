@@ -27,24 +27,47 @@ function readOrgName(orgId) {
   }
 }
 
-const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
-  const orgId = useOrgIdFromPath();
-  const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
-  const orgName = React.useMemo(() => readOrgName(orgId), [orgId]);
+const Brand = ({ orgId, logoSrc }) => {
+  const [orgName, setOrgName] = React.useState(() => readOrgNameFromStorage(orgId));
+
+  React.useEffect(() => {
+    setOrgName(readOrgNameFromStorage(orgId));
+
+    const onChange = (e) => {
+      const changedId = e?.detail?.orgId;
+      if (!changedId || changedId === orgId) setOrgName(readOrgNameFromStorage(orgId));
+    };
+
+    const onStorage = (e) => {
+      const k = e?.key || "";
+      if (k === `bf_org_settings_${orgId}` || k === "bf_orgs") {
+        setOrgName(readOrgNameFromStorage(orgId));
+      }
+    };
+
+    window.addEventListener("bf:org_settings_changed", onChange);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("bf:org_settings_changed", onChange);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [orgId]);
+
+  const label = orgName || "Org";
+
   return (
-    <Link to={homeHref} className="brand">
-      <img
-        src={logoSrc}
-        alt="Bondfire"
-        width={28}
-        height={28}
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-        }}
-      />
-      <span>Bondfire</span>
-      {orgName ? <span className="bf-brand-org">{orgName}</span> : null}
-    </Link>
+    <div className="bf-brand-wrap">
+      <Link className="bf-brand" to={homeHref}>
+        <img src={logoSrc} alt="Bondfire logo" />
+        <span>Bondfire</span>
+      </Link>
+
+      {orgId ? (
+        <span className="bf-brand-org" title={label}>
+          {label}
+        </span>
+      ) : null}
+    </div>
   );
 };
 
