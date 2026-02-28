@@ -607,25 +607,47 @@ export default function Overview() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                 <div className="helper">
                   {invLowItems.length ? (
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div className="helper" style={{ fontWeight: 800 }}>Low items</div>
-                      {invLowItems.map((it) => {
-                        const pct = Math.max(0, Math.min(1, it.pct));
-                        const nm = isEncryptedNameLike(it?.name) ? "(encrypted)" : safeStr(it?.name || "item");
-                        const cat = safeStr(it?.category || "uncategorized").toLowerCase();
-                        return (
-                          <div key={it.id} style={{ display: "grid", gap: 4 }}>
-                            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                              <div style={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nm}</div>
-                              <div className="helper" style={{ whiteSpace: "nowrap" }}>{Math.round(it.qty)} / {Math.round(it.par)}</div>
-                            </div>
-                            <div className="helper" style={{ marginTop: -2 }}>{cat}</div>
-                            <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                              <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
-                            </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      {lowItems.map(item => (
+                        <div key={item.id}>
+                          <div style={{ fontWeight: 600 }}>
+                            {item.name} {item.qty} / {item.par}
                           </div>
-                        );
-                      })}
+
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            {item.category}
+                          </div>
+
+                          <div
+                            style={{
+                              height: 6,
+                              background: "#2a2a2a",
+                              borderRadius: 4,
+                              overflow: "hidden",
+                              marginTop: 4,
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
+                                background: item.qty <= item.par * 0.25
+                                  ? "#e11d48"
+                                  : item.qty <= item.par * 0.5
+                                  ? "#f97316"
+                                  : "#22c55e",
+                                height: "100%",
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <span>No low items below par.</span>
