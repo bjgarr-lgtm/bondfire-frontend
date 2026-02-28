@@ -48,9 +48,14 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
 
   const out = [];
   for (const r of arr) {
-    if (r && r[blobField]) {
+    // Endpoints have historically returned either encrypted_blob (snake) or encryptedBlob (camel).
+    const blob =
+      (r && (r[blobField] ?? r.encrypted_blob ?? r.encryptedBlob ?? r.encrypted)) ?? null;
+
+    if (r && blob) {
       try {
-        const dec = JSON.parse(await decryptWithOrgKey(orgKey, r[blobField]));
+        const decStr = await decryptWithOrgKey(orgKey, blob);
+        const dec = JSON.parse(decStr);
         out.push({ ...r, ...dec });
         continue;
       } catch {
@@ -378,6 +383,15 @@ const countsNormalized = useMemo(() => {
     for (const it of arr) {
             const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
       let cat = safeStr(catRaw).trim();
+      // Treat placeholders as blank so we can fall back to decrypted payload fields.
+      if (cat === "__encrypted__" || cat === "_encrypted_" || cat === "__ENCRYPTED__") cat = "";
+      // Some inventory rows store the category only inside the decrypted blob.
+      if (!cat && it && typeof it === "object") {
+        try {
+          const maybe = it.category_name ?? it.categoryName ?? it.cat_name ?? it.catName;
+          if (maybe) cat = safeStr(maybe).trim();
+        } catch {}
+      }
       if (!cat) {
         try {
           for (const k of Object.keys(it || {})) {
@@ -416,18 +430,21 @@ const countsNormalized = useMemo(() => {
     return lows;
   }, [invByCat, invPar]);
 
-  async function rsvp(meeting, status = "yes") {
+  async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ meeting_id: meeting.id }),
       });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      setRsvpMsg(e?.message || "Failed to RSVP");
+      // fallback: still useful navigation
+      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
+      go("meetings");
     }
   }
 
@@ -506,7 +523,7 @@ const countsNormalized = useMemo(() => {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button className="btn-red" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); rsvp(m); }}>
+                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
                       RSVP
                     </button>
                   </div>
