@@ -207,12 +207,15 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
       let invRawFinal = invRaw;
-      const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
-        const cat = (it && (it.category || it.cat)) || "";
-        const blob = it && (it.encrypted_blob || it.encryptedBlob);
-        const nm = String(it && (it.name || it.title || "")).toLowerCase();
-        return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
-      });
+      const invLooksScrubbed =
+        Array.isArray(invRaw) &&
+        invRaw.length > 0 &&
+        invRaw.some((it) => {
+          const cat = (it && (it.category || it.cat)) || "";
+          const blob = it && (it.encrypted_blob || it.encryptedBlob);
+          const nm = String(it && (it.name || it.title || "")).toLowerCase();
+          return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
+        });
       if (invLooksScrubbed) {
         try {
           const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
@@ -226,12 +229,15 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
       let needsRawFinal = needsRaw;
-      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
-        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
-        const blob = n && (n.encrypted_blob || n.encryptedBlob);
-        const title = String(n && (n.title || "")).toLowerCase();
-        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
-      });
+      const needsLooksScrubbed =
+        Array.isArray(needsRaw) &&
+        needsRaw.length > 0 &&
+        needsRaw.some((n) => {
+          const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
+          const blob = n && (n.encrypted_blob || n.encryptedBlob);
+          const title = String(n && (n.title || "")).toLowerCase();
+          return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
+        });
       if (needsLooksScrubbed) {
         try {
           const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
@@ -434,7 +440,6 @@ export default function Overview() {
   }, [inventory, invPar]);
 
   // Low items list: up to 4 items that are below par (qty/par < 1).
-  const lowItems = invLowItems
   const invLowItems = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const parMap = invPar || {};
@@ -612,11 +617,11 @@ export default function Overview() {
                       style={{
                         marginTop: 8,
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                        gap: 12,
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: 10,
                       }}
                     >
-                      {lowItems.map(item => (
+                      {invLowItems.map((item) => (
                         <div key={item.id}>
                           <div style={{ fontWeight: 600 }}>
                             {item.name} {item.qty} / {item.par}
@@ -638,11 +643,12 @@ export default function Overview() {
                             <div
                               style={{
                                 width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                background: item.qty <= item.par * 0.25
-                                  ? "#e11d48"
-                                  : item.qty <= item.par * 0.5
-                                  ? "#f97316"
-                                  : "#22c55e",
+                                background:
+                                  item.qty <= item.par * 0.25
+                                    ? "#e11d48"
+                                    : item.qty <= item.par * 0.5
+                                    ? "#f97316"
+                                    : "#22c55e",
                                 height: "100%",
                               }}
                             />
