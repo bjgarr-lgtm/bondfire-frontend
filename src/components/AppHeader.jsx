@@ -15,9 +15,22 @@ function useOrgIdFromPath() {
   return raw ? decodeURIComponent(raw) : null;
 }
 
+function readOrgName(orgId) {
+  if (!orgId) return "";
+  try {
+    const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
+    const orgs = JSON.parse(localStorage.getItem("bf_orgs") || "[]");
+    const o = Array.isArray(orgs) ? orgs.find((x) => x?.id === orgId) : null;
+    return String((s?.name || o?.name || "").trim() || "");
+  } catch {
+    return "";
+  }
+}
+
 const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
   const orgId = useOrgIdFromPath();
   const homeHref = orgId ? `/org/${orgId}/overview` : "/orgs";
+  const orgName = React.useMemo(() => readOrgName(orgId), [orgId]);
   return (
     <Link to={homeHref} className="brand">
       <img
@@ -30,6 +43,7 @@ const Brand = ({ logoSrc = "/logo-bondfire.png" }) => {
         }}
       />
       <span>Bondfire</span>
+      {orgName ? <span className="bf-brand-org">{orgName}</span> : null}
     </Link>
   );
 };

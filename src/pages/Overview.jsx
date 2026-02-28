@@ -105,8 +105,8 @@ function deltaBadge(delta) {
   if (!Number.isFinite(delta) || delta === 0) return null;
   const up = delta > 0;
   const txt = up ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`;
-  const bg = up ? "rgba(57, 217, 138, 0.18)" : "rgba(255, 77, 77, 0.18)";
-  const bd = up ? "rgba(57, 217, 138, 0.35)" : "rgba(255, 77, 77, 0.35)";
+  const bg = up ? "rgba(0, 200, 120, 0.18)" : "rgba(255, 80, 80, 0.18)";
+  const bd = up ? "rgba(0, 200, 120, 0.35)" : "rgba(255, 80, 80, 0.35)";
   const fg = up ? "#b8ffe4" : "#ffd0d0";
   return { txt, style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: bg, border: `1px solid ${bd}`, color: fg } };
 }
@@ -129,28 +129,6 @@ function pill(text, tone) {
 }
 
 // ADD near the top (helpers/components), e.g. after pill() or before readInvPar()
-
-
-// Unified palette (used for badges, bars, sparklines)
-const BF_COLORS = {
-  success: "#39d98a",
-  warn: "#ff9a3c",
-  danger: "#ff4d4d",
-  info: "#78b4ff",
-  neutral: "rgba(255,255,255,0.18)",
-};
-
-function pctTone(pct) {
-  if (!Number.isFinite(pct)) return "neutral";
-  if (pct <= 0.25) return "danger";
-  if (pct <= 0.5) return "warn";
-  return "success";
-}
-
-// Tiny skeleton bits (used while loading)
-function Skel({ h = 12, w = "100%", r = 8, style }) {
-  return <div className="bfSkel" style={{ height: h, width: w, borderRadius: r, ...style }} />;
-}
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -186,13 +164,10 @@ function Sparkline({ values, width = 120, height = 32 }) {
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
-      <path d={d} fill="none" stroke={trendUp ? BF_COLORS.success : BF_COLORS.danger} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
-
-
-
 
 function readInvPar(orgId) {
   try {
@@ -604,46 +579,36 @@ const newsletterSpark = useMemo(() => {
 
   return (
     <div style={{ padding: 16 }}>
-      <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0, flex: 1, minWidth: 180 }}>{orgInfo?.name || "Dashboard"}</h1>
-          <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
-            {loading ? "Loading" : "Refresh"}
-          </button>
-        </div>
-        {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
-        {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
-      </div>
+      {err ? <div className="helper" style={{ color: "tomato", marginBottom: 12 }}>{err}</div> : null}
+      {rsvpMsg ? <div className="helper" style={{ marginBottom: 12 }}>{rsvpMsg}</div> : null}
 
-      {/* Top metrics row */}
-      <div className="bfTopMetricsRow">
-        {loading ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={`skel-top-${i}`} className="card" style={{ padding: 14, minHeight: 98 }}>
-              <Skel h={14} w="60%" r={8} />
-              <Skel h={34} w="40%" r={10} style={{ marginTop: 12 }} />
-              <Skel h={12} w="45%" r={8} style={{ marginTop: 10 }} />
-            </div>
-          ))
-        ) : (
-          topCards.map((c) => (
-            <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card bfHoverGlow" style={{ padding: 14, position: "relative", minHeight: 98 }}>
-                {c.badge ? (
-                  <div style={{ position: "absolute", top: 12, right: 12 }}>
-                    <span style={c.badge.style}>{c.badge.txt}</span>
-                  </div>
-                ) : null}
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ fontSize: 18 }}>{c.icon}</div>
-                  <div style={{ fontWeight: 900 }}>{c.title}</div>
+      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        {topCards.map((c) => (
+          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+            <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+              {c.badge ? (
+                <div style={{ position: "absolute", top: 12, right: 12 }}>
+                  <span style={c.badge.style}>{c.badge.txt}</span>
                 </div>
-                <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
-                <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+              ) : null}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 18 }}>{c.icon}</div>
+                <div style={{ fontWeight: 900 }}>{c.title}</div>
               </div>
-            </button>
-          ))
-        )}      </div>
+              <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+              <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+            </div>
+          </button>
+        ))}
+      </div>
 
       {/* Main grid */}
       <div
@@ -662,16 +627,7 @@ const newsletterSpark = useMemo(() => {
               View all
             </button>
           </div>
-          {loading ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {Array.from({ length: 2 }).map((_, i) => (
-                <div key={`skel-meet-${i}`} className="card" style={{ padding: 12 }}>
-                  <Skel h={14} w="70%" />
-                  <Skel h={12} w="90%" style={{ marginTop: 10 }} />
-                </div>
-              ))}
-            </div>
-          ) : meetingsSorted.length ? (
+          {meetingsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {meetingsSorted.map((m) => (
                 <div key={m.id} className="card" style={{ padding: 12 }}>
@@ -703,20 +659,7 @@ const newsletterSpark = useMemo(() => {
             </button>
           </div>
 
-          {loading ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={`skel-inv-${i}`} style={{ display: "grid", gap: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Skel h={12} w="55%" />
-                    <Skel h={12} w="25%" />
-                  </div>
-                  <Skel h={10} w="100%" r={999} />
-                </div>
-              ))}
-              <Skel h={12} w="60%" style={{ marginTop: 10 }} />
-            </div>
-          ) : invCatStats.length ? (
+          {invCatStats.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {invCatStats.map((x) => {
                 const pct = x.par > 0 ? x.pctClamped : 0;
@@ -730,7 +673,7 @@ const newsletterSpark = useMemo(() => {
                       </div>
                     </div>
                     <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? BF_COLORS.danger : pct <= 0.5 ? BF_COLORS.warn : BF_COLORS.success }} />
+                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
                     </div>
                   </div>
                 );
@@ -771,10 +714,10 @@ const newsletterSpark = useMemo(() => {
                                 width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
                                 background:
                                   item.qty <= item.par * 0.25
-                                    ? BF_COLORS.danger
+                                    ? "#e11d48"
                                     : item.qty <= item.par * 0.5
-                                    ? BF_COLORS.warn
-                                    : BF_COLORS.success,
+                                    ? "#f97316"
+                                    : "#22c55e",
                                 height: "100%",
                               }}
                             />
@@ -802,17 +745,7 @@ const newsletterSpark = useMemo(() => {
             </button>
           </div>
 
-          {loading ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={`skel-need-${i}`} className="card" style={{ padding: 12 }}>
-                  <Skel h={12} w="30%" />
-                  <Skel h={14} w="80%" style={{ marginTop: 10 }} />
-                  <Skel h={12} w="55%" style={{ marginTop: 8 }} />
-                </div>
-              ))}
-            </div>
-          ) : needsOpen.length ? (
+          {needsOpen.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {needsOpen.map((n) => {
                 const pr = Number(n?.priority || 0);
@@ -850,16 +783,7 @@ const newsletterSpark = useMemo(() => {
             {subs.length} subscriber{subs.length === 1 ? "" : "s"}
           </div>
 
-          {loading ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={`skel-sub-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <Skel h={12} w="45%" />
-                  <Skel h={12} w="35%" />
-                </div>
-              ))}
-            </div>
-          ) : subsSorted.length ? (
+          {subsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {subsSorted.map((s, idx) => {
                 const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
@@ -921,19 +845,7 @@ const newsletterSpark = useMemo(() => {
             </button>
           </div>
 
-          {loading ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={`skel-pledge-${i}`} style={{ display: "grid", gap: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <Skel h={18} w={70} r={999} />
-                    <Skel h={14} w="60%" />
-                  </div>
-                  <Skel h={12} w="70%" />
-                </div>
-              ))}
-            </div>
-          ) : pledgesSorted.length ? (
+          {pledgesSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {pledgesSorted.map((p) => {
                 const status = String(p?.status || "").toLowerCase();
