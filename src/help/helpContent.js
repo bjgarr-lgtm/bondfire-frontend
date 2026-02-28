@@ -1,4 +1,4 @@
-export const HELP_TOPICS = [
+export const helpTopics = [
   {
     id: "getting-started",
     title: "Getting Started",

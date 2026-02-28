@@ -1,6 +1,6 @@
 // src/help/HelpPanel.jsx
 import React from "react";
-import { HELP_TOPICS } from "./helpContent.js";
+import { helpTopics } from "./helpContent.js";
 import "./help.css";
 
 export default function HelpPanel({ open, activeId, setActiveId, onClose }) {
