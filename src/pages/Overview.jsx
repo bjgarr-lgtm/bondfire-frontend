@@ -70,10 +70,6 @@ function readPrevCounts(orgId) {
   }
 }
 
-function sessionFlagKey(orgId) {
-  return `bf_dash_counts_written_v1:${orgId}`;
-}
-
 function writePrevCounts(orgId, counts) {
   try {
     localStorage.setItem(`bf_dash_counts_${orgId}`, JSON.stringify(counts || {}));
@@ -149,12 +145,16 @@ export default function Overview() {
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
-  // IMPORTANT:
-  // Stock ticker deltas must be "since last login", not "since last refresh".
-  // We read the previous-login snapshot from localStorage ONCE per orgId.
-  // We write the new snapshot to localStorage ONCE per session (after first successful load),
-  // so the next login has the right baseline.
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
+
+  const [deltaSnap, setDeltaSnap] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(`bf_dash_deltas_${orgId}`) || "null");
+    } catch {
+      return null;
+    }
+  });
+
 
   async function refresh() {
     if (!orgId) return;
@@ -170,20 +170,13 @@ export default function Overview() {
 
       // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
-      // Dashboard preview rows are sometimes scrubbed (missing encrypted_blob), which breaks decrypt
-      // and makes categories fall back to "uncategorized".
-      // If the preview looks scrubbed, fetch the real inventory list.
-      let invRaw = Array.isArray(d?.inventory) ? d.inventory : null;
-      const invPreviewLooksScrubbed = Array.isArray(invRaw)
-        ? invRaw.some((it) => {
-            const nameEnc = isEncryptedNameLike(it?.name);
-            const hasBlob = Boolean(it?.encrypted_blob);
-            const catBlank = !String(it?.category || "").trim();
-            return (nameEnc && !hasBlob) || (catBlank && nameEnc);
-          })
-        : true;
-      if (invPreviewLooksScrubbed) {
-        invRaw = (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      let invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+      // Dashboard preview rows may be scrubbed (no encrypted_blob, blank category). If so, load the full list.
+      if (Array.isArray(invRaw) && invRaw.length) {
+        const looksScrubbed = invRaw.some((it) => !it?.encrypted_blob && !safeStr(it?.category || it?.cat).trim() && safeStr(it?.name).includes("encrypt"));
+        if (looksScrubbed) {
+          invRaw = (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+        }
       }
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
@@ -206,17 +199,32 @@ export default function Overview() {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
-      // Write baseline for NEXT login once per session.
-      // Do NOT rewrite on manual refresh or any background refresh.
+      
+      // Snapshot deltas once per session (since login). Do NOT overwrite on manual refresh.
       try {
-        const k = sessionFlagKey(orgId);
-        if (!sessionStorage.getItem(k)) {
-          sessionStorage.setItem(k, "1");
+        const key = `bf_dash_deltas_${orgId}`;
+        const seenKey = `bf_dash_deltas_seen_${orgId}`;
+        const already = sessionStorage.getItem(seenKey) === "1";
+        if (!already) {
+          const pc = readPrevCounts(orgId) || {};
+          const snap = {
+            people: Number(rawCounts.people || 0) - Number(pc.people || 0),
+            inventory: Number(rawCounts.inventory || 0) - Number(pc.inventory || 0),
+            needsOpen: Number(rawCounts.needsOpen || 0) - Number(pc.needsOpen || 0),
+            meetingsUpcoming: Number(rawCounts.meetingsUpcoming || 0) - Number(pc.meetingsUpcoming || 0),
+            pledgesActive: Number(rawCounts.pledgesActive || rawCounts.pledges || 0) - Number(pc.pledgesActive || pc.pledges || 0),
+            subsTotal: Number(rawCounts.subsTotal || rawCounts.subscribers || rawCounts.subs || 0) - Number(pc.subsTotal || pc.subscribers || pc.subs || 0),
+          };
+          sessionStorage.setItem(key, JSON.stringify(snap));
+          sessionStorage.setItem(seenKey, "1");
+          setDeltaSnap(snap);
+          // Also persist "current counts" as the baseline for the NEXT login/session.
           writePrevCounts(orgId, rawCounts);
         }
       } catch {
-        // ignore
+        // If sessionStorage blows up, fall back to old behavior (still avoid crashing).
       }
+
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -248,17 +256,18 @@ export default function Overview() {
   }, [counts]);
 
   const deltas = useMemo(() => {
+    // Prefer the snapshot captured once per session (since login).
+    if (deltaSnap && typeof deltaSnap === "object") return deltaSnap;
     const pc = prevCounts || {};
-    const d = {
+    return {
       people: countsNormalized.people - Number(pc.people || 0),
       inventory: countsNormalized.inventory - Number(pc.inventory || 0),
       needsOpen: countsNormalized.needsOpen - Number(pc.needsOpen || 0),
       meetingsUpcoming: countsNormalized.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
       pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || pc.pledges || 0),
-      subsTotal: countsNormalized.subsTotal - Number(pc.subscribers || pc.subs || 0),
+      subsTotal: countsNormalized.subsTotal - Number(pc.subsTotal || pc.subscribers || pc.subs || 0),
     };
-    return d;
-  }, [countsNormalized, prevCounts]);
+  }, [countsNormalized, prevCounts, deltaSnap]);
 
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
@@ -278,8 +287,8 @@ export default function Overview() {
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -493,33 +502,8 @@ export default function Overview() {
                     <span>No low items flagged.</span>
                   )}
                 </div>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => {
-                    // quick and dirty, but it works: "medical=200,food=100"
-                    const curr = Object.entries(invPar || {})
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(",");
-                    const next = window.prompt("Set par targets (category=number, comma-separated). Example: medical=200,food=100", curr);
-                    if (next == null) return;
-                    const obj = {};
-                    String(next)
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .forEach((pair) => {
-                        const [k, v] = pair.split("=").map((x) => x.trim());
-                        const n = Number(v);
-                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
-                      });
-                    writeInvPar(orgId, obj);
-                    // force rerender
-                    setCounts((c) => ({ ...(c || {}) }));
-                  }}
-                >
-                  Set par
-                </button>
+                
+
               </div>
             </div>
           ) : (
