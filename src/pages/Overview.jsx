@@ -128,6 +128,47 @@ function pill(text, tone) {
   );
 }
 
+// ADD near the top (helpers/components), e.g. after pill() or before readInvPar()
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function Sparkline({ values, width = 120, height = 32 }) {
+  const v = Array.isArray(values) ? values.map((x) => Number(x || 0)) : [];
+  if (!v.length) return null;
+
+  const min = Math.min(...v);
+  const max = Math.max(...v);
+  const range = max - min || 1;
+
+  const pad = 2;
+  const w = Math.max(10, width);
+  const h = Math.max(10, height);
+  const innerW = w - pad * 2;
+  const innerH = h - pad * 2;
+
+  const pts = v.map((val, i) => {
+    const x = pad + (i / Math.max(1, v.length - 1)) * innerW;
+    const y = pad + (1 - (val - min) / range) * innerH;
+    return [x, y];
+  });
+
+  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ");
+  const areaD = `${d} L${(pad + innerW).toFixed(2)},${(pad + innerH).toFixed(2)} L${pad.toFixed(2)},${(pad + innerH).toFixed(2)} Z`;
+
+  const last = v[v.length - 1];
+  const first = v[0];
+  const trendUp = last >= first;
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
+      <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function readInvPar(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
@@ -383,6 +424,42 @@ export default function Overview() {
   }, [pledges]);
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+
+  // ADD inside Overview() near other useMemos
+
+const newsletterSpark = useMemo(() => {
+  const arr = Array.isArray(subs) ? subs : [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  // last 14 days, oldest -> newest
+  const buckets = [];
+  for (let i = 13; i >= 0; i--) {
+    const start = now - i * dayMs;
+    const end = start + dayMs;
+    const count = arr.filter((s) => {
+      const t = Number(s?.joined || s?.created_at || 0);
+      return Number.isFinite(t) && t >= start && t < end;
+    }).length;
+    buckets.push(count);
+  }
+
+  // cumulative looks nicer than spiky daily counts
+  const cum = [];
+  let run = 0;
+  for (const c of buckets) {
+    run += c;
+    cum.push(run);
+  }
+
+  // If there were no joins in 14d but we have subs, keep a flat line at total
+  const any = buckets.some((x) => x > 0);
+  if (!any) {
+    const total = arr.length;
+    return new Array(14).fill(total);
+  }
+  return cum;
+}, [subs]);
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
@@ -702,6 +779,39 @@ export default function Overview() {
         </div>
 
         {/* Newsletter */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
+
+            {/* ADD this sparkline block */}
+            <div
+              style={{
+                width: 130,
+                height: 34,
+                borderRadius: 10,
+                padding: "2px 6px",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="subscriber trend (last 14 days)"
+            >
+              <Sparkline values={newsletterSpark} width={118} height={28} />
+            </div>
+
+            <button className="btn" type="button" onClick={() => go("settings")}>
+              View all
+            </button>
+          </div>
+
+          <div className="helper" style={{ marginTop: 10 }}>
+            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
+          </div>
+
+          {/* ...rest unchanged */}
+        </div>        
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
