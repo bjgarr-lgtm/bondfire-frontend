@@ -27,21 +27,22 @@ function readOrgName(orgId) {
   }
 }
 
-const Brand = ({ orgId, logoSrc }) => {
-  const [orgName, setOrgName] = React.useState(() => readOrgNameFromStorage(orgId));
+const Brand = ({ logoSrc }) => {
+  const orgId = useOrgIdFromPath();
+  const [orgName, setOrgName] = React.useState(() => readOrgName(orgId));
 
   React.useEffect(() => {
-    setOrgName(readOrgNameFromStorage(orgId));
+    setOrgName(readOrgName(orgId));
 
     const onChange = (e) => {
       const changedId = e?.detail?.orgId;
-      if (!changedId || changedId === orgId) setOrgName(readOrgNameFromStorage(orgId));
+      if (!changedId || changedId === orgId) setOrgName(readOrgName(orgId));
     };
 
     const onStorage = (e) => {
       const k = e?.key || "";
       if (k === `bf_org_settings_${orgId}` || k === "bf_orgs") {
-        setOrgName(readOrgNameFromStorage(orgId));
+        setOrgName(readOrgName(orgId));
       }
     };
 
@@ -57,7 +58,7 @@ const Brand = ({ orgId, logoSrc }) => {
 
   return (
     <div className="bf-brand-wrap">
-      <Link className="bf-brand" to={homeHref}>
+      <Link className="bf-brand" to="/orgs">
         <img src={logoSrc} alt="Bondfire logo" />
         <span>Bondfire</span>
       </Link>
@@ -158,7 +159,7 @@ function OrgNav({ variant = "desktop" }) {
   );
 }
 
-export default function AppHeader({ onLogout, showLogout }) {
+export default function AppHeader({ onLogout, showLogout, logoSrc = "/logo.svg" }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
 
@@ -222,7 +223,7 @@ export default function AppHeader({ onLogout, showLogout }) {
     <>
       <header className="bf-appHeader">
         <div className="bf-appHeader-left">
-          <Brand />
+          <Brand logoSrc={logoSrc} />
         </div>
 
         <div className="bf-appHeader-right">
@@ -291,7 +292,11 @@ export default function AppHeader({ onLogout, showLogout }) {
         </div>
       </div>
 
-      {debugNav ? <pre style={debugOverlayStyle}>{JSON.stringify({ pathname: loc.pathname, hash: loc.hash }, null, 2)}</pre> : null}
+      {debugNav ? (
+        <pre style={debugOverlayStyle}>
+          {JSON.stringify({ pathname: loc.pathname, hash: loc.hash }, null, 2)}
+        </pre>
+      ) : null}
     </>
   );
 }
