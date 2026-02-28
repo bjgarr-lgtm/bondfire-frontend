@@ -417,19 +417,18 @@ const countsNormalized = useMemo(() => {
   }, [invByCat, invPar]);
 
   async function rsvp(meeting, status = "yes") {
-  if (!orgId || !meeting?.id) return;
-  setRsvpMsg("");
-  try {
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    setRsvpMsg("RSVP saved.");
-  } catch (e) {
-    setRsvpMsg(e?.message || "Failed to RSVP");
-  }
-}
+    if (!orgId || !meeting?.id) return;
+    setRsvpMsg("");
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      setRsvpMsg("RSVP saved.");
+    } catch (e) {
+      setRsvpMsg(e?.message || "Failed to RSVP");
+    }
   }
 
   const cardBtnStyle = {
