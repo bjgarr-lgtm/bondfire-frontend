@@ -72,36 +72,21 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   return out;
 }
 
-function readSessionDeltas(orgId) {
+// Baseline for ticker deltas is the most recent dashboard refresh in this tab.
+// We store the last-normalized counts and compute deltas vs that baseline.
+function readRefreshBaseline(orgId) {
   try {
-    return JSON.parse(sessionStorage.getItem(`bf_dash_deltas_${orgId}`) || "{}") || {};
+    return JSON.parse(sessionStorage.getItem(`bf_dash_baseline_${orgId}`) || "{}") || {};
   } catch {
     return {};
   }
 }
 
-function writeSessionDeltas(orgId, deltas) {
+function writeRefreshBaseline(orgId, baseline) {
   try {
-    sessionStorage.setItem(`bf_dash_deltas_${orgId}`, JSON.stringify(deltas || {}));
+    sessionStorage.setItem(`bf_dash_baseline_${orgId}`, JSON.stringify(baseline || {}));
   } catch {}
 }
-
-function getAuthToken() {
-  try {
-    return localStorage.getItem("bf_auth_token") || sessionStorage.getItem("bf_auth_token") || "";
-  } catch {
-    return "";
-  }
-}
-
-function sessionInitKey(orgId) {
-  return `bf_dash_session_init_${orgId}`;
-}
-
-function sessionTokenKey(orgId) {
-  return `bf_dash_session_token_${orgId}`;
-}
-
 function readPrevCounts(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
@@ -117,33 +102,13 @@ function writePrevCounts(orgId, counts) {
 }
 
 function deltaBadge(delta) {
-  if (!Number.isFinite(delta)) return null;
-
-  // Keep badges visible even when delta is 0.
-  if (delta === 0) {
-    return {
-      txt: "0",
-      style: {
-        padding: "3px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 800,
-        background: "rgba(255,255,255,0.08)",
-        border: "1px solid rgba(255,255,255,0.18)",
-        color: "#e9e9e9",
-      },
-    };
-  }
-
+  if (!Number.isFinite(delta) || delta === 0) return null;
   const up = delta > 0;
   const txt = up ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`;
   const bg = up ? "rgba(0, 200, 120, 0.18)" : "rgba(255, 80, 80, 0.18)";
   const bd = up ? "rgba(0, 200, 120, 0.35)" : "rgba(255, 80, 80, 0.35)";
   const fg = up ? "#b8ffe4" : "#ffd0d0";
-  return {
-    txt,
-    style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: bg, border: `1px solid ${bd}`, color: fg },
-  };
+  return { txt, style: { padding: "3px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800, background: bg, border: `1px solid ${bd}`, color: fg } };
 }
 
 function pill(text, tone) {
@@ -204,9 +169,12 @@ export default function Overview() {
   const [pledges, setPledges] = useState([]);
 
   const [rsvpMsg, setRsvpMsg] = useState("");
-  const [tickerDeltas, setTickerDeltas] = useState(() => (orgId ? readSessionDeltas(orgId) : {}));
+
+  const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
+  const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   useEffect(() => {
-    if (orgId) setTickerDeltas(readSessionDeltas(orgId));
+    // New org, new baseline.
+    setTickerDeltas({});
   }, [orgId]);
 
   function countsNormalizedRef(c) {
@@ -293,48 +261,25 @@ export default function Overview() {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
-      // --- Ticker deltas ---
-      // Desired behavior:
-      // - Compute once per login (per org) and keep visible throughout the session (even after Refresh).
-      // - Recompute next time the user logs in (token changes) or opens a new session.
+      // Tickers: compute deltas vs the last refresh baseline (in this tab), then update baseline.
       try {
-        const tok = getAuthToken();
-        const tokKey = sessionTokenKey(orgId);
-        const initKey = sessionInitKey(orgId);
-
-        const prevTok = sessionStorage.getItem(tokKey) || "";
-        if (prevTok !== tok) {
-          // New login or token changed. Reset session deltas so we compute a fresh baseline.
-          sessionStorage.setItem(tokKey, tok || "");
-          sessionStorage.removeItem(initKey);
-          writeSessionDeltas(orgId, {});
-          setTickerDeltas({});
-        }
-
-        const alreadyInit = sessionStorage.getItem(initKey) === "1";
-        if (!alreadyInit) {
-          const pc = readPrevCounts(orgId) || {};
-          const cn = countsNormalizedRef(rawCounts);
-          const nextDeltas = {
-            people: cn.people - Number(pc.people || 0),
-            inventory: cn.inventory - Number(pc.inventory || 0),
-            needsOpen: cn.needsOpen - Number(pc.needsOpen || 0),
-            meetingsUpcoming: cn.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
-            pledgesActive: cn.pledgesActive - Number(pc.pledgesActive || 0),
-            subsTotal: cn.subsTotal - Number(pc.subsTotal || 0),
-          };
-          writeSessionDeltas(orgId, nextDeltas);
-          sessionStorage.setItem(initKey, "1");
-          setTickerDeltas(nextDeltas);
-        } else {
-          const existing = readSessionDeltas(orgId);
-          if (existing && Object.keys(existing).length) setTickerDeltas(existing);
-        }
+        const cn = countsNormalizedRef(rawCounts);
+        const base = readRefreshBaseline(orgId);
+        const hasBase = base && Object.keys(base).length > 0;
+        const nextDeltas = {
+          people: hasBase ? cn.people - Number(base.people || 0) : 0,
+          inventory: hasBase ? cn.inventory - Number(base.inventory || 0) : 0,
+          needsOpen: hasBase ? cn.needsOpen - Number(base.needsOpen || 0) : 0,
+          meetingsUpcoming: hasBase ? cn.meetingsUpcoming - Number(base.meetingsUpcoming || 0) : 0,
+          pledgesActive: hasBase ? cn.pledgesActive - Number(base.pledgesActive || 0) : 0,
+          subsTotal: hasBase ? cn.subsTotal - Number(base.subsTotal || 0) : 0,
+        };
+        setTickerDeltas(nextDeltas);
+        writeRefreshBaseline(orgId, cn);
       } catch {}
 
-      // Save latest counts for the *next login* baseline.
+      // Save latest counts for the next-login fallback baseline.
       writePrevCounts(orgId, rawCounts);
-
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -365,16 +310,16 @@ export default function Overview() {
   }, [counts]);
 
   const deltas = useMemo(() => {
-    const sd = tickerDeltas && Object.keys(tickerDeltas).length ? tickerDeltas : (orgId ? readSessionDeltas(orgId) : {});
+    const d = tickerDeltas || {};
     return {
-      people: Number(sd?.people || 0),
-      inventory: Number(sd?.inventory || 0),
-      needsOpen: Number(sd?.needsOpen || 0),
-      meetingsUpcoming: Number(sd?.meetingsUpcoming || 0),
-      pledgesActive: Number(sd?.pledgesActive || 0),
-      subsTotal: Number(sd?.subsTotal || 0),
+      people: Number(d.people || 0),
+      inventory: Number(d.inventory || 0),
+      needsOpen: Number(d.needsOpen || 0),
+      meetingsUpcoming: Number(d.meetingsUpcoming || 0),
+      pledgesActive: Number(d.pledgesActive || 0),
+      subsTotal: Number(d.subsTotal || 0),
     };
-  }, [tickerDeltas, orgId]);
+  }, [tickerDeltas]);
 
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
