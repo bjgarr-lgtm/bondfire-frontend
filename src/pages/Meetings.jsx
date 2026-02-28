@@ -46,6 +46,9 @@ export default function Meetings() {
 
 	const [edit, setEdit] = useState(null);
 
+	const [myRsvp, setMyRsvp] = useState(null);
+	const [rsvpBusy, setRsvpBusy] = useState(false);
+
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
 		title: "",

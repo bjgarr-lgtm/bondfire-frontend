@@ -200,6 +200,24 @@ if (invLooksScrubbed) {
 }
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
+
+      // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
+      let needsRawFinal = needsRaw;
+      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
+        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
+        const blob = n && (n.encrypted_blob || n.encryptedBlob);
+        const title = String(n && (n.title || "")).toLowerCase();
+        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
+      });
+      if (needsLooksScrubbed) {
+        try {
+          const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
+          needsRawFinal = Array.isArray(needsFull?.needs) ? needsFull.needs : needsRaw;
+        } catch {
+          needsRawFinal = needsRaw;
+        }
+      }
+
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
       // These live under Settings pages, so fetch directly.
@@ -208,7 +226,7 @@ if (invLooksScrubbed) {
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
       const invDec = await tryDecryptList(orgId, invRawFinal, "encrypted_blob");
-      const needsDec = await tryDecryptList(orgId, needsRaw, "encrypted_blob");
+      const needsDec = await tryDecryptList(orgId, needsRawFinal, "encrypted_blob");
       const meetsDec = await tryDecryptList(orgId, meetsRaw, "encrypted_blob");
       const subsDec = await tryDecryptList(orgId, subsResp?.subscribers || [], "encrypted_blob");
       const pledgesDec = await tryDecryptList(orgId, pledgesResp?.pledges || [], "encrypted_blob");
@@ -318,7 +336,7 @@ const countsNormalized = useMemo(() => {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -358,7 +376,19 @@ const countsNormalized = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const map = new Map();
     for (const it of arr) {
-      const cat = safeStr(it?.category || it?.cat || "uncategorized").trim().toLowerCase() || "uncategorized";
+            const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
+      let cat = safeStr(catRaw).trim();
+      if (!cat) {
+        try {
+          for (const k of Object.keys(it || {})) {
+            if (String(k).toLowerCase() === "category") {
+              cat = safeStr(it[k]).trim();
+              break;
+            }
+          }
+        } catch {}
+      }
+      cat = (cat || "uncategorized").toLowerCase();
       const qty = Number(it?.qty);
       map.set(cat, (map.get(cat) || 0) + (Number.isFinite(qty) ? qty : 0));
     }
@@ -532,29 +562,7 @@ const countsNormalized = useMemo(() => {
                     <span>No low items flagged.</span>
                   )}
                 </div>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => {
-                    // quick and dirty, but it works: "medical=200,food=100"
-                    const obj = {};
-                    String(next)
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .forEach((pair) => {
-                        const [k, v] = pair.split("=").map((x) => x.trim());
-                        const n = Number(v);
-                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
-                      });
-                    writeInvPar(orgId, obj);
-                    // force rerender
-                    setCounts((c) => ({ ...(c || {}) }));
-                  }}
-                >
-                  Set par
-                </button>
-              </div>
+</div>
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>

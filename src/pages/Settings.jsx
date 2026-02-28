@@ -1475,7 +1475,11 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       continue;
     }
     try {
-      const dec = await decryptWithOrgKey(keyBytes, blob);
+      const decRaw = await decryptWithOrgKey(keyBytes, blob);
+      let dec = decRaw;
+      if (typeof decRaw === "string") {
+        try { dec = JSON.parse(decRaw); } catch { dec = null; }
+      }
       if (dec && typeof dec === "object") {
         for (const [k, v] of Object.entries(dec)) {
           // Only fill placeholders; never overwrite real server fields.
