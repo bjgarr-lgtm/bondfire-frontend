@@ -645,30 +645,7 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/needs`, {
         method: "GET",
       });
-      const rows = Array.isArray(r.needs) ? r.needs : [];
-      const orgKey = getCachedOrgKey(orgId);
-      if (orgKey) {
-        const out = [];
-        for (const n of rows) {
-          if (n?.encrypted_blob) {
-            try {
-              const dec = JSON.parse(await decryptWithOrgKey(orgKey, n.encrypted_blob));
-              const merged = { ...(n || {}) };
-              if (!safeStr(merged.title).trim() || isEncryptedNameLike(merged.title)) merged.title = dec.title || dec.name || merged.title;
-              if (!safeStr(merged.description).trim() || isEncryptedNameLike(merged.description)) merged.description = dec.description || merged.description;
-              if (!safeStr(merged.urgency).trim() || isEncryptedNameLike(merged.urgency)) merged.urgency = dec.urgency || merged.urgency;
-              out.push(merged);
-              continue;
-            } catch {
-              // fall through
-            }
-          }
-          out.push(n);
-        }
-        setNeeds(out);
-      } else {
-        setNeeds(rows);
-      }
+      setNeeds(await tryDecryptList(orgId, Array.isArray(r.needs) ? r.needs : []));
     } catch {
       setNeeds([]);
     }
@@ -1476,3 +1453,48 @@ React.useEffect(() => {
     </div>
   );
 }
+
+/* ---------- ZK decrypt helper ---------- */
+async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!orgId || list.length === 0) return list;
+  let keyBytes = null;
+  try {
+    keyBytes = await getCachedOrgKey(orgId);
+  } catch {
+    keyBytes = null;
+  }
+  if (!keyBytes) return list;
+
+  const out = [];
+  for (const row of list) {
+    const r = { ...(row || {}) };
+    const blob = r?.[blobField];
+    if (!blob) {
+      out.push(r);
+      continue;
+    }
+    try {
+      const dec = await decryptWithOrgKey(keyBytes, blob);
+      if (dec && typeof dec === "object") {
+        for (const [k, v] of Object.entries(dec)) {
+          // Only fill placeholders; never overwrite real server fields.
+          const cur = r[k];
+          const isPlaceholder =
+            cur == null ||
+            cur === "" ||
+            cur === "__encrypted__" ||
+            cur === "_encrypted_" ||
+            cur === "encrypted";
+          if (isPlaceholder) r[k] = v;
+        }
+        r.__decrypted__ = true;
+      }
+    } catch {
+      // keep original row
+    }
+    out.push(r);
+  }
+  return out;
+}
+

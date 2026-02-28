@@ -46,10 +46,6 @@ export default function Meetings() {
 
 	const [edit, setEdit] = useState(null);
 
-	const [myRsvp, setMyRsvp] = useState(null);
-	const [rsvpBusy, setRsvpBusy] = useState(false);
-	const [rsvpErr, setRsvpErr] = useState("");
-
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
 		title: "",
@@ -200,44 +196,6 @@ export default function Meetings() {
 		}
 	}
 
-
-
-async function loadMyRsvp(meetingId) {
-	if (!orgId || !meetingId) return;
-	setRsvpErr("");
-	try {
-		const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`);
-		setMyRsvp(data?.my_rsvp || null);
-	} catch (e) {
-		setMyRsvp(null);
-		setRsvpErr(e?.message || String(e));
-	}
-}
-
-async function setRsvp(status) {
-	if (!orgId || !edit?.id) return;
-	setRsvpBusy(true);
-	setRsvpErr("");
-	// Optimistic UI so it feels instant even if the network is slow.
-	setMyRsvp({ status });
-	try {
-		const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(edit.id)}/rsvp`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ status }),
-		});
-		// If the backend returns a normalized status, prefer it.
-		if (res?.status) setMyRsvp({ status: String(res.status) });
-		else await loadMyRsvp(edit.id);
-	} catch (e) {
-		// Roll back to unknown on error.
-		setMyRsvp(null);
-		setRsvpErr(e?.message || String(e));
-	} finally {
-		setRsvpBusy(false);
-	}
-}
-
 	function openItem(m) {
 		setEdit({
 			id: m.id,
@@ -248,14 +206,47 @@ async function setRsvp(status) {
 			agenda: m.agenda || "",
 			is_public: !!m.is_public,
 		});
-		loadMyRsvp(m.id).catch(console.error);
+		setMyRsvp(null);
+		loadMyRsvp(m.id);
 	}
 
 	function closeModal() {
 		setEdit(null);
 	}
 
-	async function saveEdit() {
+	
+
+async function loadMyRsvp(meetingId) {
+	if (!orgId || !meetingId) return;
+	try {
+		const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+			method: "GET",
+		});
+		setMyRsvp(r?.rsvp || null);
+	} catch {
+		setMyRsvp(null);
+	}
+}
+
+async function saveMyRsvp(status) {
+	if (!orgId || !edit?.id) return;
+	setRsvpBusy(true);
+	setErr("");
+	try {
+		const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(edit.id)}/rsvp`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ status }),
+		});
+		setMyRsvp(r?.rsvp || { status });
+	} catch (e) {
+		setErr(e?.message || "Failed to RSVP");
+	} finally {
+		setRsvpBusy(false);
+	}
+}
+
+async function saveEdit() {
 		if (!orgId || !edit?.id) return;
 		setErr("");
 		try {
@@ -371,26 +362,16 @@ async function setRsvp(status) {
 						inset: 0,
 						background: "rgba(0,0,0,0.55)",
 						display: "flex",
-						alignItems: "flex-start",
+						alignItems: "center",
 						justifyContent: "center",
 						padding: 16,
-						overflowY: "auto",
 						zIndex: 50,
 					}}
 					onMouseDown={(e) => {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div
-						className="card"
-						style={{
-							width: "min(920px, 100%)",
-							padding: 16,
-							marginTop: 16,
-							maxHeight: "calc(100vh - 32px)",
-							overflowY: "auto",
-						}}
-					>
+					<div className="card" style={{ width: "min(920px, 100%)", padding: 16 }}>
 						<div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Meeting Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>
@@ -404,16 +385,15 @@ async function setRsvp(status) {
 						</div>
 
 
-<div className="card" style={{ padding: 10, marginTop: 10 }}>
-	<div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-		<div className="helper">Your RSVP</div>
-		{myRsvp?.status ? <div className="pill">{myRsvp.status}</div> : <div className="helper">none</div>}
-	</div>
-	{rsvpErr && <div className="helper" style={{ color: "tomato", marginTop: 6 }}>{rsvpErr}</div>}
-	<div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("yes")}>Yes</button>
-		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("maybe")}>Maybe</button>
-		<button className="btn" type="button" disabled={rsvpBusy} onClick={() => setRsvp("no")}>No</button>
+<div style={{ marginTop: 12 }}>
+	<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>Your RSVP</div>
+	<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+		<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("yes")}>Yes</button>
+			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("maybe")}>Maybe</button>
+			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("no")}>No</button>
+		</div>
+		<div className="helper" style={{ opacity: 0.9 }}>{myRsvp?.status || "none"}</div>
 	</div>
 </div>
 

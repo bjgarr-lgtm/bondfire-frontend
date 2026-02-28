@@ -21,11 +21,13 @@ export function getAuthToken() {
 
 export async function api(path, opts = {}) {
   const headers = new Headers(opts.headers || {});
-  // If cookie-session auth is active (bf_csrf present), do NOT send a stale Bearer token.
-  // A legacy token in storage can cause the backend to reject the request even though cookies are valid.
+  const tok = getAuthToken();
+  // If we have a cookie session (bf_csrf), prefer it and DO NOT send stale Bearer tokens.
   const csrfCookie = readCookie("bf_csrf");
-  const tok = csrfCookie ? "" : getAuthToken();
-  if (tok && !headers.has("authorization")) headers.set("authorization", `Bearer ${tok}`);
+  const cookieSessionActive = !!csrfCookie;
+  if (!cookieSessionActive && tok && !headers.has("authorization")) {
+    headers.set("authorization", `Bearer ${tok}`);
+  }
 
   // Cookie sessions
   const method = String(opts.method || "GET").toUpperCase();

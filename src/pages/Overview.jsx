@@ -62,6 +62,21 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   return out;
 }
 
+
+
+function readSessionDeltas(orgId) {
+  try {
+    return JSON.parse(sessionStorage.getItem(`bf_dash_deltas_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionDeltas(orgId, deltas) {
+  try {
+    sessionStorage.setItem(`bf_dash_deltas_${orgId}`, JSON.stringify(deltas || {}));
+  } catch {}
+}
 function readPrevCounts(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
@@ -146,15 +161,10 @@ export default function Overview() {
   const [rsvpMsg, setRsvpMsg] = useState("");
 
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
-
-  const [deltaSnap, setDeltaSnap] = useState(() => {
-    try {
-      return JSON.parse(sessionStorage.getItem(`bf_dash_deltas_${orgId}`) || "null");
-    } catch {
-      return null;
-    }
-  });
-
+  const [tickerDeltas, setTickerDeltas] = useState(() => (orgId ? readSessionDeltas(orgId) : {}));
+  useEffect(() => {
+    if (orgId) setTickerDeltas(readSessionDeltas(orgId));
+  }, [orgId]);
 
   async function refresh() {
     if (!orgId) return;
@@ -170,14 +180,25 @@ export default function Overview() {
 
       // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
-      let invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
-      // Dashboard preview rows may be scrubbed (no encrypted_blob, blank category). If so, load the full list.
-      if (Array.isArray(invRaw) && invRaw.length) {
-        const looksScrubbed = invRaw.some((it) => !it?.encrypted_blob && !safeStr(it?.category || it?.cat).trim() && safeStr(it?.name).includes("encrypt"));
-        if (looksScrubbed) {
-          invRaw = (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
-        }
-      }
+      const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
+
+// Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
+let invRawFinal = invRaw;
+const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
+  const cat = (it && (it.category || it.cat)) || "";
+  const blob = it && (it.encrypted_blob || it.encryptedBlob);
+  const nm = String(it && (it.name || it.title || "")).toLowerCase();
+  return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
+});
+if (invLooksScrubbed) {
+  try {
+    const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
+    invRawFinal = Array.isArray(invFull?.items) ? invFull.items : invRaw;
+  } catch {
+    invRawFinal = invRaw;
+  }
+}
+
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
@@ -186,7 +207,7 @@ export default function Overview() {
       const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
-      const invDec = await tryDecryptList(orgId, invRaw, "encrypted_blob");
+      const invDec = await tryDecryptList(orgId, invRawFinal, "encrypted_blob");
       const needsDec = await tryDecryptList(orgId, needsRaw, "encrypted_blob");
       const meetsDec = await tryDecryptList(orgId, meetsRaw, "encrypted_blob");
       const subsDec = await tryDecryptList(orgId, subsResp?.subscribers || [], "encrypted_blob");
@@ -199,31 +220,27 @@ export default function Overview() {
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
 
-      
-      // Snapshot deltas once per session (since login). Do NOT overwrite on manual refresh.
-      try {
-        const key = `bf_dash_deltas_${orgId}`;
-        const seenKey = `bf_dash_deltas_seen_${orgId}`;
-        const already = sessionStorage.getItem(seenKey) === "1";
-        if (!already) {
-          const pc = readPrevCounts(orgId) || {};
-          const snap = {
-            people: Number(rawCounts.people || 0) - Number(pc.people || 0),
-            inventory: Number(rawCounts.inventory || 0) - Number(pc.inventory || 0),
-            needsOpen: Number(rawCounts.needsOpen || 0) - Number(pc.needsOpen || 0),
-            meetingsUpcoming: Number(rawCounts.meetingsUpcoming || 0) - Number(pc.meetingsUpcoming || 0),
-            pledgesActive: Number(rawCounts.pledgesActive || rawCounts.pledges || 0) - Number(pc.pledgesActive || pc.pledges || 0),
-            subsTotal: Number(rawCounts.subsTotal || rawCounts.subscribers || rawCounts.subs || 0) - Number(pc.subsTotal || pc.subscribers || pc.subs || 0),
-          };
-          sessionStorage.setItem(key, JSON.stringify(snap));
-          sessionStorage.setItem(seenKey, "1");
-          setDeltaSnap(snap);
-          // Also persist "current counts" as the baseline for the NEXT login/session.
-          writePrevCounts(orgId, rawCounts);
-        }
-      } catch {
-        // If sessionStorage blows up, fall back to old behavior (still avoid crashing).
-      }
+
+// Persist ticker deltas for this session so they don't disappear after refresh.
+try {
+  const existing = readSessionDeltas(orgId);
+  if (!existing || Object.keys(existing).length === 0) {
+    const pc = prevCounts || {};
+    const nextDeltas = {
+      people: countsNormalizedRef(rawCounts).people - Number(pc.people || 0),
+      inventory: countsNormalizedRef(rawCounts).inventory - Number(pc.inventory || 0),
+      needsOpen: countsNormalizedRef(rawCounts).needsOpen - Number(pc.needsOpen || 0),
+      meetingsUpcoming: countsNormalizedRef(rawCounts).meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
+      pledgesActive: countsNormalizedRef(rawCounts).pledgesActive - Number(pc.pledgesActive || 0),
+      subsTotal: countsNormalizedRef(rawCounts).subsTotal - Number(pc.subsTotal || 0),
+    };
+    writeSessionDeltas(orgId, nextDeltas);
+    setTickerDeltas(nextDeltas);
+  }
+} catch {}
+
+// Save latest counts for the *next login* baseline.
+writePrevCounts(orgId, rawCounts);
 
     } catch (e) {
       console.error(e);
@@ -243,7 +260,20 @@ export default function Overview() {
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
   // ----- derived -----
-  const countsNormalized = useMemo(() => {
+  
+
+function countsNormalizedRef(c) {
+  const cc = c || {};
+  return {
+    people: Number(cc.people || 0),
+    inventory: Number(cc.inventory || 0),
+    needsOpen: Number(cc.needsOpen || cc.needs || 0),
+    meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
+    pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
+    subsTotal: Number(cc.subscribers || cc.subs || 0),
+  };
+}
+const countsNormalized = useMemo(() => {
     const c = counts || {};
     return {
       people: Number(c.people || 0),
@@ -256,18 +286,18 @@ export default function Overview() {
   }, [counts]);
 
   const deltas = useMemo(() => {
-    // Prefer the snapshot captured once per session (since login).
-    if (deltaSnap && typeof deltaSnap === "object") return deltaSnap;
+    const sd = tickerDeltas && Object.keys(tickerDeltas).length ? tickerDeltas : null;
+    if (sd) return sd;
     const pc = prevCounts || {};
     return {
       people: countsNormalized.people - Number(pc.people || 0),
       inventory: countsNormalized.inventory - Number(pc.inventory || 0),
       needsOpen: countsNormalized.needsOpen - Number(pc.needsOpen || 0),
       meetingsUpcoming: countsNormalized.meetingsUpcoming - Number(pc.meetingsUpcoming || 0),
-      pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || pc.pledges || 0),
-      subsTotal: countsNormalized.subsTotal - Number(pc.subsTotal || pc.subscribers || pc.subs || 0),
+      pledgesActive: countsNormalized.pledgesActive - Number(pc.pledgesActive || 0),
+      subsTotal: countsNormalized.subsTotal - Number(pc.subsTotal || 0),
     };
-  }, [countsNormalized, prevCounts, deltaSnap]);
+  }, [countsNormalized, prevCounts, tickerDeltas]);
 
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
@@ -288,7 +318,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings"),
     ];
   }, [countsNormalized, deltas]);
 
@@ -502,8 +532,28 @@ export default function Overview() {
                     <span>No low items flagged.</span>
                   )}
                 </div>
-                
-
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    // quick and dirty, but it works: "medical=200,food=100"
+                    const obj = {};
+                    String(next)
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .forEach((pair) => {
+                        const [k, v] = pair.split("=").map((x) => x.trim());
+                        const n = Number(v);
+                        if (k && Number.isFinite(n)) obj[k.toLowerCase()] = n;
+                      });
+                    writeInvPar(orgId, obj);
+                    // force rerender
+                    setCounts((c) => ({ ...(c || {}) }));
+                  }}
+                >
+                  Set par
+                </button>
               </div>
             </div>
           ) : (
@@ -580,7 +630,7 @@ export default function Overview() {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" type="button" onClick={() => go("pledges")}>
+            <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
               View all
             </button>
           </div>
