@@ -225,7 +225,7 @@ async function loadMyRsvp(meetingId) {
 		const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
 			method: "GET",
 		});
-		setMyRsvp(r?.rsvp || null);
+		setMyRsvp(r?.my_rsvp ?? r?.rsvp ?? null);
 	} catch {
 		setMyRsvp(null);
 	}
@@ -241,7 +241,9 @@ async function saveMyRsvp(status) {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status }),
 		});
-		setMyRsvp(r?.rsvp || { status });
+		setMyRsvp(r?.my_rsvp ?? r?.rsvp ?? { status });
+		// Re-read to ensure we reflect what actually persisted
+		await loadMyRsvp(edit.id);
 	} catch (e) {
 		setErr(e?.message || "Failed to RSVP");
 	} finally {

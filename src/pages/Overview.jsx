@@ -416,22 +416,20 @@ const countsNormalized = useMemo(() => {
     return lows;
   }, [invByCat, invPar]);
 
-  async function rsvp(meeting) {
-    if (!orgId || !meeting?.id) return;
-    setRsvpMsg("");
-    try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: meeting.id }),
-      });
-      setRsvpMsg("RSVP saved.");
-    } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
-    }
+  async function rsvp(meeting, status = "yes") {
+  if (!orgId || !meeting?.id) return;
+  setRsvpMsg("");
+  try {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    setRsvpMsg("RSVP saved.");
+  } catch (e) {
+    setRsvpMsg(e?.message || "Failed to RSVP");
+  }
+}
   }
 
   const cardBtnStyle = {
@@ -509,7 +507,7 @@ const countsNormalized = useMemo(() => {
                     <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
                       {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
                     </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                    <button className="btn-red" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); rsvp(m); }}>
                       RSVP
                     </button>
                   </div>
