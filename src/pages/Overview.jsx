@@ -428,17 +428,6 @@ const countsNormalized = useMemo(() => {
 
   const invMax = useMemo(() => {
     let m = 1;
-    for (const x of invByCat) {
-      m = Math.max(m, Number(x.qty) || 0, Number(x.par) || 0);
-    }
-    return m;
-  }, [invByCat]);
-
-
-  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
-
-  const invMax = useMemo(() => {
-    let m = 1;
     for (const x of invByCat) m = Math.max(m, Number(x.qty) || 0, Number(invPar?.[x.category]) || 0);
     return m;
   }, [invByCat, invPar]);
@@ -480,19 +469,18 @@ const countsNormalized = useMemo(() => {
 
 
   async function rsvp(meeting, status = "yes") {
-  if (!orgId || !meeting?.id) return;
-  setRsvpMsg("");
-  try {
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    setRsvpMsg("RSVP saved.");
-  } catch (e) {
-    setRsvpMsg(e?.message || "Failed to RSVP");
-  }
-}
+    if (!orgId || !meeting?.id) return;
+    setRsvpMsg("");
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      setRsvpMsg("RSVP saved.");
+    } catch (e) {
+      setRsvpMsg(e?.message || "Failed to RSVP");
+    }
   }
 
   const cardBtnStyle = {
