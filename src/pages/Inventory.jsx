@@ -317,7 +317,7 @@ export default function Inventory() {
 
         {zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search inventory" style={{ marginTop: 12 }} />
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+        <div className="bf-inv-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
           <div className="helper">Sort</div>
           <select className="input" value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ width: 180 }}>
             <option value="low">Lowest stock first</option>
@@ -336,8 +336,8 @@ export default function Inventory() {
         </div>
         {err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table className="table" style={{ width: "100%" }}>
+        <div className="bf-table-scroll" style={{ marginTop: 12, overflowX: "auto" }}>
+          <table className="table" style={{ width: "100%", minWidth: 760 }}>
             <thead>
               <tr>
                 <th>Name</th>

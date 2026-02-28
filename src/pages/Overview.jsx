@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
-import "./Overview.css";
 
 function readOrgInfo(orgId) {
   try {
@@ -102,6 +101,22 @@ function writePrevCounts(orgId, counts) {
   } catch {}
 }
 
+function readTopCardOrder(orgId) {
+  try {
+    const v = JSON.parse(localStorage.getItem(`bf_overview_topcard_order_${orgId}`) || "[]");
+    return Array.isArray(v) ? v.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTopCardOrder(orgId, order) {
+  try {
+    localStorage.setItem(`bf_overview_topcard_order_${orgId}`, JSON.stringify(Array.isArray(order) ? order : []));
+  } catch {}
+}
+
+
 function deltaBadge(delta) {
   if (!Number.isFinite(delta) || delta === 0) return null;
   const up = delta > 0;
@@ -127,6 +142,11 @@ function pill(text, tone) {
       {text}
     </span>
   );
+}
+
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
 }
 
 function Sparkline({ values, width = 120, height = 32 }) {
@@ -178,25 +198,6 @@ function writeInvPar(orgId, obj) {
   } catch {}
 }
 
-function readDashCardOrder(orgId) {
-  try {
-    const v = JSON.parse(localStorage.getItem(`bf_dash_card_order_${orgId}`) || "null");
-    return Array.isArray(v) ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeDashCardOrder(orgId, order) {
-  try {
-    localStorage.setItem(`bf_dash_card_order_${orgId}`, JSON.stringify(Array.isArray(order) ? order : []));
-  } catch {}
-}
-
-function SkeletonCard({ h = 98 }) {
-  return <div className="card bfSkel" style={{ padding: 14, minHeight: h }} />;
-}
-
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -232,11 +233,13 @@ export default function Overview() {
     setTickerDeltas({});
   }, [orgId]);
 
-  const [dashOrder, setDashOrder] = useState(() => readDashCardOrder(orgId) || []);
-
+  const [topCardOrder, setTopCardOrder] = useState(() => readTopCardOrder(orgId));
+  const [draggingTopKey, setDraggingTopKey] = useState("");
   useEffect(() => {
-    setDashOrder(readDashCardOrder(orgId) || []);
+    setTopCardOrder(readTopCardOrder(orgId));
+    setDraggingTopKey("");
   }, [orgId]);
+
 
   function countsNormalizedRef(c) {
     const cc = c || {};
@@ -268,12 +271,15 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
       let invRawFinal = invRaw;
-      const invLooksScrubbed = Array.isArray(invRaw) && invRaw.length > 0 && invRaw.some((it) => {
-        const cat = (it && (it.category || it.cat)) || "";
-        const blob = it && (it.encrypted_blob || it.encryptedBlob);
-        const nm = String(it && (it.name || it.title || "")).toLowerCase();
-        return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
-      });
+      const invLooksScrubbed =
+        Array.isArray(invRaw) &&
+        invRaw.length > 0 &&
+        invRaw.some((it) => {
+          const cat = (it && (it.category || it.cat)) || "";
+          const blob = it && (it.encrypted_blob || it.encryptedBlob);
+          const nm = String(it && (it.name || it.title || "")).toLowerCase();
+          return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
+        });
       if (invLooksScrubbed) {
         try {
           const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
@@ -287,12 +293,15 @@ export default function Overview() {
 
       // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
       let needsRawFinal = needsRaw;
-      const needsLooksScrubbed = Array.isArray(needsRaw) && needsRaw.length > 0 && needsRaw.some((n) => {
-        const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
-        const blob = n && (n.encrypted_blob || n.encryptedBlob);
-        const title = String(n && (n.title || "")).toLowerCase();
-        return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
-      });
+      const needsLooksScrubbed =
+        Array.isArray(needsRaw) &&
+        needsRaw.length > 0 &&
+        needsRaw.some((n) => {
+          const hasPriority = n && Object.prototype.hasOwnProperty.call(n, "priority");
+          const blob = n && (n.encrypted_blob || n.encryptedBlob);
+          const title = String(n && (n.title || "")).toLowerCase();
+          return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
+        });
       if (needsLooksScrubbed) {
         try {
           const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
@@ -385,7 +394,15 @@ export default function Overview() {
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
       const db = deltaBadge(deltas[key]);
-      return { key, title, icon, value, sub, to, badge: db };
+      return {
+        key,
+        title,
+        icon,
+        value,
+        sub,
+        to,
+        badge: db,
+      };
     };
     return [
       mk("people", "People", "👥", countsNormalized.people, "members", "people"),
@@ -398,81 +415,119 @@ export default function Overview() {
   }, [countsNormalized, deltas]);
 
   const topCardsOrdered = useMemo(() => {
-    const order = Array.isArray(dashOrder) && dashOrder.length ? dashOrder : topCards.map((c) => c.key);
-    const map = new Map(topCards.map((c) => [c.key, c]));
+    const arr = Array.isArray(topCards) ? topCards.slice() : [];
+    const ord = Array.isArray(topCardOrder) ? topCardOrder : [];
+    if (!ord.length) return arr;
+
+    const byKey = new Map(arr.map((c) => [c.key, c]));
     const out = [];
-    for (const k of order) {
-      const v = map.get(k);
-      if (v) out.push(v);
+    for (const k of ord) {
+      if (byKey.has(k)) out.push(byKey.get(k));
     }
-    for (const c of topCards) {
-      if (!out.some((x) => x.key === c.key)) out.push(c);
+    for (const c of arr) {
+      if (!ord.includes(c.key)) out.push(c);
     }
     return out;
-  }, [dashOrder, topCards]);
+  }, [topCards, topCardOrder]);
+
+  function moveTopCard(dragKey, dropKey) {
+    if (!dragKey || !dropKey || dragKey === dropKey) return;
+    const keys = topCardsOrdered.map((c) => c.key);
+    const from = keys.indexOf(dragKey);
+    const to = keys.indexOf(dropKey);
+    if (from < 0 || to < 0) return;
+
+    const next = keys.slice();
+    const [k] = next.splice(from, 1);
+    next.splice(to, 0, k);
+    setTopCardOrder(next);
+    writeTopCardOrder(orgId, next);
+  }
+
 
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
-    return arr.filter((m) => Number(m?.starts_at) > 0).sort((a, b) => Number(a.starts_at) - Number(b.starts_at)).slice(0, 3);
+    return arr
+      .filter((m) => Number(m?.starts_at) > 0)
+      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
+      .slice(0, 3);
   }, [meetings]);
 
   const needsOpen = useMemo(() => {
     const arr = Array.isArray(needs) ? needs : [];
-    return arr.filter((n) => String(n?.status || "").toLowerCase() === "open").sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0)).slice(0, 6);
+    return arr
+      .filter((n) => String(n?.status || "").toLowerCase() === "open")
+      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
+      .slice(0, 6);
   }, [needs]);
 
   const subsSorted = useMemo(() => {
     const arr = Array.isArray(subs) ? subs : [];
-    return arr.slice().sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0)).slice(0, 6);
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
+      .slice(0, 6);
   }, [subs]);
 
   const pledgesSorted = useMemo(() => {
     const arr = Array.isArray(pledges) ? pledges : [];
-    return arr.slice().sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0)).slice(0, 6);
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
+      .slice(0, 6);
   }, [pledges]);
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  // Newsletter sparkline data + percent change (last 14 days)
   const newsletterSpark = useMemo(() => {
+  const arr = Array.isArray(subs) ? subs : [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  // last 14 days, oldest -> newest
+  const buckets = [];
+  for (let i = 13; i >= 0; i--) {
+    const start = now - i * dayMs;
+    const end = start + dayMs;
+    const count = arr.filter((s) => {
+      const t = Number(s?.joined || s?.created_at || 0);
+      return Number.isFinite(t) && t >= start && t < end;
+    }).length;
+    buckets.push(count);
+  }
+
+  // cumulative looks nicer than spiky daily counts
+  const cum = [];
+  let run = 0;
+  for (const c of buckets) {
+    run += c;
+    cum.push(run);
+  }
+
+  // If there were no joins in 14d but we have subs, keep a flat line at total
+  const any = buckets.some((x) => x > 0);
+  if (!any) {
+    const total = arr.length;
+    return new Array(14).fill(total);
+  }
+  return cum;
+}, [subs]);
+
+  const newsletterPct14d = useMemo(() => {
     const arr = Array.isArray(subs) ? subs : [];
+    if (!arr.length) return { pct: 0, joins: 0, prev: 0 };
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
-
-    const buckets = [];
-    for (let i = 13; i >= 0; i--) {
-      const start = now - i * dayMs;
-      const end = start + dayMs;
-      const count = arr.filter((s) => {
-        const t = Number(s?.joined || s?.created_at || 0);
-        return Number.isFinite(t) && t >= start && t < end;
-      }).length;
-      buckets.push(count);
-    }
-
-    const cum = [];
-    let run = 0;
-    for (const c of buckets) {
-      run += c;
-      cum.push(run);
-    }
-
-    const any = buckets.some((x) => x > 0);
-    if (!any) {
-      const total = arr.length;
-      return new Array(14).fill(total);
-    }
-    return cum;
+    const since = now - 14 * dayMs;
+    const joins = arr.filter((s) => {
+      const t = Number(s?.joined || s?.created_at || 0);
+      return Number.isFinite(t) && t >= since;
+    }).length;
+    const prev = Math.max(0, arr.length - joins);
+    const pct = prev > 0 ? (joins / prev) * 100 : joins > 0 ? 100 : 0;
+    return { pct, joins, prev };
   }, [subs]);
 
-  const newsletterPct = useMemo(() => {
-    const v = Array.isArray(newsletterSpark) ? newsletterSpark : [];
-    if (!v.length) return 0;
-    const first = Number(v[0] || 0);
-    const last = Number(v[v.length - 1] || 0);
-    if (first <= 0) return last > 0 ? 100 : 0;
-    return ((last - first) / first) * 100;
-  }, [newsletterSpark]);
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
@@ -511,9 +566,14 @@ export default function Overview() {
 
     const out = Array.from(map.values()).map((x) => {
       const pct = x.par > 0 ? x.qty / x.par : null;
-      return { ...x, pct, pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0 };
+      return {
+        ...x,
+        pct,
+        pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0,
+      };
     });
 
+    // Prefer categories with a par set, ordered by how low they are.
     out.sort((a, b) => {
       const ap = a.pct == null ? 999 : a.pct;
       const bp = b.pct == null ? 999 : b.pct;
@@ -533,6 +593,7 @@ export default function Overview() {
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
       const raw = parMap?.[id];
+      // treat "" as unset
       if (raw === "" || raw == null) continue;
       const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
@@ -541,7 +602,16 @@ export default function Overview() {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const pct = qty / par;
-      if (pct < 1) lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
+      if (pct < 1) {
+        lows.push({
+          id,
+          name: it?.name,
+          category: it?.category,
+          qty,
+          par,
+          pct,
+        });
+      }
     }
 
     lows.sort((a, b) => a.pct - b.pct);
@@ -552,6 +622,7 @@ export default function Overview() {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
     try {
+      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
       await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -559,6 +630,7 @@ export default function Overview() {
       });
       setRsvpMsg("RSVP saved.");
     } catch (e) {
+      // fallback: still useful navigation
       setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
       go("meetings");
     }
@@ -573,41 +645,6 @@ export default function Overview() {
     cursor: "pointer",
   };
 
-  const [dragKey, setDragKey] = useState(null);
-
-  function onDragStart(key, e) {
-    setDragKey(key);
-    try {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", key);
-    } catch {}
-  }
-
-  function onDropKey(targetKey, e) {
-    e.preventDefault();
-    const fromKey = (() => {
-      try {
-        return e.dataTransfer.getData("text/plain") || dragKey;
-      } catch {
-        return dragKey;
-      }
-    })();
-    if (!fromKey || fromKey === targetKey) return;
-
-    const current = topCardsOrdered.map((c) => c.key);
-    const fromIdx = current.indexOf(fromKey);
-    const toIdx = current.indexOf(targetKey);
-    if (fromIdx < 0 || toIdx < 0) return;
-
-    const next = current.slice();
-    next.splice(fromIdx, 1);
-    next.splice(toIdx, 0, fromKey);
-
-    setDashOrder(next);
-    writeDashCardOrder(orgId, next);
-    setDragKey(null);
-  }
-
   return (
     <div style={{ padding: 16 }}>
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
@@ -621,17 +658,20 @@ export default function Overview() {
         {rsvpMsg ? <div className="helper" style={{ marginTop: 10 }}>{rsvpMsg}</div> : null}
       </div>
 
-      {/* Top metrics row: desktop one row, mobile snap-scroll (no spilloff). Drag to reorder. */}
-      <div className="bfTopMetricsRow">
-        {loading && !Object.keys(counts || {}).length ? (
-          <>
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
-          </>
+      {/* Top metrics row: ONE row on desktop; on mobile it scrolls instead of spilling off-screen */}
+      <div
+        className="bf-top-metrics"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        {loading && !topCardsOrdered.length ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={`sk-top-${i}`} className="card bf-skel" style={{ padding: 14, minHeight: 98 }} />
+          ))
         ) : (
           topCardsOrdered.map((c) => (
             <button
@@ -639,16 +679,21 @@ export default function Overview() {
               type="button"
               style={cardBtnStyle}
               onClick={() => go(c.to)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDropKey(c.key, e)}
+              draggable
+              onDragStart={() => setDraggingTopKey(c.key)}
+              onDragEnd={() => setDraggingTopKey("")}
+              onDragOver={(e) => {
+                if (!draggingTopKey) return;
+                e.preventDefault();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                moveTopCard(draggingTopKey, c.key);
+                setDraggingTopKey("");
+              }}
+              title="drag to reorder"
             >
-              <div
-                className="card bfDashCard"
-                style={{ padding: 14, position: "relative", minHeight: 98 }}
-                draggable="true"
-                onDragStart={(e) => onDragStart(c.key, e)}
-                title="drag to reorder"
-              >
+              <div className="card bf-hoverglow" style={{ padding: 14, position: "relative", minHeight: 98 }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -683,12 +728,7 @@ export default function Overview() {
               View all
             </button>
           </div>
-          {loading && !meetingsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              <div className="card bfSkel" style={{ padding: 12, minHeight: 64 }} />
-              <div className="card bfSkel" style={{ padding: 12, minHeight: 64 }} />
-            </div>
-          ) : meetingsSorted.length ? (
+          {meetingsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {meetingsSorted.map((m) => (
                 <div key={m.id} className="card" style={{ padding: 12 }}>
@@ -831,62 +871,70 @@ export default function Overview() {
           )}
         </div>
 
-        {/* Newsletter */}
+          {/* Newsletter */}
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Newsletter</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, flex: 1, minWidth: 160 }}>Newsletter</h2>
+
+            <div
+              className="bf-spark-wrap"
+              style={{
+                width: 160,
+                height: 34,
+                borderRadius: 10,
+                padding: "2px 8px",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="subscriber trend (last 14 days)"
+            >
+              <Sparkline values={newsletterSpark} width={140} height={24} />
+            </div>
+
             <button className="btn" type="button" onClick={() => go("settings")}>
               View all
             </button>
           </div>
 
           <div className="helper" style={{ marginTop: 10 }}>
-            {subs.length} subscriber{subs.length === 1 ? "" : "s"} · {newsletterPct >= 0 ? "+" : ""}{Math.round(newsletterPct)}% (14d)
+            {subs.length} subscriber{subs.length === 1 ? "" : "s"}
+            {subs.length ? (
+              <span style={{ marginLeft: 10, opacity: 0.95 }}>
+                {newsletterPct14d.joins ? `+${newsletterPct14d.joins} in 14d · ` : ""}
+                {Math.round(newsletterPct14d.pct)}%
+              </span>
+            ) : null}
           </div>
 
-          {subsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              {subsSorted.map((s, idx) => {
-                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
-                const email = safeStr(s?.email || s?.Email || s?.subscriber_email || "").trim();
+          {loading && !subsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={`sk-sub-${i}`} className="card bf-skel" style={{ padding: 12, height: 56 }} />
+              ))}
+            </div>
+          ) : subsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {subsSorted.map((s) => {
+                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "");
+                const email = safeStr(s?.email || s?.email_address || s?.addr || "");
                 const joined = Number(s?.joined || s?.created_at || 0);
 
                 return (
-                  <div
-                    key={s.id || `${name}-${joined}`}
-                    style={{
-                      display: "grid",
-                      gap: 6,
-                      padding: "6px 0",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {name}{email ? ` · ${email}` : ""}
+                  <div key={s.id || `${email}-${joined}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {name || email || "subscriber"}
                       </div>
-                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                        {fmtDT(joined)}
-                      </div>
+                      {email ? (
+                        <div className="helper" style={{ marginTop: 2, overflowWrap: "anywhere" }}>
+                          {email}
+                        </div>
+                      ) : null}
                     </div>
-
-                    {idx === 0 ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: 30,
-                          borderRadius: 10,
-                          padding: "2px 8px",
-                          background: "rgba(255,255,255,0.05)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-start",
-                        }}
-                        title="subscriber trend (last 14 days)"
-                      >
-                        <Sparkline values={newsletterSpark} width={260} height={24} />
-                      </div>
-                    ) : null}
+                    <div className="helper" style={{ whiteSpace: "nowrap" }}>{fmtDT(joined)}</div>
                   </div>
                 );
               })}

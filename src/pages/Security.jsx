@@ -231,7 +231,7 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       </section>
 
       <section style={{ marginTop: 16, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
-        <h3>zero knowledge storage (beta)</h3>
+        <h3>zero knowledge storage</h3>
         <div style={{ fontSize: 14, opacity: 0.9 }}>
           device key: {zkStatus.deviceKey ? "ok" : "missing"} | org key cached: {zkStatus.orgKey ? "yes" : "no"} | org key version: {orgKeyVersion}
         </div>
@@ -241,11 +241,6 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: false })}>rewrap for all members</button>
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: true })}>rotate org key</button>
           <button onClick={fetchOrgKey}>load org key on this device</button>
-        </div>
-
-        <div style={{ fontSize: 13, marginTop: 8, opacity: 0.85 }}>
-          this is v1. it encrypts meeting notes and need descriptions client side when an org key exists.
-          the server only stores ciphertext blobs.
         </div>
       </section>
 
