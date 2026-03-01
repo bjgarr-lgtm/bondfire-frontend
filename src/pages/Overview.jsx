@@ -169,6 +169,64 @@ function Sparkline({ values, width = 120, height = 32 }) {
   );
 }
 
+// Lightweight loading skeletons (no extra deps)
+function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
+  return (
+    <div
+      style={{
+        width: w,
+        height: h,
+        borderRadius: r,
+        background: "linear-gradient(90deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.12) 45%, rgba(255,255,255,0.06) 90%)",
+        backgroundSize: "240% 100%",
+        animation: "bfShimmer 1.2s ease-in-out infinite",
+        ...style,
+      }}
+    />
+  );
+}
+
+function MetricCardSkeleton({ icon = "⬛" }) {
+  return (
+    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
+        <SkeletonBox w={78} h={14} r={8} />
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <SkeletonBox w={56} h={34} r={10} />
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <SkeletonBox w={56} h={12} r={8} />
+      </div>
+    </div>
+  );
+}
+
+function SectionCardSkeleton({ rows = 3 }) {
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <SkeletonBox w={160} h={18} r={10} />
+        <div style={{ marginLeft: "auto" }}>
+          <SkeletonBox w={76} h={34} r={12} />
+        </div>
+      </div>
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="card" style={{ padding: 12 }}>
+            <SkeletonBox w={"70%"} h={14} r={8} />
+            <div style={{ marginTop: 8 }}>
+              <SkeletonBox w={"55%"} h={12} r={8} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 function readInvPar(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
@@ -199,6 +257,7 @@ export default function Overview() {
   }, [orgId]);
 
   const [loading, setLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [err, setErr] = useState("");
 
   const [counts, setCounts] = useState({});
@@ -327,6 +386,7 @@ export default function Overview() {
 
       // Save latest counts for the next-login fallback baseline.
       writePrevCounts(orgId, rawCounts);
+      setHasLoadedOnce(true);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load dashboard");
@@ -340,7 +400,8 @@ export default function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
-  if (!orgId) return <div style={{ padding: 16 }}>No org selected.</div>;
+  if (!orgId) return <div style={{ padding: 16 }}>
+      <style>{`@keyframes bfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -40% 0; } }`}</style>No org selected.</div>;
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
@@ -367,6 +428,8 @@ export default function Overview() {
       subsTotal: Number(d.subsTotal || 0),
     };
   }, [tickerDeltas]);
+
+  const showSkeleton = loading && !hasLoadedOnce;
 
   const topCards = useMemo(() => {
     const mk = (key, title, icon, value, sub, to) => {
@@ -579,6 +642,14 @@ const newsletterSpark = useMemo(() => {
 
   return (
     <div style={{ padding: 16 }}>
+      {/* Org name now lives in the global header; keep refresh + status messages compact. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          {err ? <div className="helper" style={{ color: "tomato" }}>{err}</div> : null}
+          {rsvpMsg ? <div className="helper" style={{ marginTop: err ? 6 : 0 }}>{rsvpMsg}</div> : null}
+        </div>
+      </div>
+
       {/* Top metrics row: ONE row on desktop, wraps on small screens */}
       <div
         style={{
@@ -588,23 +659,33 @@ const newsletterSpark = useMemo(() => {
           marginBottom: 12,
         }}
       >
-        {topCards.map((c) => (
-          <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-            <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
-              {c.badge ? (
-                <div style={{ position: "absolute", top: 12, right: 12 }}>
-                  <span style={c.badge.style}>{c.badge.txt}</span>
-                </div>
-              ) : null}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ fontSize: 18 }}>{c.icon}</div>
-                <div style={{ fontWeight: 900 }}>{c.title}</div>
+        {!hasLoadedOnce && loading ? (
+          <>
+            {["👥", "📦", "🧾", "📅", "🤝", "📰"].map((ic, i) => (
+              <div key={i}>
+                <MetricCardSkeleton icon={ic} />
               </div>
-              <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
-              <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
-            </div>
-          </button>
-        ))}
+            ))}
+          </>
+        ) : (
+          topCards.map((c) => (
+            <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
+              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+                {c.badge ? (
+                  <div style={{ position: "absolute", top: 12, right: 12 }}>
+                    <span style={c.badge.style}>{c.badge.txt}</span>
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontSize: 18 }}>{c.icon}</div>
+                  <div style={{ fontWeight: 900 }}>{c.title}</div>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+                <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+              </div>
+            </button>
+          ))
+        )}
       </div>
 
       {/* Main grid */}
@@ -616,6 +697,16 @@ const newsletterSpark = useMemo(() => {
           alignItems: "start",
         }}
       >
+        {showSkeleton ? (
+          <>
+            <SectionCardSkeleton rows={2} />
+            <SectionCardSkeleton rows={3} />
+            <SectionCardSkeleton rows={3} />
+            <SectionCardSkeleton rows={3} />
+            <SectionCardSkeleton rows={3} />
+          </>
+        ) : (
+          <>
         {/* Next meetings */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -871,6 +962,8 @@ const newsletterSpark = useMemo(() => {
             <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );
