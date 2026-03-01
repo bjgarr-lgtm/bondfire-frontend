@@ -270,6 +270,25 @@ export default function Overview() {
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
+  // Responsive layout helper (we do this here because inline styles can't use media queries).
+  const [isNarrow, setIsNarrow] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia("(max-width: 820px)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(max-width: 820px)");
+    const onChange = () => setIsNarrow(!!mq.matches);
+    onChange();
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, []);
+
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
   const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   useEffect(() => {
@@ -654,8 +673,8 @@ const newsletterSpark = useMemo(() => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(160px, 1fr))",
+          gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
       >
