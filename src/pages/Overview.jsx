@@ -579,17 +579,6 @@ const newsletterSpark = useMemo(() => {
 
   return (
     <div style={{ padding: 16 }}>
-      {/* Org name now lives in the global header; keep refresh + status messages compact. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          {err ? <div className="helper" style={{ color: "tomato" }}>{err}</div> : null}
-          {rsvpMsg ? <div className="helper" style={{ marginTop: err ? 6 : 0 }}>{rsvpMsg}</div> : null}
-        </div>
-        <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>
-          {loading ? "Loading" : "Refresh"}
-        </button>
-      </div>
-
       {/* Top metrics row: ONE row on desktop, wraps on small screens */}
       <div
         style={{
