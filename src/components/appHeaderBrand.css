@@ -40,11 +40,14 @@
   color: rgba(255, 255, 255, 0.9);
   font-weight: 700;
   font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.2;
+  /* Let long org names show fully without turning the header into
+     a horizontal scroll hellscape. Wrap inside the pill instead. */
+  white-space: normal;
+  max-width: min(520px, 46vw);
+  overflow: visible;
+  text-overflow: unset;
+  word-break: break-word;
 }
 
 .bf-appHeader-left {
@@ -53,6 +56,6 @@
 
 @media (max-width: 860px) {
   .bf-brand-org {
-    max-width: 78vw;
+    max-width: 92vw;
   }
 }
