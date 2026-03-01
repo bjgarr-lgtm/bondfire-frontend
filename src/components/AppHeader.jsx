@@ -2,6 +2,8 @@
 import React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
+const homeHref = "/orgs";
+
 function useOrgIdFromPath() {
   const loc = useLocation();
   const pathname = loc.pathname || "";
@@ -27,22 +29,27 @@ function readOrgName(orgId) {
   }
 }
 
-const Brand = ({ logoSrc }) => {
-  const orgId = useOrgIdFromPath();
-  const [orgName, setOrgName] = React.useState(() => readOrgName(orgId));
+// Older patches referenced this name. Keep it so we don't trip over our own feet again.
+function readOrgNameFromStorage(orgId) {
+  return readOrgName(orgId);
+}
+
+const Brand = ({ orgId, logoSrc }) => {
+  const inferredOrgId = orgId || useOrgIdFromPath();
+  const [orgName, setOrgName] = React.useState(() => readOrgNameFromStorage(inferredOrgId));
 
   React.useEffect(() => {
-    setOrgName(readOrgName(orgId));
+    setOrgName(readOrgNameFromStorage(inferredOrgId));
 
     const onChange = (e) => {
       const changedId = e?.detail?.orgId;
-      if (!changedId || changedId === orgId) setOrgName(readOrgName(orgId));
+      if (!changedId || changedId === inferredOrgId) setOrgName(readOrgNameFromStorage(inferredOrgId));
     };
 
     const onStorage = (e) => {
       const k = e?.key || "";
-      if (k === `bf_org_settings_${orgId}` || k === "bf_orgs") {
-        setOrgName(readOrgName(orgId));
+      if (k === `bf_org_settings_${inferredOrgId}` || k === "bf_orgs") {
+        setOrgName(readOrgNameFromStorage(inferredOrgId));
       }
     };
 
@@ -52,18 +59,19 @@ const Brand = ({ logoSrc }) => {
       window.removeEventListener("bf:org_settings_changed", onChange);
       window.removeEventListener("storage", onStorage);
     };
-  }, [orgId]);
+  }, [inferredOrgId]);
 
   const label = orgName || "Org";
+  const imgSrc = logoSrc || "/logo-bondfire.png";
 
   return (
     <div className="bf-brand-wrap">
-      <Link className="bf-brand" to="/orgs">
-        <img src={logoSrc} alt="Bondfire logo" />
+      <Link className="bf-brand" to={homeHref}>
+        <img src={imgSrc} alt="Bondfire logo" />
         <span>Bondfire</span>
       </Link>
 
-      {orgId ? (
+      {inferredOrgId ? (
         <span className="bf-brand-org" title={label}>
           {label}
         </span>
@@ -159,7 +167,7 @@ function OrgNav({ variant = "desktop" }) {
   );
 }
 
-export default function AppHeader({ onLogout, showLogout, logoSrc = "/logo.svg" }) {
+export default function AppHeader({ onLogout, showLogout }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const loc = useLocation();
 
@@ -223,7 +231,7 @@ export default function AppHeader({ onLogout, showLogout, logoSrc = "/logo.svg" 
     <>
       <header className="bf-appHeader">
         <div className="bf-appHeader-left">
-          <Brand logoSrc={logoSrc} />
+          <Brand />
         </div>
 
         <div className="bf-appHeader-right">
@@ -232,7 +240,12 @@ export default function AppHeader({ onLogout, showLogout, logoSrc = "/logo.svg" 
           </div>
 
           {showLogout ? (
-            <button className="bf-logout" type="button" onClick={onLogout} title="Logout">
+            <button
+              className="bf-logout"
+              type="button"
+              onClick={onLogout}
+              title="Logout"
+            >
               Logout
             </button>
           ) : null}
@@ -254,9 +267,17 @@ export default function AppHeader({ onLogout, showLogout, logoSrc = "/logo.svg" 
         <div className="bf-drawer-panel" style={panelStyle}>
           <div
             className="bf-drawer-top"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
           >
-            <div className="bf-drawer-title" style={{ fontWeight: 800, letterSpacing: ".3px" }}>
+            <div
+              className="bf-drawer-title"
+              style={{ fontWeight: 800, letterSpacing: ".3px" }}
+            >
               Menu
             </div>
             <button
