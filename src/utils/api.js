@@ -41,11 +41,44 @@ export async function api(path, opts = {}) {
     headers.set("content-type", "application/json; charset=utf-8");
   }
 
-  const res = await fetch(path, {
-    ...opts,
-    headers,
-    credentials: opts.credentials || "include",
-  });
+  const doFetch = async () =>
+    fetch(path, {
+      ...opts,
+      headers,
+      credentials: opts.credentials || "include",
+    });
+
+  let res = await doFetch();
+
+  // If the session expired, try a one-time refresh and retry.
+  // This reduces the "randomly logged out" experience when the backend uses short-lived sessions.
+  if (res.status === 401) {
+    try {
+      // Try both same-origin and API_BASE (in case the frontend talks to a separate API host).
+      const refreshUrls = ["/api/auth/refresh", `${API_BASE}/api/auth/refresh`].filter(
+        (u) => typeof u === "string" && u && !u.includes("undefined")
+      );
+      for (const u of refreshUrls) {
+        try {
+          const rr = await fetch(u, {
+            method: "POST",
+            credentials: "include",
+            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            body: "{}",
+          });
+          // If refresh succeeded, retry the original request.
+          if (rr && rr.ok) {
+            res = await doFetch();
+            break;
+          }
+        } catch {
+          // ignore and try next URL
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const data = await res.json().catch(() => ({}));
 

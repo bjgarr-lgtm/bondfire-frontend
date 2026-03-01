@@ -25,8 +25,6 @@ import SignIn from "./pages/SignIn.jsx";
 import Security from "./pages/Security.jsx";
 
 // COMPONENTS
-import HelpWidget from "./help/HelpWidget.jsx";
-
 import AppHeader from "./components/AppHeader.jsx";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 
@@ -133,6 +131,35 @@ function Shell() {
 		return () => window.removeEventListener("bf-auth-changed", onAuthChanged);
 	}, [refresh]);
 
+	// Keep the session alive while the app is open.
+	// Some deployments use short-lived sessions; without this, users get bounced to Sign In mid-session.
+	React.useEffect(() => {
+		if (!state.authed) return;
+		let alive = true;
+		const ping = async () => {
+			if (!alive) return;
+			if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+			try {
+				await fetch("/api/auth/refresh", {
+					method: "POST",
+					credentials: "include",
+					headers: { Accept: "application/json", "Content-Type": "application/json" },
+					body: "{}",
+				});
+			} catch {
+				// ignore
+			}
+		};
+
+		const t0 = setTimeout(ping, 30_000);
+		const iv = setInterval(ping, 5 * 60_000);
+		return () => {
+			alive = false;
+			clearTimeout(t0);
+			clearInterval(iv);
+		};
+	}, [state.authed]);
+
 	const ctxValue = React.useMemo(() => ({
 		authed: state.authed,
 		loading: state.loading,
@@ -209,8 +236,6 @@ function Shell() {
 
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
-
-			{!hideHeader && state.authed ? <HelpWidget /> : null}
 		</AuthCtx.Provider>
 	);
 }
