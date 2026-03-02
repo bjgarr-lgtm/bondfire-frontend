@@ -27,7 +27,6 @@ import Security from "./pages/Security.jsx";
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
-import HelpWidget from "./help/HelpWidget.jsx";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -66,15 +65,43 @@ const AuthCtx = React.createContext({
 });
 
 async function fetchMe() {
-	const res = await fetch("/api/auth/me", {
-		method: "GET",
-		credentials: "include",
-		headers: { Accept: "application/json" },
-	});
-	const data = await res.json().catch(() => ({}));
-	if (!res.ok || !data?.ok) return { ok: false, status: res.status, data };
-	return { ok: true, user: data.user };
+	// Try /me first. If access cookie expired but refresh cookie is still valid,
+	// attempt a silent refresh and retry once before declaring the session dead.
+	const doMe = async () => {
+		const res = await fetch("/api/auth/me", {
+			method: "GET",
+			credentials: "include",
+			headers: { Accept: "application/json" },
+		});
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok || !data?.ok) return { ok: false, status: res.status, data };
+		return { ok: true, user: data.user };
+	};
+
+	let me = await doMe();
+	if (me.ok) return me;
+
+	// Only retry on auth-ish failures.
+	if (me.status === 401 || me.status === 403) {
+		try {
+			const rr = await fetch("/api/auth/refresh", {
+				method: "POST",
+				credentials: "include",
+				headers: { Accept: "application/json" },
+			});
+			// ignore body, just see if it worked
+			if (rr.ok) {
+				me = await doMe();
+				if (me.ok) return me;
+			}
+		} catch {
+			// ignore
+		}
+	}
+
+	return me;
 }
+
 
 function RequireAuth({ children }) {
 	const { authed, loading } = React.useContext(AuthCtx);
@@ -138,15 +165,10 @@ function Shell() {
 		if (!state.authed) return;
 		let alive = true;
 		const ping = async () => {
-			if (!alive) return;
-			if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+			if (document.visibilityState !== "visible") return;
 			try {
-				await fetch("/api/auth/refresh", {
-					method: "POST",
-					credentials: "include",
-					headers: { Accept: "application/json", "Content-Type": "application/json" },
-					body: "{}",
-				});
+				// This will attempt /me, and if needed do a silent refresh + retry.
+				await refresh();
 			} catch {
 				// ignore
 			}
@@ -159,7 +181,7 @@ function Shell() {
 			clearTimeout(t0);
 			clearInterval(iv);
 		};
-	}, [state.authed]);
+	}, [state.authed, refresh]);
 
 	const ctxValue = React.useMemo(() => ({
 		authed: state.authed,
@@ -183,9 +205,6 @@ function Shell() {
 					onLogout={logout}
 				/>
 			)}
-
-			{/* Help button and guides live globally on authenticated pages */}
-			{state.authed ? <HelpWidget /> : null}
 
 			<Routes>
 				{/* PUBLIC */}
