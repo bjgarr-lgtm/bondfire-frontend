@@ -41,6 +41,11 @@ function unb64(s) {
   return out;
 }
 
+// Historically other modules referenced fromB64/toB64.
+// Keep these aliases so we don't explode at runtime.
+export const fromB64 = (s) => unb64(String(s || ""));
+export const toB64 = (bytes) => b64(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
+
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
