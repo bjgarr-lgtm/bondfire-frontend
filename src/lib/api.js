@@ -1,10 +1,16 @@
 // src/lib/api.js
+import { debugLog } from "./debugBus.js";
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
 let refreshing = null;
 
 export async function apiFetch(path, opts = {}) {
+  const startedAt = Date.now();
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  debugLog("api:request", {
+    url,
+    method: (opts?.method || "GET").toString(),
+  });
   const init = {
     credentials: "include",
     ...opts,
@@ -20,13 +26,16 @@ export async function apiFetch(path, opts = {}) {
   }
 
   const res = await fetch(url, init);
+  debugLog("api:response", { url, status: res.status, ms: Date.now() - startedAt });
   if (res.status !== 401) return res;
 
   // Try one refresh then retry once.
   if (!refreshing) {
     refreshing = (async () => {
       try {
+        debugLog("api:refresh_start", { url });
         const r = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+        debugLog("api:refresh_result", { ok: r.ok, status: r.status });
         return r.ok;
       } finally {
         refreshing = null;
@@ -34,9 +43,14 @@ export async function apiFetch(path, opts = {}) {
     })();
   }
   const ok = await refreshing;
-  if (!ok) return res;
+  if (!ok) {
+    debugLog("api:refresh_failed", { url });
+    return res;
+  }
 
-  return fetch(url, init);
+  const res2 = await fetch(url, init);
+  debugLog("api:retry_response", { url, status: res2.status });
+  return res2;
 }
 
 export async function apiJSON(path, opts) {
