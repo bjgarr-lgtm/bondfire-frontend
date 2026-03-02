@@ -38,6 +38,14 @@ function parseOrgIdFromHash() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+// Local flag so the UI can remember that THIS browser device was verified.
+// This is not the source of truth for encryption, it is a convenience signal.
+function verifiedKeyFor(userId, deviceId) {
+  const u = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  const d = String(deviceId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  return `bf_mx_verified_${u}_${d}`;
+}
+
 const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
