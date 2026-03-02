@@ -34,7 +34,11 @@ function removeKey(key) {
 }
 
 function parseOrgIdFromHash() {
-  const m = (window.location.hash || "").match(
+  const m = (window.location.hash || "").match(/#\/org\/([^/]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
 }
