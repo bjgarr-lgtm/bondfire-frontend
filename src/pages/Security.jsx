@@ -1,6 +1,5 @@
 import React from "react";
-import {
-  useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import {
   ensureDeviceKeypair,
@@ -16,6 +15,22 @@ import {
   deleteRecoveryFromServer,
 } from "../lib/zk.js";
 import { kidFromJwk } from "../lib/zk_kid.js";
+
+// Base64url -> Uint8Array (robust to missing padding)
+function b64urlToBytes(input) {
+  if (typeof input !== "string") throw new Error("Invalid base64 payload");
+  let s = input.trim().replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  let bin;
+  try {
+    bin = atob(s);
+  } catch {
+    throw new Error("Invalid base64 payload (decode failed)");
+  }
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 export default function Security() {
   const { orgId } = useParams();
@@ -34,8 +49,6 @@ export default function Security() {
   const [recoveryPassA, setRecoveryPassA] = React.useState("");
   const [recoveryPassB, setRecoveryPassB] = React.useState("");
   const [recoveryRestorePass, setRecoveryRestorePass] = React.useState("");
-
-
 
   React.useEffect(() => {
     (async () => {
@@ -110,7 +123,11 @@ export default function Security() {
       for (const m of list) {
         if (!m?.public_key) continue;
         let pub;
-        try { pub = JSON.parse(m.public_key); } catch { continue; }
+        try {
+          pub = JSON.parse(m.public_key);
+        } catch {
+          continue;
+        }
         const wrapped_key = await wrapForMember(key, pub);
         wrapped_keys.push({ user_id: m.user_id, wrapped_key });
       }
@@ -133,64 +150,66 @@ export default function Security() {
     }
   }
 
-async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
-  setMsg("");
-  try {
-    await ensureDeviceKeypair();
+  async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
+    setMsg("");
+    try {
+      await ensureDeviceKeypair();
 
-    const cached = getCachedOrgKey(orgId);
-    if (!cached) {
-      setMsg("no org key cached on this device. load org key first.");
-      return;
+      const cached = getCachedOrgKey(orgId);
+      if (!cached) {
+        setMsg("no org key cached on this device. load org key first.");
+        return;
+      }
+
+      let keyVersion = orgKeyVersion || 1;
+      let orgKeyBytes = cached;
+
+      if (rotate) {
+        const r = await api(`/api/orgs/${orgId}/zk/rotate`, { method: "POST" });
+        keyVersion = Number(r?.key_version) || keyVersion + 1;
+        setOrgKeyVersion(keyVersion);
+        orgKeyBytes = randomOrgKey();
+      }
+
+      const members = await api(`/api/orgs/${orgId}/members`);
+      const list = Array.isArray(members.members) ? members.members : [];
+
+      const wrapped_keys = [];
+      for (const m of list) {
+        const pk = m?.public_key || m?.publicKey;
+        const uid = m?.user_id || m?.userId;
+        if (!pk || !uid) continue;
+        let pub;
+        try {
+          pub = JSON.parse(pk);
+        } catch {
+          continue;
+        }
+        const wrapped_key = await wrapForMember(orgKeyBytes, pub);
+        wrapped_keys.push({ user_id: uid, wrapped_key, key_version: keyVersion });
+      }
+
+      if (!wrapped_keys.length) {
+        setMsg("no members have public keys registered yet");
+        return;
+      }
+
+      await api(`/api/orgs/${orgId}/crypto`, {
+        method: "POST",
+        body: JSON.stringify({ wrapped_keys, encrypted_org_metadata: null, key_version: keyVersion }),
+      });
+
+      if (rotate) {
+        cacheOrgKey(orgId, orgKeyBytes);
+        setZkStatus((s) => ({ ...s, orgKey: true }));
+        setMsg("org key rotated and re-wrapped for members");
+      } else {
+        setMsg("org key re-wrapped for members");
+      }
+    } catch (e) {
+      setMsg(e.message || "failed");
     }
-
-    // If rotating, bump version first (keeps old wraps until we publish).
-    let keyVersion = orgKeyVersion || 1;
-    let orgKeyBytes = cached;
-
-    if (rotate) {
-      const r = await api(`/api/orgs/${orgId}/zk/rotate`, { method: "POST" });
-      keyVersion = Number(r?.key_version) || (keyVersion + 1);
-      setOrgKeyVersion(keyVersion);
-      orgKeyBytes = randomOrgKey();
-    }
-
-    const members = await api(`/api/orgs/${orgId}/members`);
-    const list = Array.isArray(members.members) ? members.members : [];
-
-    const wrapped_keys = [];
-    for (const m of list) {
-      const pk = m?.public_key || m?.publicKey;
-      const uid = m?.user_id || m?.userId;
-      if (!pk || !uid) continue;
-      let pub;
-      try { pub = JSON.parse(pk); } catch { continue; }
-      const wrapped_key = await wrapForMember(orgKeyBytes, pub);
-      wrapped_keys.push({ user_id: uid, wrapped_key, key_version: keyVersion });
-    }
-
-    if (!wrapped_keys.length) {
-      setMsg("no members have public keys registered yet");
-      return;
-    }
-
-    await api(`/api/orgs/${orgId}/crypto`, {
-      method: "POST",
-      body: JSON.stringify({ wrapped_keys, encrypted_org_metadata: null, key_version: keyVersion }),
-    });
-
-    if (rotate) {
-      cacheOrgKey(orgId, orgKeyBytes);
-      setZkStatus((s) => ({ ...s, orgKey: true }));
-      setMsg("org key rotated and re-wrapped for members");
-    } else {
-      setMsg("org key re-wrapped for members");
-    }
-  } catch (e) {
-    setMsg(e.message || "failed");
   }
-}
-
 
   async function fetchOrgKey() {
     setMsg("");
@@ -209,7 +228,6 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       setMsg(String(e?.message || e || "failed"));
     }
   }
-
 
   async function saveRecoveryBackup() {
     setRecoveryMsg("");
@@ -236,8 +254,24 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
       if (!orgId) throw new Error("Missing org id");
       const r = await loadRecoveryFromServer(orgId);
       if (!r?.has_recovery) throw new Error("No recovery backup found for this org/user.");
-      const orgKeyB64 = await unwrapOrgKeyFromRecovery(r, recoveryRestorePass);
-      cacheOrgKey(orgId, orgKeyB64);
+
+      const recovered = await unwrapOrgKeyFromRecovery(r, recoveryRestorePass);
+
+      // Some builds returned base64, others return bytes. Normalize to bytes.
+      const orgKeyBytes =
+        recovered instanceof Uint8Array
+          ? recovered
+          : Array.isArray(recovered)
+          ? new Uint8Array(recovered)
+          : typeof recovered === "string"
+          ? b64urlToBytes(recovered)
+          : null;
+
+      if (!orgKeyBytes || !(orgKeyBytes instanceof Uint8Array) || orgKeyBytes.length < 16) {
+        throw new Error("Recovery returned an invalid org key.");
+      }
+
+      cacheOrgKey(orgId, orgKeyBytes);
       setZkStatus((s) => ({ ...s, orgKey: true }));
       setRecoveryRestorePass("");
       setRecoveryMsg("Org key restored ✅");
@@ -281,10 +315,14 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
 
         {mfaSecret ? (
           <div style={{ marginTop: 8 }}>
-            <div><b>secret</b> {mfaSecret}</div>
+            <div>
+              <b>secret</b> {mfaSecret}
+            </div>
             {mfaQr ? (
               <div style={{ marginTop: 4 }}>
-                <a href={mfaQr} target="_blank" rel="noreferrer">open otp url</a>
+                <a href={mfaQr} target="_blank" rel="noreferrer">
+                  open otp url
+                </a>
               </div>
             ) : null}
           </div>
@@ -309,13 +347,14 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: false })}>rewrap for all members</button>
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: true })}>rotate org key</button>
           <button onClick={fetchOrgKey}>load org key on this device</button>
+        </div>
+
         <div style={{ height: 12 }} />
 
         <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
           <h4 style={{ margin: 0 }}>Key recovery (option A)</h4>
           <p style={{ marginTop: 8 }}>
-            Clearing site data wipes your local org key cache. Recovery lets you store a passphrase encrypted backup on the server
-            so you can restore the org key after a wipe.
+            Clearing site data wipes your local org key cache. Recovery lets you store a passphrase encrypted backup on the server so you can restore the org key after a wipe.
           </p>
 
           <div style={{ marginTop: 6, opacity: 0.85 }}>
@@ -326,18 +365,8 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           {!recoveryInfo.has ? (
             <>
               <div style={{ display: "grid", gap: 8, maxWidth: 520, marginTop: 10 }}>
-                <input
-                  type="password"
-                  value={recoveryPassA}
-                  placeholder="Create recovery passphrase (min 8 chars)"
-                  onChange={(e) => setRecoveryPassA(e.target.value)}
-                />
-                <input
-                  type="password"
-                  value={recoveryPassB}
-                  placeholder="Confirm passphrase"
-                  onChange={(e) => setRecoveryPassB(e.target.value)}
-                />
+                <input type="password" value={recoveryPassA} placeholder="Create recovery passphrase (min 8 chars)" onChange={(e) => setRecoveryPassA(e.target.value)} />
+                <input type="password" value={recoveryPassB} placeholder="Confirm passphrase" onChange={(e) => setRecoveryPassB(e.target.value)} />
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                 <button onClick={saveRecoveryBackup}>enable recovery</button>
@@ -346,12 +375,7 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           ) : (
             <>
               <div style={{ display: "grid", gap: 8, maxWidth: 520, marginTop: 10 }}>
-                <input
-                  type="password"
-                  value={recoveryRestorePass}
-                  placeholder="Enter passphrase to restore org key"
-                  onChange={(e) => setRecoveryRestorePass(e.target.value)}
-                />
+                <input type="password" value={recoveryRestorePass} placeholder="Enter passphrase to restore org key" onChange={(e) => setRecoveryRestorePass(e.target.value)} />
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                 <button onClick={restoreFromRecovery}>restore org key</button>
@@ -361,8 +385,6 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           )}
 
           {recoveryMsg ? <div style={{ marginTop: 10, color: "#8b1d1d" }}>{recoveryMsg}</div> : null}
-        </div>
-
         </div>
       </section>
 
