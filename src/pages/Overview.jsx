@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
 
 function readOrgInfo(orgId) {
   try {
@@ -188,7 +189,7 @@ function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
 
 function MetricCardSkeleton({ icon = "⬛" }) {
   return (
-    <div className="card" style={{ padding: 10, position: "relative", minHeight: 76 }}>
+    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
         <SkeletonBox w={78} h={14} r={8} />
@@ -669,11 +670,13 @@ const newsletterSpark = useMemo(() => {
         </div>
       </div>
 
+      <OrgKeyBackupNudge orgId={orgId} />
+
       {/* Top metrics row: ONE row on desktop, wraps on small screens */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(140px, 1fr))",
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(160px, 1fr))",
           gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
@@ -689,9 +692,9 @@ const newsletterSpark = useMemo(() => {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 10, position: "relative", minHeight: 76 }}>
+              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
                 {c.badge ? (
-                  <div style={{ position: "absolute", top: 8, right: 8 }}>
+                  <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
                   </div>
                 ) : null}
@@ -699,7 +702,7 @@ const newsletterSpark = useMemo(() => {
                   <div style={{ fontSize: 18 }}>{c.icon}</div>
                   <div style={{ fontWeight: 900 }}>{c.title}</div>
                 </div>
-                <div style={{ marginTop: 10, fontSize: 28, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+                <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
                 <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
               </div>
             </button>
@@ -786,7 +789,7 @@ const newsletterSpark = useMemo(() => {
                 );
               })}
 
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                 <div className="helper">
                   {invLowItems.length ? (
                     <div

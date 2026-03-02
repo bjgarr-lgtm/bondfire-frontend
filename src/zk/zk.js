@@ -1,35 +1,82 @@
-// Zero-knowledge (beta) client crypto utilities.
-// Goal: the server never sees plaintext org keys or encrypted content.
-// This file is intentionally dependency-free (WebCrypto only).
+// src/lib/zk.js
+import { api } from "../utils/api.js";
 
-function b64u(bytes) {
-  const bin = String.fromCharCode(...bytes);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+/*
+  Pragmatic ZK v1
+  - Device keypair: ECDH P-256 stored in IndexedDB (private) + public JWK in localStorage + server.
+  - Org key: random 32 bytes; wrapped per member via ECDH(shared) -> HKDF -> AES-GCM.
+  - Record encryption: AES-GCM with org key.
+*/
+
+const DB_NAME = "bondfire_zk";
+const STORE = "keys";
+const DEVICE_KEY_ID = "device_keypair_v1";
+const LS_PUB = "bf_device_public_jwk_v1";
+const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
+
+
+export function kidFromJwk(jwk) {
+  try {
+    const x = String(jwk?.x || "");
+    const y = String(jwk?.y || "");
+    const raw = (x + "." + y).slice(0, 120);
+    const b64s = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    return b64s.slice(0, 16) || "unknown";
+  } catch {
+    return "unknown";
+  }
 }
-function unb64u(s) {
-  const pad = "=".repeat((4 - (s.length % 4)) % 4);
-  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
-  const bin = atob(b64);
+
+function b64(bytes) {
+  let s = "";
+  bytes.forEach((b) => (s += String.fromCharCode(b)));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function unb64(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
-async function hkdfAesKey(sharedSecret) {
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    sharedSecret,
-    "HKDF",
-    false,
-    ["deriveKey"]
-  );
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const st = tx.objectStore(STORE);
+    const req = st.get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    const st = tx.objectStore(STORE);
+    const req = st.put(val, key);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function hkdfAesKey(sharedBits, saltBytes, infoStr) {
+  const baseKey = await crypto.subtle.importKey("raw", sharedBits, "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: new Uint8Array(32),
-      info: new TextEncoder().encode("bondfire-orgkey-wrap-v1"),
-    },
+    { name: "HKDF", hash: "SHA-256", salt: saltBytes, info: new TextEncoder().encode(infoStr) },
     baseKey,
     { name: "AES-GCM", length: 256 },
     false,
@@ -37,97 +84,142 @@ async function hkdfAesKey(sharedSecret) {
   );
 }
 
-export async function generateUserKeypair() {
-  // ECDH keypair used to wrap org symmetric keys.
-  return crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    ["deriveBits"]
-  );
+export async function ensureDeviceKeypair() {
+  const existing = await idbGet(DEVICE_KEY_ID);
+  if (existing?.privJwk && existing?.pubJwk) {
+    if (!localStorage.getItem(LS_PUB)) localStorage.setItem(LS_PUB, JSON.stringify(existing.pubJwk));
+    return existing;
+  }
+
+  const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const pubJwk = await crypto.subtle.exportKey("jwk", kp.publicKey);
+  const privJwk = await crypto.subtle.exportKey("jwk", kp.privateKey);
+
+  await idbSet(DEVICE_KEY_ID, { pubJwk, privJwk });
+  localStorage.setItem(LS_PUB, JSON.stringify(pubJwk));
+
+  // register public key with server
+  try { await api("/api/auth/keys", { method: "POST", body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }) }); } catch {}
+  return { pubJwk, privJwk };
 }
 
-export async function exportPublicKeyJwk(publicKey) {
-  return crypto.subtle.exportKey("jwk", publicKey);
+async function importPriv(privJwk) {
+  return crypto.subtle.importKey("jwk", privJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+}
+async function importPub(pubJwk) {
+  return crypto.subtle.importKey("jwk", pubJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
 }
 
-export async function exportPrivateKeyJwk(privateKey) {
-  return crypto.subtle.exportKey("jwk", privateKey);
-}
+export async function wrapForMember(orgKeyBytes, memberPublicJwk) {
+  const device = await ensureDeviceKeypair();
+  const priv = await importPriv(device.privJwk);
+  const pub = await importPub(memberPublicJwk);
 
-export async function importPublicKeyJwk(jwk) {
-  return crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    []
-  );
-}
-
-export async function importPrivateKeyJwk(jwk) {
-  return crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "ECDH", namedCurve: "P-256" },
-    false,
-    ["deriveBits"]
-  );
-}
-
-export async function wrapOrgKeyForMember(memberPublicKeyJwk, orgKeyRaw) {
-  const memberPub = await importPublicKeyJwk(memberPublicKeyJwk);
-  const eph = await crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    ["deriveBits"]
-  );
-  const shared = await crypto.subtle.deriveBits(
-    { name: "ECDH", public: memberPub },
-    eph.privateKey,
-    256
-  );
-  const aes = await hkdfAesKey(shared);
+  const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: pub }, priv, 256);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const aes = await hkdfAesKey(shared, salt, "bondfire:orgkey-wrap:v1");
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, orgKeyRaw)
-  );
-  const epkRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", eph.publicKey)
-  );
-  return {
-    v: 1,
-    alg: "ECDH-P256+HKDF-SHA256+AES-256-GCM",
-    epk: b64u(epkRaw),
-    iv: b64u(iv),
-    ct: b64u(ct),
-  };
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, orgKeyBytes);
+
+  return JSON.stringify({ v: 1, sender_pub: device.pubJwk, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) });
 }
 
-export async function unwrapOrgKey(privateKeyJwk, wrapped) {
-  const priv = await importPrivateKeyJwk(privateKeyJwk);
-  const epkRaw = unb64u(wrapped.epk);
-  const epk = await crypto.subtle.importKey(
-    "raw",
-    epkRaw,
-    { name: "ECDH", namedCurve: "P-256" },
-    false,
-    []
-  );
-  const shared = await crypto.subtle.deriveBits(
-    { name: "ECDH", public: epk },
-    priv,
-    256
-  );
-  const aes = await hkdfAesKey(shared);
-  const iv = unb64u(wrapped.iv);
-  const ct = unb64u(wrapped.ct);
-  const pt = new Uint8Array(
-    await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aes, ct)
-  );
-  return pt; // raw 32-byte org key
+export async function unwrapOrgKey(wrappedStr) {
+  const device = await ensureDeviceKeypair();
+  const priv = await importPriv(device.privJwk);
+
+  const wrapped = JSON.parse(wrappedStr);
+  const salt = unb64(wrapped.salt);
+  const iv = unb64(wrapped.iv);
+  const ct = unb64(wrapped.ct);
+
+  const senderPubJwk = wrapped.sender_pub;
+  if (!senderPubJwk) throw new Error("MISSING_SENDER_PUB");
+  const senderPub = await importPub(senderPubJwk);
+
+  const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: senderPub }, priv, 256);
+  const aes = await hkdfAesKey(shared, salt, "bondfire:orgkey-wrap:v1");
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aes, ct);
+  return new Uint8Array(pt);
 }
 
-// Convenience: create a brand-new 32-byte org key.
-export function newOrgKeyRaw() {
-  return crypto.getRandomValues(new Uint8Array(32));
+export function randomOrgKey() {
+  const k = new Uint8Array(32);
+  crypto.getRandomValues(k);
+  return k;
+}
+
+export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
+  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const pt = new TextEncoder().encode(plaintext);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, pt);
+  return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(new Uint8Array(ct)) });
+}
+
+export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
+  const blob = (typeof blobStr === "string") ? JSON.parse(blobStr) : (blobStr || {});
+  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+  const iv = unb64(blob.iv);
+  const ct = unb64(blob.ct);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+  return new TextDecoder().decode(pt);
+}
+
+// Convenience helpers for encrypting structured records.
+export async function encryptJsonWithOrgKey(orgKeyBytes, obj) {
+  return encryptWithOrgKey(orgKeyBytes, JSON.stringify(obj));
+}
+
+export async function decryptJsonWithOrgKey(orgKeyBytes, blobStr) {
+  const s = await decryptWithOrgKey(orgKeyBytes, blobStr);
+  return JSON.parse(s);
+}
+
+export function cacheOrgKey(orgId, keyBytes) {
+  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(keyBytes));
+
+  // Let the UI know a key was cached so it can update banners/prompts without a reload.
+  try {
+    window.dispatchEvent(new CustomEvent("bf:orgkey_cached", { detail: { orgId: String(orgId || "") } }));
+  } catch {
+    // ignore
+  }
+}
+
+export function getCachedOrgKey(orgId) {
+  // orgId comes from both HashRouter and BrowserRouter paths. Be defensive.
+  const candidates = [];
+  try { if (orgId) candidates.push(String(orgId)); } catch {}
+  try { if (orgId) candidates.push(encodeURIComponent(String(orgId))); } catch {}
+  try { if (orgId) candidates.push(decodeURIComponent(String(orgId))); } catch {}
+  // also try double decode (we've seen it happen in the wild)
+  try { if (orgId) candidates.push(decodeURIComponent(decodeURIComponent(String(orgId)))); } catch {}
+
+  // Preferred: canonical cache key written by cacheOrgKey()
+  for (const id of candidates) {
+    try {
+      const b64key = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
+      if (!b64key) continue;
+      return unb64(b64key);
+    } catch {}
+  }
+
+  // Back-compat: older builds stored the raw base64 string under bf_org_key_${orgId}
+  for (const id of candidates) {
+    try {
+      const b64key = localStorage.getItem(`bf_org_key_${id}`);
+      if (!b64key) continue;
+      // Some legacy builds stored JSON-encoded byte arrays.
+      if (String(b64key).trim().startsWith("[")) {
+        try {
+          const arr = JSON.parse(b64key);
+          if (Array.isArray(arr)) return new Uint8Array(arr);
+        } catch {}
+      }
+      return unb64(b64key);
+    } catch {}
+  }
+
+  return null;
 }
