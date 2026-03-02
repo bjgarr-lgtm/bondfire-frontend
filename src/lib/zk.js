@@ -239,3 +239,117 @@ export function getCachedOrgKey(orgId) {
 
   return null;
 }
+
+
+/* ---------------- Base64 aliases (legacy callers) ---------------- */
+export function toB64(u8) { return b64(u8); }
+export function fromB64(s) { return unb64(s); }
+
+/* ---------------- Recovery wrap (option A) ----------------
+   Purpose: survive localStorage/IndexedDB wipes.
+   We store a *password-derived* encrypted copy of the org key on the server,
+   scoped to (org_id, user_id). Clearing browser storage then only requires the
+   user to re-enter their recovery passphrase to restore the org key locally.
+*/
+
+function u8(n) {
+  return new Uint8Array(n);
+}
+
+async function pbkdf2Key(passphrase, saltU8, iterations) {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(String(passphrase || "")),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltU8, iterations, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function wrapOrgKeyForRecovery(orgKeyB64, passphrase) {
+  if (!orgKeyB64) throw new Error("MISSING_ORG_KEY");
+  if (!passphrase || String(passphrase).length < 8) throw new Error("PASSPHRASE_TOO_SHORT");
+
+  const salt = crypto.getRandomValues(u8(16));
+  const iv = crypto.getRandomValues(u8(12));
+  const iterations = 250_000;
+
+  const key = await pbkdf2Key(passphrase, salt, iterations);
+  const orgKeyBytes = fromB64(orgKeyB64);
+
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, orgKeyBytes);
+
+  const payload = {
+    v: 1,
+    iv: toB64(iv),
+    ct: toB64(new Uint8Array(ct)),
+  };
+
+  return {
+    wrapped_key: toB64(new TextEncoder().encode(JSON.stringify(payload))),
+    salt: toB64(salt),
+    kdf: JSON.stringify({ name: "PBKDF2", hash: "SHA-256", iterations }),
+  };
+}
+
+export async function unwrapOrgKeyFromRecovery(recoveryRow, passphrase) {
+  if (!recoveryRow?.wrapped_key || !recoveryRow?.salt || !recoveryRow?.kdf) {
+    throw new Error("NO_RECOVERY_BLOB");
+  }
+  if (!passphrase) throw new Error("MISSING_PASSPHRASE");
+
+  let kdf;
+  try {
+    kdf = JSON.parse(String(recoveryRow.kdf || "{}"));
+  } catch {
+    kdf = {};
+  }
+  const iterations = Number(kdf.iterations || 250000) || 250000;
+
+  const salt = fromB64(String(recoveryRow.salt));
+  const wrappedBytes = fromB64(String(recoveryRow.wrapped_key));
+  const payloadStr = new TextDecoder().decode(wrappedBytes);
+
+  let payload;
+  try {
+    payload = JSON.parse(payloadStr);
+  } catch {
+    throw new Error("BAD_RECOVERY_BLOB");
+  }
+
+  const iv = fromB64(String(payload.iv || ""));
+  const ct = fromB64(String(payload.ct || ""));
+
+  const key = await pbkdf2Key(passphrase, salt, iterations);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+
+  return toB64(new Uint8Array(pt));
+}
+
+export async function saveRecoveryToServer(orgId, wrapped) {
+  if (!orgId) throw new Error("MISSING_ORG_ID");
+  if (!wrapped?.wrapped_key) throw new Error("MISSING_WRAPPED_KEY");
+  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, {
+    method: "POST",
+    body: JSON.stringify(wrapped),
+  });
+}
+
+export async function loadRecoveryFromServer(orgId) {
+  if (!orgId) throw new Error("MISSING_ORG_ID");
+  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`);
+}
+
+export async function deleteRecoveryFromServer(orgId) {
+  if (!orgId) throw new Error("MISSING_ORG_ID");
+  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, { method: "DELETE" });
+}
