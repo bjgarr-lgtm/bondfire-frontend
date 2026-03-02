@@ -34,6 +34,21 @@ export async function ensureZkSchema(db) {
   );
   await tryRun(db, "CREATE INDEX IF NOT EXISTS idx_org_key_wrapped_org ON org_key_wrapped(org_id)");
 
+  // org_key_recovery: optional password-derived backup of org key per user
+  await tryRun(
+    db,
+    "CREATE TABLE IF NOT EXISTS org_key_recovery (\n" +
+      "org_id TEXT NOT NULL,\n" +
+      "user_id TEXT NOT NULL,\n" +
+      "wrapped_key TEXT NOT NULL,\n" +
+      "salt TEXT NOT NULL,\n" +
+      "kdf TEXT NOT NULL,\n" +
+      "updated_at INTEGER NOT NULL,\n" +
+      "PRIMARY KEY (org_id, user_id)\n" +
+    ")"
+  );
+  await tryRun(db, "CREATE INDEX IF NOT EXISTS idx_org_key_recovery_org ON org_key_recovery(org_id)");
+
   // org_crypto: we have two historical schemas:
   // - (org_id, version, created_at)    [early]
   // - (org_id, key_version, updated_at) [current]

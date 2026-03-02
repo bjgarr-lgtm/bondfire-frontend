@@ -9,6 +9,11 @@ import {
   unwrapOrgKey,
   cacheOrgKey,
   getCachedOrgKey,
+  wrapOrgKeyForRecovery,
+  unwrapOrgKeyFromRecovery,
+  saveRecoveryToServer,
+  loadRecoveryFromServer,
+  deleteRecoveryFromServer,
 } from "../lib/zk.js";
 import { kidFromJwk } from "../lib/zk_kid.js";
 
@@ -24,6 +29,12 @@ export default function Security() {
 
   const [zkStatus, setZkStatus] = React.useState({ deviceKey: false, orgKey: false });
   const [orgKeyVersion, setOrgKeyVersion] = React.useState(1);
+  const [recoveryInfo, setRecoveryInfo] = React.useState({ has: false, updatedAt: null });
+  const [recoveryMsg, setRecoveryMsg] = React.useState("");
+  const [recoveryPassA, setRecoveryPassA] = React.useState("");
+  const [recoveryPassB, setRecoveryPassB] = React.useState("");
+  const [recoveryRestorePass, setRecoveryRestorePass] = React.useState("");
+
 
 
   React.useEffect(() => {
@@ -34,6 +45,13 @@ export default function Security() {
         const dev = await ensureDeviceKeypair();
         setZkStatus((s) => ({ ...s, deviceKey: !!dev?.pubJwk }));
       } catch {}
+
+      try {
+        const r = await loadRecoveryFromServer(orgId);
+        setRecoveryInfo({ has: !!r?.has_recovery, updatedAt: r?.updated_at || null });
+      } catch {
+        // ignore
+      }
     })();
   }, [orgId]);
 
@@ -192,6 +210,56 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
     }
   }
 
+
+  async function saveRecoveryBackup() {
+    setRecoveryMsg("");
+    try {
+      if (!orgId) throw new Error("Missing org id");
+      const orgKey = getCachedOrgKey(orgId);
+      if (!orgKey) throw new Error("No org key cached yet. Load the org key first, then enable recovery.");
+      if (recoveryPassA !== recoveryPassB) throw new Error("Passphrases do not match.");
+      const wrapped = await wrapOrgKeyForRecovery(orgKey, recoveryPassA);
+      const r = await saveRecoveryToServer(orgId, wrapped);
+      setRecoveryInfo({ has: true, updatedAt: r?.updated_at || Date.now() });
+      setRecoveryPassA("");
+      setRecoveryPassB("");
+      setRecoveryMsg("Recovery backup saved ✅");
+      setTimeout(() => setRecoveryMsg(""), 1600);
+    } catch (e) {
+      setRecoveryMsg(e?.message || String(e));
+    }
+  }
+
+  async function restoreFromRecovery() {
+    setRecoveryMsg("");
+    try {
+      if (!orgId) throw new Error("Missing org id");
+      const r = await loadRecoveryFromServer(orgId);
+      if (!r?.has_recovery) throw new Error("No recovery backup found for this org/user.");
+      const orgKeyB64 = await unwrapOrgKeyFromRecovery(r, recoveryRestorePass);
+      cacheOrgKey(orgId, orgKeyB64);
+      setZkStatus((s) => ({ ...s, orgKey: true }));
+      setRecoveryRestorePass("");
+      setRecoveryMsg("Org key restored ✅");
+      setTimeout(() => setRecoveryMsg(""), 1600);
+    } catch (e) {
+      setRecoveryMsg(e?.message || String(e));
+    }
+  }
+
+  async function removeRecoveryBackup() {
+    setRecoveryMsg("");
+    try {
+      if (!orgId) throw new Error("Missing org id");
+      await deleteRecoveryFromServer(orgId);
+      setRecoveryInfo({ has: false, updatedAt: null });
+      setRecoveryMsg("Recovery backup removed.");
+      setTimeout(() => setRecoveryMsg(""), 1200);
+    } catch (e) {
+      setRecoveryMsg(e?.message || String(e));
+    }
+  }
+
   return (
     <div style={{ maxWidth: 920, margin: "0 auto", padding: 16 }}>
       <h2>security</h2>
@@ -241,6 +309,60 @@ async function rewrapOrgKeyForAllMembers({ rotate = false } = {}) {
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: false })}>rewrap for all members</button>
           <button onClick={() => rewrapOrgKeyForAllMembers({ rotate: true })}>rotate org key</button>
           <button onClick={fetchOrgKey}>load org key on this device</button>
+        <div style={{ height: 12 }} />
+
+        <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
+          <h4 style={{ margin: 0 }}>Key recovery (option A)</h4>
+          <p style={{ marginTop: 8 }}>
+            Clearing site data wipes your local org key cache. Recovery lets you store a passphrase encrypted backup on the server
+            so you can restore the org key after a wipe.
+          </p>
+
+          <div style={{ marginTop: 6, opacity: 0.85 }}>
+            <strong>Status:</strong> {recoveryInfo.has ? "backup saved" : "no backup"}
+            {recoveryInfo.updatedAt ? ` · last updated ${new Date(recoveryInfo.updatedAt).toLocaleString()}` : ""}
+          </div>
+
+          {!recoveryInfo.has ? (
+            <>
+              <div style={{ display: "grid", gap: 8, maxWidth: 520, marginTop: 10 }}>
+                <input
+                  type="password"
+                  value={recoveryPassA}
+                  placeholder="Create recovery passphrase (min 8 chars)"
+                  onChange={(e) => setRecoveryPassA(e.target.value)}
+                />
+                <input
+                  type="password"
+                  value={recoveryPassB}
+                  placeholder="Confirm passphrase"
+                  onChange={(e) => setRecoveryPassB(e.target.value)}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                <button onClick={saveRecoveryBackup}>enable recovery</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "grid", gap: 8, maxWidth: 520, marginTop: 10 }}>
+                <input
+                  type="password"
+                  value={recoveryRestorePass}
+                  placeholder="Enter passphrase to restore org key"
+                  onChange={(e) => setRecoveryRestorePass(e.target.value)}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                <button onClick={restoreFromRecovery}>restore org key</button>
+                <button onClick={removeRecoveryBackup}>remove backup</button>
+              </div>
+            </>
+          )}
+
+          {recoveryMsg ? <div style={{ marginTop: 10, color: "#8b1d1d" }}>{recoveryMsg}</div> : null}
+        </div>
+
         </div>
       </section>
 
