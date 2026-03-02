@@ -3,14 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
 import { registerSW } from "virtual:pwa-register";
-import Olm from "olm";
 
-async function initOlm() {
-  await Olm.init();
-  window.Olm = Olm;
-}
-
-initOlm();
 
 // --- PWA / Service Worker ---
 // Goal: keep PWA features, but NEVER auto-reload while someone is on sign-in,
