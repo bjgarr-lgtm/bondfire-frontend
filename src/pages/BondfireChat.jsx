@@ -34,11 +34,7 @@ function removeKey(key) {
 }
 
 function parseOrgIdFromHash() {
-  const m = (window.location.hash || "").match(/#\/org\/([^/]+)/i);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-const ts = legibleNow;
+  const m = (window.location.hash || "").match(
 function legibleNow() {
   return new Date().toLocaleTimeString();
 }
@@ -89,6 +85,10 @@ export default function BondfireChat() {
   const [status, setStatus] = useState("");
   const [ready, setReady] = useState(false);
   const [cryptoReady, setCryptoReady] = useState(false);
+  const [deviceVerified, setDeviceVerified] = useState(() => {
+    const k = verifiedKeyFor(saved?.userId || "", saved?.deviceId || "");
+    return k ? !!readJSON(k, false) : false;
+  });
 
   // verification
   const [verificationReq, setVerificationReq] = useState(null);
@@ -141,6 +141,18 @@ export default function BondfireChat() {
       setVerifyMsg("");
     }
   };
+
+  const markThisDeviceVerified = React.useCallback(() => {
+    try {
+      const uidKey = clientRef.current?.getUserId?.() || saved?.userId || userId || "";
+      const didKey = clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
+      const k = verifiedKeyFor(uidKey, didKey);
+      setDeviceVerified(true);
+      if (k) writeJSON(k, true);
+    } catch {
+      setDeviceVerified(true);
+    }
+  }, [saved?.userId, saved?.deviceId, userId, deviceId]);
 
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
@@ -258,6 +270,31 @@ export default function BondfireChat() {
       } catch (e) {
         setCryptoReady(false);
         log("Crypto init failed:", e?.message || e);
+      }
+
+
+      // Determine whether THIS device is verified (best-effort).
+      try {
+        const crypto = client.getCrypto?.();
+        const myUid = client.getUserId?.() || uid;
+        const myDid = client.getDeviceId?.() || did || saved?.deviceId || "";
+        const key = verifiedKeyFor(myUid, myDid);
+
+        let verified = key ? !!readJSON(key, false) : false;
+
+        // Some matrix-js-sdk builds expose a verification-status helper. If present, trust it.
+        if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
+          const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
+          verified =
+            res === true ||
+            res?.isVerified === true ||
+            res?.verified === true ||
+            res?.isCrossSigningVerified === true;
+        }
+
+        setDeviceVerified(!!verified);
+      } catch {
+        // ignore
       }
 
       // If a verification request already exists (e.g. app reloaded mid-flow),
@@ -390,6 +427,7 @@ export default function BondfireChat() {
       });
 
       verifier.on(VerifierEvent.Done, () => {
+        markThisDeviceVerified();
         cleanupVerification("Verified ✅");
       });
 
@@ -401,7 +439,8 @@ export default function BondfireChat() {
       verifier.on?.("change", () => {
         try {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
-            cleanupVerification("Verified ✅");
+            markThisDeviceVerified();
+        cleanupVerification("Verified ✅");
           }
         } catch {
           // ignore
@@ -421,7 +460,8 @@ export default function BondfireChat() {
       setVerifyMsg("Confirmed. Waiting for other device…");
       // In case other side never sends Done back, clear after a bit.
       setTimeout(() => {
-        if (verifierRef.current) cleanupVerification("Verified ✅");
+        if (verifierRef.current) markThisDeviceVerified();
+        cleanupVerification("Verified ✅");
       }, 6500);
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
@@ -472,7 +512,16 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_${orgId}`);
+    removeKey(`bf_matrix_`);
+
+    // also clear local verified flag for this device
+    try {
+      const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
+      if (k) removeKey(k);
+    } catch {
+      // ignore
+    }
+    setDeviceVerified(false);
 
     setUserId("");
     setAccessToken("");
@@ -592,7 +641,7 @@ export default function BondfireChat() {
         <div className="helper" style={{ marginTop: 8 }}>
           <strong>Signed in as:</strong> {saved?.userId || userId} ·{" "}
           <strong>Device:</strong> {saved?.deviceId || deviceId || "(loading)"}{" "}
-          {cryptoReady ? "🔒" : "🟡"}
+          {!cryptoReady ? "🟡" : deviceVerified ? "🔒" : "🔓"}
         </div>
       )}
 
@@ -608,7 +657,15 @@ export default function BondfireChat() {
               Crypto isn’t ready yet, so verification can’t start. If this stays
               yellow, your homeserver or build is missing E2EE support.
             </div>
-          ) : verificationReq ? (
+          ) : deviceVerified && !verificationReq ? (
+            <>
+              <div className="helper">This device is verified for this account. You should be able to read and send E2EE messages in encrypted rooms. 🔒</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <button className="btn" onClick={requestOwnVerification}>
+                  Re-verify (optional)
+                </button>
+              </div>
+            </>) : verificationReq ? (
             <>
               <div className="helper">
                 From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
@@ -704,7 +761,7 @@ export default function BondfireChat() {
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
-              placeholder="Homeserver base URL (e.g. https://matrix-client.matrix.org)"
+              placeholder="Homeserver base URL (e.g. https://matrix.org)"
               value={hsUrl}
               onChange={(e) => setHsUrl(e.target.value)}
               required
