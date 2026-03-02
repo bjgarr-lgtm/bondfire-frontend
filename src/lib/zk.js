@@ -32,36 +32,56 @@ function b64(bytes) {
   bytes.forEach((b) => (s += String.fromCharCode(b)));
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
-function unb64(input) {
-  if (input == null) return new Uint8Array();
-  let s = String(input).trim();
-
-  // Strip data URL prefix if it ever sneaks in.
-  if (s.startsWith("data:")) {
-    const idx = s.indexOf(",");
-    if (idx >= 0) s = s.slice(idx + 1);
-  }
-
-  // base64url -> base64
+function unb64(s) {
   s = s.replace(/-/g, "+").replace(/_/g, "/");
-  // remove whitespace/newlines
-  s = s.replace(/\s+/g, "");
-  // keep only legal base64 chars
-  s = s.replace(/[^A-Za-z0-9+/=]/g, "");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
-  // pad to multiple of 4
-  const pad = s.length % 4;
-  if (pad) s += "=".repeat(4 - pad);
+function isLikelyBase64String(x) {
+  return typeof x === "string" && x.length >= 16 && /^[A-Za-z0-9+/=_-]+$/.test(x);
+}
 
-  try {
-    const bin = atob(s);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  } catch (e) {
-    const msg = e?.message || String(e);
-    throw new Error(`Invalid base64 payload (decode failed): ${msg}`);
+function toBytesFlexible(x) {
+  if (!x) return new Uint8Array();
+  if (x instanceof Uint8Array) return x;
+  if (Array.isArray(x)) return new Uint8Array(x);
+  if (typeof x === "string") {
+    if (isLikelyBase64String(x)) {
+      try {
+        return unb64(x);
+      } catch {
+        // fall through
+      }
+    }
+    return new TextEncoder().encode(x);
   }
+  return new Uint8Array();
+}
+
+async function normalizeAesGcmKeyBytes(raw) {
+  const bytes = toBytesFlexible(raw);
+
+  // Some WebCrypto implementations accept only 128 or 256 bit AES keys.
+  if (bytes.length === 16 || bytes.length === 32) return bytes;
+
+  // Common failure: we cached base64(text) instead of bytes (double-encoded).
+  try {
+    const asAscii = new TextDecoder().decode(bytes);
+    if (isLikelyBase64String(asAscii)) {
+      const second = toBytesFlexible(asAscii);
+      if (second.length === 16 || second.length === 32) return second;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Last resort: hash to 32 bytes so importKey won't throw.
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return new Uint8Array(digest);
 }
 
 function openDb() {
@@ -173,7 +193,8 @@ export function randomOrgKey() {
 }
 
 export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
-  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const keyBytes = await normalizeAesGcmKeyBytes(orgKeyBytes);
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const pt = new TextEncoder().encode(plaintext);
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, pt);
@@ -182,7 +203,8 @@ export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
   const blob = (typeof blobStr === "string") ? JSON.parse(blobStr) : (blobStr || {});
-  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+  const keyBytes = await normalizeAesGcmKeyBytes(orgKeyBytes);
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
   const iv = unb64(blob.iv);
   const ct = unb64(blob.ct);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
@@ -200,7 +222,9 @@ export async function decryptJsonWithOrgKey(orgKeyBytes, blobStr) {
 }
 
 export function cacheOrgKey(orgId, keyBytes) {
-  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(keyBytes));
+  // Accept Uint8Array *or* a base64 string (common after recovery restore).
+  const bytes = toBytesFlexible(keyBytes);
+  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(bytes));
 }
 
 export function getCachedOrgKey(orgId) {
@@ -217,7 +241,17 @@ export function getCachedOrgKey(orgId) {
     try {
       const b64key = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
       if (!b64key) continue;
-      return unb64(b64key);
+      const bytes = unb64(b64key);
+      if (bytes.length === 16 || bytes.length === 32) return bytes;
+      // Salvage the double-encoded case: bytes are actually base64 text.
+      try {
+        const asAscii = new TextDecoder().decode(bytes);
+        if (isLikelyBase64String(asAscii)) {
+          const second = toBytesFlexible(asAscii);
+          if (second.length === 16 || second.length === 32) return second;
+        }
+      } catch {}
+      return bytes;
     } catch {}
   }
 
@@ -233,17 +267,22 @@ export function getCachedOrgKey(orgId) {
           if (Array.isArray(arr)) return new Uint8Array(arr);
         } catch {}
       }
-      return unb64(b64key);
+      const bytes = unb64(b64key);
+      if (bytes.length === 16 || bytes.length === 32) return bytes;
+      try {
+        const asAscii = new TextDecoder().decode(bytes);
+        if (isLikelyBase64String(asAscii)) {
+          const second = toBytesFlexible(asAscii);
+          if (second.length === 16 || second.length === 32) return second;
+        }
+      } catch {}
+      return bytes;
     } catch {}
   }
 
   return null;
 }
 
-
-/* ---------------- Base64 aliases (legacy callers) ---------------- */
-export function toB64(u8) { return b64(u8); }
-export function fromB64(s) { return unb64(s); }
 
 /* ---------------- Recovery wrap (option A) ----------------
    Purpose: survive localStorage/IndexedDB wipes.
