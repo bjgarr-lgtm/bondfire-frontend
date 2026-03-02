@@ -26,9 +26,8 @@ import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
+import HelpWidget from "./help/HelpWidget";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
-import DebugWidget from "./components/DebugWidget.jsx";
-import { debugLog } from "./lib/debugBus.js";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -142,7 +141,6 @@ function Shell() {
 			if (!alive) return;
 			if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
 			try {
-        debugLog("keepalive:refresh", { url: "/api/auth/refresh" });
 				await fetch("/api/auth/refresh", {
 					method: "POST",
 					credentials: "include",
@@ -150,7 +148,6 @@ function Shell() {
 					body: "{}",
 				});
 			} catch {
-        debugLog("keepalive:error", { url: "/api/auth/refresh" });
 				// ignore
 			}
 		};
@@ -240,7 +237,6 @@ function Shell() {
 
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
-		<DebugWidget />
 		</AuthCtx.Provider>
 	);
 }
