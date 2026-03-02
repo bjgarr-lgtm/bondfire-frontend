@@ -10,6 +10,13 @@ function readCookie(name) {
   return "";
 }
 
+// Optional separate API host. Keep it safe: never reference an undefined global.
+// If not set, we stick to same-origin.
+const API_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
+  (typeof window !== "undefined" && window.__BF_API_BASE__) ||
+  "";
+
 export function getAuthToken() {
   // Back-compat for older deployments still using Bearer tokens.
   return (
@@ -55,9 +62,10 @@ export async function api(path, opts = {}) {
   if (res.status === 401) {
     try {
       // Try both same-origin and API_BASE (in case the frontend talks to a separate API host).
-      const refreshUrls = ["/api/auth/refresh", `${API_BASE}/api/auth/refresh`].filter(
-        (u) => typeof u === "string" && u && !u.includes("undefined")
-      );
+      const refreshUrls = [
+        "/api/auth/refresh",
+        API_BASE ? `${API_BASE}/api/auth/refresh` : "",
+      ].filter((u) => typeof u === "string" && u);
       for (const u of refreshUrls) {
         try {
           const rr = await fetch(u, {
