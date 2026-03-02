@@ -26,7 +26,7 @@ import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
-import HelpWidget from "./help/HelpWidget";
+import HelpWidget from "./help/HelpWidget"; 
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 
 /* -------------------------------- Error Boundary ------------------------------- */
