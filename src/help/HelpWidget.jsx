@@ -10,6 +10,18 @@ export default function HelpWidget() {
   const [open, setOpen] = React.useState(false);
   const [activeId, setActiveId] = React.useState(() => guessTopicIdFromPath(loc?.pathname));
 
+  React.useEffect(() => {
+    // Debug sanity check: should be true when widget is mounted.
+    try {
+      window.__BF_HELP_MOUNTED = true;
+    } catch {}
+    return () => {
+      try {
+        window.__BF_HELP_MOUNTED = false;
+      } catch {}
+    };
+  }, []);
+
   const [pulse, setPulse] = React.useState(() => {
     try {
       return localStorage.getItem("bf_help_seen") ? false : true;

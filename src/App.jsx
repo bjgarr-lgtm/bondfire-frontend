@@ -26,8 +26,8 @@ import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
-import HelpWidget from "./help/HelpWidget"; 
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
+import HelpWidget from "./help/HelpWidget.jsx";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -183,6 +183,9 @@ function Shell() {
 					onLogout={logout}
 				/>
 			)}
+
+			{/* Help button and guides live globally on authenticated pages */}
+			{state.authed ? <HelpWidget /> : null}
 
 			<Routes>
 				{/* PUBLIC */}
