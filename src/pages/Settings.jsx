@@ -1,7 +1,13 @@
 // src/pages/Settings.jsx
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
+import {
+  cacheOrgKey,
+  decryptWithOrgKey,
+  getCachedOrgKey,
+  getSessionMasterKey,
+  unwrapOrgKey,
+} from "../lib/zk.js";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
@@ -1471,12 +1477,44 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   } catch {
     keyBytes = null;
   }
+  // If we don't have a cached org key in this tab/session, try to fetch the
+  // wrapped org key and unwrap it using the session master key.
+  if (!keyBytes) {
+    try {
+      const mk = await getSessionMasterKey();
+      if (mk) {
+        const r = await authFetch(`/api/orgs/${orgId}/zk/wrapped`);
+        if (r.ok) {
+          const j = await r.json().catch(() => null);
+          const wrapped = j?.wrapped || null;
+          if (wrapped) {
+            const kb = await unwrapOrgKey(mk, wrapped);
+            if (kb) {
+              cacheOrgKey(orgId, kb);
+              keyBytes = kb;
+            }
+          }
+        }
+      }
+    } catch {
+      keyBytes = null;
+    }
+  }
   if (!keyBytes) return list;
 
   const out = [];
   for (const row of list) {
     const r = { ...(row || {}) };
-    const blob = r?.[blobField];
+    // Some endpoints use different blob field names.
+    // Accept the caller's hint first, then try common alternatives.
+    const blob =
+      r?.[blobField] ||
+      r?.encrypted_blob ||
+      r?.encryptedBlob ||
+      r?.encrypted_profile ||
+      r?.encryptedProfile ||
+      r?.encrypted_payload ||
+      r?.encryptedPayload;
     if (!blob) {
       out.push(r);
       continue;

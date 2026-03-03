@@ -13,6 +13,34 @@ import {
   canAcceptVerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api";
 
+// Keep a single Matrix client alive per browser tab so switching away from the
+// Chat page doesn't make it look like you're reconnecting or re-verifying.
+const BF_MATRIX_GLOBAL = "__bf_matrix_client__";
+
+function getGlobalMatrix() {
+  try {
+    return window[BF_MATRIX_GLOBAL] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setGlobalMatrix(v) {
+  try {
+    window[BF_MATRIX_GLOBAL] = v;
+  } catch {}
+}
+
+function clearGlobalMatrix() {
+  try {
+    delete window[BF_MATRIX_GLOBAL];
+  } catch {
+    try {
+      window[BF_MATRIX_GLOBAL] = null;
+    } catch {}
+  }
+}
+
 /* ---------------- helpers ---------------- */
 function readJSON(key, fallback = null) {
   try {
@@ -179,6 +207,7 @@ export default function BondfireChat() {
     const baseUrl = saved.hsUrl;
     const uid = saved.userId;
     const token = saved.accessToken;
+    // Older sessions may not have persisted deviceId.
     const did = saved.deviceId || "";
 
     // Keep state aligned with storage
@@ -186,28 +215,60 @@ export default function BondfireChat() {
     setAccessToken(token);
     setDeviceId(did);
 
-    const store = new IndexedDBStore({
-      indexedDB: window.indexedDB,
-      localStorage: window.localStorage,
-      dbName: `bf_mx_store_${uid}`,
-    });
+    // Reuse an existing Matrix client for this tab to avoid the fake
+    // "Connecting…" + "verify again" nonsense when you switch tabs.
+    const g = getGlobalMatrix();
+    const sameDevice = !did || (g?.deviceId || "") === did;
+    const canReuse =
+      g &&
+      g.client &&
+      g.baseUrl === baseUrl &&
+      g.userId === uid &&
+      g.accessToken === token &&
+      sameDevice;
 
-    const cryptoStore = new IndexedDBCryptoStore(
-      window.indexedDB,
-      `bf_mx_crypto_${uid}`
-    );
+    let client = null;
+    let store = null;
+    let cryptoStore = null;
+    if (canReuse) {
+      client = g.client;
+      // If deviceId wasn't stored previously, capture it now so verification
+      // state keys are stable.
+      if (!did && g?.deviceId) setDeviceId(g.deviceId);
+      log("Connected (resumed)");
+    } else {
+      store = new IndexedDBStore({
+        indexedDB: window.indexedDB,
+        localStorage: window.localStorage,
+        dbName: `bf_mx_store_${uid}`,
+      });
 
-    const client = createClient({
-      baseUrl,
-      accessToken: token,
-      userId: uid,
-      deviceId: did || undefined,
-      store,
-      cryptoStore,
-    });
+      cryptoStore = new IndexedDBCryptoStore(
+        window.indexedDB,
+        `bf_mx_crypto_${uid}`
+      );
+
+      client = createClient({
+        baseUrl,
+        accessToken: token,
+        userId: uid,
+        deviceId: did || undefined,
+        store,
+        cryptoStore,
+      });
+
+      setGlobalMatrix({
+        client,
+        baseUrl,
+        userId: uid,
+        accessToken: token,
+        deviceId: did,
+      });
+
+      log("Connecting…");
+    }
 
     clientRef.current = client;
-    log("Connecting…");
 
     function refreshRooms() {
       try {
@@ -261,27 +322,40 @@ export default function BondfireChat() {
       });
     }
 
-    (async () => {
-      try {
-        await store.startup();
-      } catch (e) {
-        log("Store startup failed:", e?.message || e);
+    function onSync(state) {
+      if (state === "PREPARED") {
+        setReady(true);
+        setStatus("Connected");
+        refreshRooms();
       }
+    }
 
-      try {
-        if (typeof client.initRustCrypto === "function") {
-          await client.initRustCrypto();
-          setCryptoReady(true);
-        } else if (typeof client.initCrypto === "function") {
-          await client.initCrypto();
-          setCryptoReady(true);
-        } else {
-          setCryptoReady(false);
-          log("Crypto init not available");
+    (async () => {
+      if (!canReuse) {
+        try {
+          await store.startup();
+        } catch (e) {
+          log("Store startup failed:", e?.message || e);
         }
-      } catch (e) {
-        setCryptoReady(false);
-        log("Crypto init failed:", e?.message || e);
+
+        try {
+          if (typeof client.initRustCrypto === "function") {
+            await client.initRustCrypto();
+            setCryptoReady(true);
+          } else if (typeof client.initCrypto === "function") {
+            await client.initCrypto();
+            setCryptoReady(true);
+          } else {
+            setCryptoReady(false);
+            log("Crypto init not available");
+          }
+        } catch (e) {
+          setCryptoReady(false);
+          log("Crypto init failed:", e?.message || e);
+        }
+      } else {
+        // Client is already running; crypto may already be initialized.
+        setCryptoReady(true);
       }
 
 
@@ -320,24 +394,21 @@ export default function BondfireChat() {
         // ignore
       }
 
-      client.on("sync", (state) => {
-        if (state === "PREPARED") {
-          setReady(true);
-          refreshRooms();
-        }
-      });
+      client.on("sync", onSync);
 
       client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
       client.on("Room.timeline", onTimeline);
 
-      client.startClient({ initialSyncLimit: 30 });
+      if (!canReuse) client.startClient({ initialSyncLimit: 30 });
     })();
 
     return () => {
       stoppedRef.current = true;
       try {
-        client.stopClient();
-        client.removeAllListeners();
+        // Keep the client alive globally; just detach listeners bound to this component.
+        client.removeListener?.("sync", onSync);
+        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+        client.removeListener?.("Room.timeline", onTimeline);
       } catch {}
       clientRef.current = null;
     };
@@ -553,6 +624,8 @@ export default function BondfireChat() {
       } catch {}
       clientRef.current = null;
     }
+
+    clearGlobalMatrix();
 
     log("Logged out");
   };
