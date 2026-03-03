@@ -1,4 +1,5 @@
-import { json, ok, bad, requireOrgRole } from "../../../_lib/http.js";
+import { ok, bad, readJSON } from "../../../_lib/http.js";
+import { requireOrgRole } from "../../../_lib/auth.js";
 import { ensureZkSchema } from "../../../_lib/zkSchema.js";
 
 // Option A: store a passphrase-encrypted recovery blob on the server
@@ -9,12 +10,13 @@ export async function onRequestGet(ctx) {
     const { params, env, request } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole(ctx, orgId, "member");
+    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
+    if (!gate.ok) return gate.resp;
     const userId = gate.user.sub;
 
-    await ensureZkSchema(env);
+    const { db } = await ensureZkSchema(env);
 
-    const row = await env.DB.prepare(
+    const row = await db.prepare(
       `SELECT recovery_payload, updated_at
          FROM org_key_recovery
         WHERE org_id = ? AND user_id = ?`
@@ -40,7 +42,7 @@ export async function onRequestGet(ctx) {
       recovery: payload,
     });
   } catch (e) {
-    return bad(e?.message || String(e));
+    return bad(500, e?.message || String(e));
   }
 }
 
@@ -49,20 +51,21 @@ export async function onRequestPost(ctx) {
     const { params, env, request } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole(ctx, orgId, "member");
+    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
+    if (!gate.ok) return gate.resp;
     const userId = gate.user.sub;
 
-    await ensureZkSchema(env);
+    const { db } = await ensureZkSchema(env);
 
-    const body = await json(request);
+    const body = await readJSON(request);
     // Accept either { recovery: <obj> } or { wrapped: <obj> } for backwards compatibility.
     const recovery = body?.recovery ?? body?.wrapped ?? body;
-    if (!recovery) return bad("Missing recovery payload");
+    if (!recovery) return bad(400, "MISSING_RECOVERY_PAYLOAD");
 
     const payloadText = typeof recovery === "string" ? recovery : JSON.stringify(recovery);
     const now = Date.now();
 
-    await env.DB.prepare(
+    await db.prepare(
       `INSERT INTO org_key_recovery (org_id, user_id, recovery_payload, updated_at)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(org_id, user_id) DO UPDATE SET
@@ -74,21 +77,22 @@ export async function onRequestPost(ctx) {
 
     return ok({ has_recovery: true, updated_at: now });
   } catch (e) {
-    return bad(e?.message || String(e));
+    return bad(500, e?.message || String(e));
   }
 }
 
 export async function onRequestDelete(ctx) {
   try {
-    const { params, env } = ctx;
+    const { params, env, request } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole(ctx, orgId, "member");
+    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
+    if (!gate.ok) return gate.resp;
     const userId = gate.user.sub;
 
-    await ensureZkSchema(env);
+    const { db } = await ensureZkSchema(env);
 
-    await env.DB.prepare(
+    await db.prepare(
       `DELETE FROM org_key_recovery WHERE org_id = ? AND user_id = ?`
     )
       .bind(orgId, userId)
@@ -96,6 +100,6 @@ export async function onRequestDelete(ctx) {
 
     return ok({ has_recovery: false });
   } catch (e) {
-    return bad(e?.message || String(e));
+    return bad(500, e?.message || String(e));
   }
 }
