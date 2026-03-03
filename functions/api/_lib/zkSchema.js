@@ -28,6 +28,19 @@ export async function ensureZkSchema(env) {
     )`
   ).run();
 
+  // org_key_recovery: per-user, per-org recovery backup (Option A)
+  // This stores an *already passphrase-encrypted* payload produced client-side.
+  // The server never sees the org key or the passphrase.
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS org_key_recovery (
+      org_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      recovery_payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (org_id, user_id)
+    )`
+  ).run();
+
   // Add optional columns if missing (safe additive changes)
   const cols = await tableInfo(db, 'org_key_wrapped');
   const colNames = new Set(cols.map((c) => c.name));
