@@ -29,6 +29,18 @@ function readOrgName(orgId) {
   }
 }
 
+function readOrgLogo(orgId) {
+  if (!orgId) return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
+    const v = s?.logoDataUrl || s?.logoUrl || s?.logo || null;
+    const str = String(v || "").trim();
+    return str ? str : null;
+  } catch {
+    return null;
+  }
+}
+
 // Older patches referenced this name. Keep it so we don't trip over our own feet again.
 function readOrgNameFromStorage(orgId) {
   return readOrgName(orgId);
@@ -37,19 +49,25 @@ function readOrgNameFromStorage(orgId) {
 const Brand = ({ orgId, logoSrc }) => {
   const inferredOrgId = orgId || useOrgIdFromPath();
   const [orgName, setOrgName] = React.useState(() => readOrgNameFromStorage(inferredOrgId));
+  const [orgLogo, setOrgLogo] = React.useState(() => readOrgLogo(inferredOrgId));
 
   React.useEffect(() => {
     setOrgName(readOrgNameFromStorage(inferredOrgId));
+    setOrgLogo(readOrgLogo(inferredOrgId));
 
     const onChange = (e) => {
       const changedId = e?.detail?.orgId;
-      if (!changedId || changedId === inferredOrgId) setOrgName(readOrgNameFromStorage(inferredOrgId));
+      if (!changedId || changedId === inferredOrgId) {
+        setOrgName(readOrgNameFromStorage(inferredOrgId));
+        setOrgLogo(readOrgLogo(inferredOrgId));
+      }
     };
 
     const onStorage = (e) => {
       const k = e?.key || "";
       if (k === `bf_org_settings_${inferredOrgId}` || k === "bf_orgs") {
         setOrgName(readOrgNameFromStorage(inferredOrgId));
+        setOrgLogo(readOrgLogo(inferredOrgId));
       }
     };
 
@@ -72,8 +90,29 @@ const Brand = ({ orgId, logoSrc }) => {
       </Link>
 
       {inferredOrgId ? (
-        <span className="bf-brand-org" title={label}>
-          {label}
+        <span
+          className="bf-brand-org"
+          title={label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+        >
+          {orgLogo ? (
+            <img
+              src={orgLogo}
+              alt={`${label} logo`}
+              className="bf-org-logo"
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 8,
+                objectFit: "cover",
+                border: "1px solid rgba(255,255,255,0.16)",
+                background: "rgba(255,255,255,0.06)",
+              }}
+              loading="lazy"
+              decoding="async"
+            />
+          ) : null}
+          <span className="bf-org-name">{label}</span>
         </span>
       ) : null}
     </div>
