@@ -35,8 +35,9 @@ export async function onRequest(ctx) {
 
   try {
     if (request.method === "GET") {
-      const url = new URL(request.url);
-      const allowPlaintext = (url.searchParams.get("plaintext") || "") === "1";
+      // This endpoint is admin-gated, so returning plaintext PII here is OK.
+      // (Public pages should never call this route.)
+      const allowPlaintext = true;
 
       const rows = await db
         .prepare(
@@ -71,12 +72,12 @@ export async function onRequest(ctx) {
           return {
             userId: r.user_id,
             user_id: r.user_id,
-            // Default: do not ship plaintext PII.
-            // For one-time backfill/encrypt-existing, caller can use ?plaintext=1.
-            email: allowPlaintext ? (r.email || "") : (hasEnc ? "__encrypted__" : ""),
+            // If plaintext columns are blank but encrypted data exists, return a
+            // placeholder so the client can decrypt and display.
+            email: allowPlaintext ? (r.email || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
             publicKey: r.public_key || null,
             public_key: r.public_key || null,
-            name: allowPlaintext ? (r.name || "") : (hasEnc ? "__encrypted__" : ""),
+            name: allowPlaintext ? (r.name || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
             role: r.role || "member",
             createdAt: r.created_at || null,
             encrypted_blob: r.encrypted_blob || null,

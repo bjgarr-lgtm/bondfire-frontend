@@ -27,12 +27,13 @@ export async function onRequestGet(ctx) {
   // Ensure ZK columns exist (safe/no-op if already applied).
   await ensureZkSchema(db);
 
-  // Any member can view subscribers in settings (you can tighten this later).
-  const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "member" });
+  // Subscriber list and exports are an admin function.
+  const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "admin" });
   if (!auth.ok) return auth.resp;
   const url = new URL(request.url);
   const wantCsv = (url.searchParams.get("format") || "").toLowerCase() === "csv";
-  const allowPlaintext = (url.searchParams.get("plaintext") || "") === "1";
+  // Admin-only endpoint: OK to return plaintext so the Settings UI can render.
+  const allowPlaintext = true;
 
   const r = await db.prepare(
     `SELECT id, email, name, created_at, encrypted_blob, key_version
@@ -45,14 +46,15 @@ export async function onRequestGet(ctx) {
   const rows = Array.isArray(r?.results) ? r.results : [];
 
   if (!wantCsv) {
-    // Default: don't ship plaintext subscriber PII.
-    // For backfill/encrypt-existing, use ?plaintext=1.
+    // Admin-only endpoint: return plaintext + encrypted blob (for ZK clients).
     const safe = rows.map((s) => {
       const hasEnc = !!s.encrypted_blob;
       return {
         id: s.id,
-        email: allowPlaintext ? (s.email || "") : (hasEnc ? "__encrypted__" : ""),
-        name: allowPlaintext ? (s.name || "") : (hasEnc ? "__encrypted__" : ""),
+        // If plaintext columns are blank but encrypted data exists, return a
+        // placeholder so the client can decrypt and display.
+        email: allowPlaintext ? (s.email || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
+        name: allowPlaintext ? (s.name || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
         created_at: s.created_at ?? null,
         encrypted_blob: s.encrypted_blob || null,
         key_version: s.key_version ?? null,

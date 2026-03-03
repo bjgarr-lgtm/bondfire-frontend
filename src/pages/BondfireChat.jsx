@@ -349,8 +349,38 @@ export default function BondfireChat() {
           log("Crypto init failed:", e?.message || e);
         }
       } else {
-        // Client is already running; crypto may already be initialized.
-        setCryptoReady(true);
+        // Client is already running; don't assume crypto survived route changes.
+        try {
+          const crypto = client.getCrypto?.();
+          setCryptoReady(!!crypto);
+        } catch {
+          setCryptoReady(false);
+        }
+
+        // If crypto isn't present, try a one-shot init using the stored pickle key.
+        // This fixes the "verification disappears after tab change" behavior.
+        if (!client.getCrypto?.()) {
+          try {
+            const rust = await import("@matrix-org/matrix-sdk-crypto-wasm");
+            const { initRustCrypto } = await import("matrix-js-sdk/lib/rust-crypto");
+            await rust.initAsync();
+            const pickleKey = await loadLocalItem(LS_PICKLE_KEY);
+            await initRustCrypto(client, {
+              useIndexedDB: true,
+              pickleKey,
+            });
+            setCryptoReady(!!client.getCrypto?.());
+          } catch (e) {
+            console.warn("Matrix crypto re-init failed", e);
+            setCryptoReady(false);
+          }
+        }
+
+        // When reusing a running client, we might not get another PREPARED sync
+        // event, so set UI state eagerly.
+        setReady(true);
+        setStatus("Connected (resumed)");
+        refreshRooms();
       }
 
 
@@ -366,14 +396,11 @@ export default function BondfireChat() {
         // Some matrix-js-sdk builds expose a verification-status helper. If present, trust it.
         if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
           const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
-          if (typeof res?.isVerified === "function") {
-            verified = !!res.isVerified();
-          } else {
-            verified =
-              res === true ||
-              res?.verified === true ||
-              res?.isCrossSigningVerified === true;
-          }
+          verified =
+            res === true ||
+            res?.isVerified === true ||
+            res?.verified === true ||
+            res?.isCrossSigningVerified === true;
         }
 
         setDeviceVerified(!!verified);
@@ -419,42 +446,14 @@ export default function BondfireChat() {
     try {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
-
-      if (!crypto) {
-        setVerifyMsg("Crypto is not initialized. Try reloading or use another Matrix client to verify.");
+      if (!crypto?.requestOwnUserVerification) {
+        setVerifyMsg("This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate.");
         return;
       }
-
-      // Best case: modern CryptoApi
-      if (typeof crypto.requestOwnUserVerification === "function") {
-        const req = await crypto.requestOwnUserVerification();
-        setVerificationReq(req);
-        setSasData(null);
-        setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
-        return;
-      }
-
-      // Fallback: request verification against another known device.
-      if (typeof crypto.requestDeviceVerification === "function") {
-        const myUid = client.getUserId?.() || saved?.userId || userId;
-        const myDid = client.getDeviceId?.() || saved?.deviceId;
-        const devices = client.getStoredDevicesForUser?.(myUid) || [];
-        const other = devices.find((d) => d?.deviceId && d.deviceId !== myDid);
-
-        if (!other?.deviceId) {
-          setVerifyMsg("No other device found for this Matrix account. Open Element (or another client) on a second device and start verification there.");
-          return;
-        }
-
-        const req = await crypto.requestDeviceVerification(myUid, other.deviceId);
-        setVerificationReq(req);
-        setSasData(null);
-        setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
-        return;
-      }
-
-      // Legacy crypto: can't initiate from here.
-      setVerifyMsg("This Matrix crypto build cannot initiate verification. Start it from Element (or another client) and then accept here.");
+      const req = await crypto.requestOwnUserVerification();
+      setVerificationReq(req);
+      setSasData(null);
+      setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }

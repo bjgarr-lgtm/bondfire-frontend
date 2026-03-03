@@ -254,13 +254,6 @@ export function getCachedOrgKey(orgId) {
   return null;
 }
 
-// Compatibility export: some UI code imports this name.
-// Bondfire doesn't keep a separate "session master key" beyond the cached org key.
-// Returning the cached org key keeps the contract simple: Uint8Array or null.
-export function getSessionMasterKey(orgId) {
-  return getCachedOrgKey(orgId);
-}
-
 /* ---------------- Recovery (Option A) ---------------- */
 async function pbkdf2Key(passphrase, saltBytes) {
   const base = await crypto.subtle.importKey(
@@ -328,4 +321,15 @@ export async function loadRecoveryFromServer(orgId) {
 
 export async function deleteRecoveryFromServer(orgId) {
   return api(`/api/orgs/${orgId}/zk/recovery`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Back-compat shim
+//
+// Some older UI builds imported `getSessionMasterKey` from this module.
+// The current design caches per-org keys (`getCachedOrgKey`) instead.
+// Exporting a stub prevents build failures when that import still exists.
+// ---------------------------------------------------------------------------
+export function getSessionMasterKey() {
+  return null;
 }
