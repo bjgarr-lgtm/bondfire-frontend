@@ -16,11 +16,20 @@ export async function onRequestGet(ctx) {
 
     const { db } = await ensureZkSchema(env);
 
-    const row = await db.prepare(
-      `SELECT recovery_payload, updated_at
-         FROM org_key_recovery
-        WHERE org_id = ? AND user_id = ?`
-    )
+    const cols = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
+    const names = new Set((cols?.results || []).map((c) => c.name));
+    const hasRecoveryPayload = names.has("recovery_payload");
+
+    const row = await db
+      .prepare(
+        hasRecoveryPayload
+          ? `SELECT recovery_payload AS payload_text, updated_at
+               FROM org_key_recovery
+              WHERE org_id = ? AND user_id = ?`
+          : `SELECT wrapped_key AS payload_text, updated_at
+               FROM org_key_recovery
+              WHERE org_id = ? AND user_id = ?`
+      )
       .bind(orgId, userId)
       .first();
 
@@ -30,16 +39,16 @@ export async function onRequestGet(ctx) {
 
     let payload = null;
     try {
-      payload = JSON.parse(row.recovery_payload);
+      payload = JSON.parse(row.payload_text);
     } catch {
       // Keep it raw if somehow not JSON (older builds)
-      payload = row.recovery_payload;
+      payload = row.payload_text;
     }
 
     return ok({
       has_recovery: true,
       updated_at: row.updated_at,
-      recovery: payload,
+      payload,
     });
   } catch (e) {
     return bad(500, e?.message || String(e));
@@ -57,23 +66,51 @@ export async function onRequestPost(ctx) {
 
     const { db } = await ensureZkSchema(env);
 
-    const body = await readJSON(request);
-    // Accept either { recovery: <obj> } or { wrapped: <obj> } for backwards compatibility.
-    const recovery = body?.recovery ?? body?.wrapped ?? body;
-    if (!recovery) return bad(400, "MISSING_RECOVERY_PAYLOAD");
+    const cols = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
+    const names = new Set((cols?.results || []).map((c) => c.name));
+    const hasRecoveryPayload = names.has("recovery_payload");
 
-    const payloadText = typeof recovery === "string" ? recovery : JSON.stringify(recovery);
+    const body = await readJSON(request);
+    // Accept { payload }, { recovery }, { wrapped }, or raw object.
+    const payload = body?.payload ?? body?.recovery ?? body?.wrapped ?? body;
+    if (!payload) return bad(400, "MISSING_RECOVERY_PAYLOAD");
+
+    const payloadText = typeof payload === "string" ? payload : JSON.stringify(payload);
     const now = Date.now();
 
-    await db.prepare(
-      `INSERT INTO org_key_recovery (org_id, user_id, recovery_payload, updated_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(org_id, user_id) DO UPDATE SET
-         recovery_payload = excluded.recovery_payload,
-         updated_at = excluded.updated_at`
-    )
-      .bind(orgId, userId, payloadText, now)
-      .run();
+    if (hasRecoveryPayload) {
+      await db
+        .prepare(
+          `INSERT INTO org_key_recovery (org_id, user_id, recovery_payload, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(org_id, user_id) DO UPDATE SET
+             recovery_payload = excluded.recovery_payload,
+             updated_at = excluded.updated_at`
+        )
+        .bind(orgId, userId, payloadText, now)
+        .run();
+    } else {
+      // Legacy schema compatibility: org_key_recovery(org_id,user_id,wrapped_key,salt,kdf,updated_at)
+      // We store the full JSON blob into wrapped_key so the client can round-trip its v1 payload.
+      const salt = typeof payload === "object" && payload?.salt ? String(payload.salt) : "legacy";
+      const kdf =
+        typeof payload === "object" && payload?.kdf
+          ? JSON.stringify(payload.kdf)
+          : JSON.stringify({ name: "PBKDF2", hash: "SHA-256", iterations: 210000 });
+
+      await db
+        .prepare(
+          `INSERT INTO org_key_recovery (org_id, user_id, wrapped_key, salt, kdf, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(org_id, user_id) DO UPDATE SET
+             wrapped_key = excluded.wrapped_key,
+             salt = excluded.salt,
+             kdf = excluded.kdf,
+             updated_at = excluded.updated_at`
+        )
+        .bind(orgId, userId, payloadText, salt, kdf, now)
+        .run();
+    }
 
     return ok({ has_recovery: true, updated_at: now });
   } catch (e) {
@@ -92,11 +129,7 @@ export async function onRequestDelete(ctx) {
 
     const { db } = await ensureZkSchema(env);
 
-    await db.prepare(
-      `DELETE FROM org_key_recovery WHERE org_id = ? AND user_id = ?`
-    )
-      .bind(orgId, userId)
-      .run();
+    await db.prepare(`DELETE FROM org_key_recovery WHERE org_id = ? AND user_id = ?`).bind(orgId, userId).run();
 
     return ok({ has_recovery: false });
   } catch (e) {

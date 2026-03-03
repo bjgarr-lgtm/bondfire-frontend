@@ -352,7 +352,7 @@ export default function Security() {
         <div style={{ height: 12 }} />
 
         <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-          <h4 style={{ margin: 0 }}>Key recovery (option A)</h4>
+          <h4 style={{ margin: 0 }}>Key recovery</h4>
           <p style={{ marginTop: 8 }}>
             Clearing site data wipes your local org key cache. Recovery lets you store a passphrase encrypted backup on the server so you can restore the org key after a wipe.
           </p>
