@@ -45,7 +45,12 @@ async function ensurePledgesTable(db) {
       await db.prepare(sql).run();
     } catch (e) {
       const msg = String(e?.message || e);
-      if (!msg.toLowerCase().includes("duplicate column")) throw e;
+      if (
+        !msg.toLowerCase().includes("duplicate") &&
+        !msg.toLowerCase().includes("exists")
+      ) {
+        throw e;
+      }
     }
   }
 }
@@ -286,8 +291,6 @@ export async function onRequest(ctx) {
         .run();
 
       const pledges = await listPledges(db, orgId);
-      return ok({ pledges });
-      // If pledge got accepted and it’s linked to a need, auto-bump the need to in_progress.
       if (String(fields.status || body.status || "").toLowerCase() === "accepted") {
         const needId = fields.need_id || body.need_id || null;
 
@@ -303,7 +306,8 @@ export async function onRequest(ctx) {
 
         await bumpNeedToInProgress(db, orgId, resolvedNeedId);
       }
-
+      return ok({ pledges });
+      // If pledge got accepted and it’s linked to a need, auto-bump the need to in_progress.
     }
 
     if (request.method === "DELETE") {
