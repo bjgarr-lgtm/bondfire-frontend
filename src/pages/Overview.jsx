@@ -899,54 +899,22 @@ const newsletterSpark = useMemo(() => {
           <div className="helper" style={{ marginTop: 10 }}>
             {subs.length} subscriber{subs.length === 1 ? "" : "s"}
           </div>
-
+            {subs.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  borderRadius: 10,
+                  padding: "6px 10px",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                }}
+                title="subscriber trend (last 14 days)"
+              >
+                <Sparkline values={newsletterSpark} width={260} height={28} />
+              </div>
+            )}
           {subsSorted.length ? (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {subsSorted.map((s, idx) => {
-                const name = isEncryptedNameLike(s?.name) ? "(encrypted)" : safeStr(s?.name || "subscriber");
-                const joined = Number(s?.joined || s?.created_at || 0);
-
-                return (
-                  <div
-                    key={s.id || `${name}-${joined}`}
-                    style={{
-                      display: "grid",
-                      gap: 6,
-                      padding: "6px 0",
-                    }}
-                  >
-                    {/* Row 1: name + date */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {name}
-                      </div>
-                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                        {fmtDT(joined)}
-                      </div>
-                    </div>
-
-                    {/* Row 2: sparkline (only on first row) */}
-                    {idx === 0 ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: 30,
-                          borderRadius: 10,
-                          padding: "2px 8px",
-                          background: "rgba(255,255,255,0.05)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-start",
-                        }}
-                        title="subscriber trend (last 14 days)"
-                      >
-                        <Sparkline values={newsletterSpark} width={260} height={24} />
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
             </div>
           ) : (
             <div className="helper" style={{ marginTop: 12 }}>No subscribers yet.</div>
