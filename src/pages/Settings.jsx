@@ -1,13 +1,7 @@
 // src/pages/Settings.jsx
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import {
-  cacheOrgKey,
-  decryptWithOrgKey,
-  getCachedOrgKey,
-  getSessionMasterKey,
-  unwrapOrgKey,
-} from "../lib/zk.js";
+import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
@@ -1477,29 +1471,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   } catch {
     keyBytes = null;
   }
-  // If we don't have a cached org key in this tab/session, try to fetch the
-  // wrapped org key and unwrap it using the session master key.
-  if (!keyBytes) {
-    try {
-      const mk = await getSessionMasterKey();
-      if (mk) {
-        const r = await authFetch(`/api/orgs/${orgId}/zk/wrapped`);
-        if (r.ok) {
-          const j = await r.json().catch(() => null);
-          const wrapped = j?.wrapped || null;
-          if (wrapped) {
-            const kb = await unwrapOrgKey(mk, wrapped);
-            if (kb) {
-              cacheOrgKey(orgId, kb);
-              keyBytes = kb;
-            }
-          }
-        }
-      }
-    } catch {
-      keyBytes = null;
-    }
-  }
   if (!keyBytes) return list;
 
   const out = [];
@@ -1514,7 +1485,12 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       r?.encrypted_profile ||
       r?.encryptedProfile ||
       r?.encrypted_payload ||
-      r?.encryptedPayload;
+      r?.encryptedPayload ||
+      r?.encrypted_description ||
+      r?.encryptedDescription ||
+      r?.encrypted ||
+      r?.blob ||
+      r?.payload;
     if (!blob) {
       out.push(r);
       continue;
@@ -1526,16 +1502,35 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
         try { dec = JSON.parse(decRaw); } catch { dec = null; }
       }
       if (dec && typeof dec === "object") {
+        // Newsletter + Members endpoints sometimes return blank or placeholder
+        // columns for name/email, while the real values live in the encrypted payload.
+        const decEmail =
+          dec.email ??
+          dec.subscriber_email ??
+          dec.pledger_email ??
+          dec.member_email ??
+          null;
+        const decName =
+          dec.name ??
+          dec.subscriber_name ??
+          dec.pledger_name ??
+          dec.member_name ??
+          null;
+
+        const isPlaceholderVal = (v) =>
+          v == null ||
+          v === "" ||
+          v === "__encrypted__" ||
+          v === "_encrypted_" ||
+          v === "encrypted";
+
+        if (isPlaceholderVal(r.email) && decEmail) r.email = decEmail;
+        if (isPlaceholderVal(r.name) && decName) r.name = decName;
+
         for (const [k, v] of Object.entries(dec)) {
           // Only fill placeholders; never overwrite real server fields.
           const cur = r[k];
-          const isPlaceholder =
-            cur == null ||
-            cur === "" ||
-            cur === "__encrypted__" ||
-            cur === "_encrypted_" ||
-            cur === "encrypted";
-          if (isPlaceholder) r[k] = v;
+          if (isPlaceholderVal(cur)) r[k] = v;
         }
         r.__decrypted__ = true;
       }
