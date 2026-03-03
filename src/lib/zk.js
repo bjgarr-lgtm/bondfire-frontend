@@ -15,6 +15,14 @@ const DEVICE_KEY_ID = "device_keypair_v1";
 const LS_PUB = "bf_device_public_jwk_v1";
 const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
 
+// Compatibility shim: some UI code may import this.
+// Current app stores only per-org keys, not a session-wide "master key".
+// Returning null keeps older imports from breaking the build.
+export function getSessionMasterKey() {
+  return null;
+}
+
+
 /* ---------------- base64 helpers ---------------- */
 function b64urlEncodeBytes(bytes) {
   let s = "";
