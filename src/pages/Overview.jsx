@@ -636,18 +636,25 @@ const newsletterSpark = useMemo(() => {
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
+
     try {
-      // If your backend doesn't support this yet, you'll get a 404 and we fall back.
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/rsvp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: meeting.id }),
-      });
+      await api(
+        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`,
+        {
+          method: "POST",
+        }
+      );
+
+      // Optimistic UI update
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.id === meeting.id ? { ...m, my_rsvp: "going" } : m
+        )
+      );
+
       setRsvpMsg("RSVP saved.");
     } catch (e) {
-      // fallback: still useful navigation
-      setRsvpMsg("RSVP endpoint not available yet. Opening meetings.");
-      go("meetings");
+      setRsvpMsg(e?.message || "Failed to RSVP");
     }
   }
 
