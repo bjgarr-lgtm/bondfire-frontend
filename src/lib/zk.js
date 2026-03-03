@@ -33,55 +33,29 @@ function b64(bytes) {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 function unb64(s) {
-  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  if (typeof s !== "string") throw new Error("Invalid base64 payload (not a string)");
+  // Accept base64url or base64, tolerate missing padding.
+  s = s.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
-  const bin = atob(s);
+  let bin;
+  try {
+    bin = atob(s);
+  } catch {
+    throw new Error("Invalid base64 payload (decode failed)");
+  }
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
-function isLikelyBase64String(x) {
-  return typeof x === "string" && x.length >= 16 && /^[A-Za-z0-9+/=_-]+$/.test(x);
+// Back-compat names used by the recovery patches/UI.
+// Some builds reference fromB64/toB64. Keep them defined and exported.
+export function toB64(bytes) {
+  return b64(bytes);
 }
 
-function toBytesFlexible(x) {
-  if (!x) return new Uint8Array();
-  if (x instanceof Uint8Array) return x;
-  if (Array.isArray(x)) return new Uint8Array(x);
-  if (typeof x === "string") {
-    if (isLikelyBase64String(x)) {
-      try {
-        return unb64(x);
-      } catch {
-        // fall through
-      }
-    }
-    return new TextEncoder().encode(x);
-  }
-  return new Uint8Array();
-}
-
-async function normalizeAesGcmKeyBytes(raw) {
-  const bytes = toBytesFlexible(raw);
-
-  // Some WebCrypto implementations accept only 128 or 256 bit AES keys.
-  if (bytes.length === 16 || bytes.length === 32) return bytes;
-
-  // Common failure: we cached base64(text) instead of bytes (double-encoded).
-  try {
-    const asAscii = new TextDecoder().decode(bytes);
-    if (isLikelyBase64String(asAscii)) {
-      const second = toBytesFlexible(asAscii);
-      if (second.length === 16 || second.length === 32) return second;
-    }
-  } catch {
-    // ignore
-  }
-
-  // Last resort: hash to 32 bytes so importKey won't throw.
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return new Uint8Array(digest);
+export function fromB64(s) {
+  return unb64(s);
 }
 
 function openDb() {
@@ -193,8 +167,7 @@ export function randomOrgKey() {
 }
 
 export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
-  const keyBytes = await normalizeAesGcmKeyBytes(orgKeyBytes);
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const pt = new TextEncoder().encode(plaintext);
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, pt);
@@ -203,8 +176,7 @@ export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
   const blob = (typeof blobStr === "string") ? JSON.parse(blobStr) : (blobStr || {});
-  const keyBytes = await normalizeAesGcmKeyBytes(orgKeyBytes);
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+  const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
   const iv = unb64(blob.iv);
   const ct = unb64(blob.ct);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
@@ -222,9 +194,7 @@ export async function decryptJsonWithOrgKey(orgKeyBytes, blobStr) {
 }
 
 export function cacheOrgKey(orgId, keyBytes) {
-  // Accept Uint8Array *or* a base64 string (common after recovery restore).
-  const bytes = toBytesFlexible(keyBytes);
-  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(bytes));
+  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(keyBytes));
 }
 
 export function getCachedOrgKey(orgId) {
@@ -241,17 +211,7 @@ export function getCachedOrgKey(orgId) {
     try {
       const b64key = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
       if (!b64key) continue;
-      const bytes = unb64(b64key);
-      if (bytes.length === 16 || bytes.length === 32) return bytes;
-      // Salvage the double-encoded case: bytes are actually base64 text.
-      try {
-        const asAscii = new TextDecoder().decode(bytes);
-        if (isLikelyBase64String(asAscii)) {
-          const second = toBytesFlexible(asAscii);
-          if (second.length === 16 || second.length === 32) return second;
-        }
-      } catch {}
-      return bytes;
+      return unb64(b64key);
     } catch {}
   }
 
@@ -267,128 +227,9 @@ export function getCachedOrgKey(orgId) {
           if (Array.isArray(arr)) return new Uint8Array(arr);
         } catch {}
       }
-      const bytes = unb64(b64key);
-      if (bytes.length === 16 || bytes.length === 32) return bytes;
-      try {
-        const asAscii = new TextDecoder().decode(bytes);
-        if (isLikelyBase64String(asAscii)) {
-          const second = toBytesFlexible(asAscii);
-          if (second.length === 16 || second.length === 32) return second;
-        }
-      } catch {}
-      return bytes;
+      return unb64(b64key);
     } catch {}
   }
 
   return null;
-}
-
-
-/* ---------------- Recovery wrap (option A) ----------------
-   Purpose: survive localStorage/IndexedDB wipes.
-   We store a *password-derived* encrypted copy of the org key on the server,
-   scoped to (org_id, user_id). Clearing browser storage then only requires the
-   user to re-enter their recovery passphrase to restore the org key locally.
-*/
-
-function u8(n) {
-  return new Uint8Array(n);
-}
-
-async function pbkdf2Key(passphrase, saltU8, iterations) {
-  const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(String(passphrase || "")),
-    { name: "PBKDF2" },
-    false,
-    ["deriveKey"]
-  );
-
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: saltU8, iterations, hash: "SHA-256" },
-    baseKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-
-export async function wrapOrgKeyForRecovery(orgKeyB64, passphrase) {
-  if (!orgKeyB64) throw new Error("MISSING_ORG_KEY");
-  if (!passphrase || String(passphrase).length < 8) throw new Error("PASSPHRASE_TOO_SHORT");
-
-  const salt = crypto.getRandomValues(u8(16));
-  const iv = crypto.getRandomValues(u8(12));
-  const iterations = 250_000;
-
-  const key = await pbkdf2Key(passphrase, salt, iterations);
-  const orgKeyBytes = fromB64(orgKeyB64);
-
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, orgKeyBytes);
-
-  const payload = {
-    v: 1,
-    iv: toB64(iv),
-    ct: toB64(new Uint8Array(ct)),
-  };
-
-  return {
-    wrapped_key: toB64(new TextEncoder().encode(JSON.stringify(payload))),
-    salt: toB64(salt),
-    kdf: JSON.stringify({ name: "PBKDF2", hash: "SHA-256", iterations }),
-  };
-}
-
-export async function unwrapOrgKeyFromRecovery(recoveryRow, passphrase) {
-  if (!recoveryRow?.wrapped_key || !recoveryRow?.salt || !recoveryRow?.kdf) {
-    throw new Error("NO_RECOVERY_BLOB");
-  }
-  if (!passphrase) throw new Error("MISSING_PASSPHRASE");
-
-  let kdf;
-  try {
-    kdf = JSON.parse(String(recoveryRow.kdf || "{}"));
-  } catch {
-    kdf = {};
-  }
-  const iterations = Number(kdf.iterations || 250000) || 250000;
-
-  const salt = fromB64(String(recoveryRow.salt));
-  const wrappedBytes = fromB64(String(recoveryRow.wrapped_key));
-  const payloadStr = new TextDecoder().decode(wrappedBytes);
-
-  let payload;
-  try {
-    payload = JSON.parse(payloadStr);
-  } catch {
-    throw new Error("BAD_RECOVERY_BLOB");
-  }
-
-  const iv = fromB64(String(payload.iv || ""));
-  const ct = fromB64(String(payload.ct || ""));
-
-  const key = await pbkdf2Key(passphrase, salt, iterations);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
-
-  return toB64(new Uint8Array(pt));
-}
-
-export async function saveRecoveryToServer(orgId, wrapped) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  if (!wrapped?.wrapped_key) throw new Error("MISSING_WRAPPED_KEY");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, {
-    method: "POST",
-    body: JSON.stringify(wrapped),
-  });
-}
-
-export async function loadRecoveryFromServer(orgId) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`);
-}
-
-export async function deleteRecoveryFromServer(orgId) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, { method: "DELETE" });
 }
