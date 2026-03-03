@@ -2,10 +2,11 @@
 import { api } from "../utils/api.js";
 
 /*
-  Pragmatic ZK v1
+  Pragmatic ZK v1 (+ Recovery Option A)
   - Device keypair: ECDH P-256 stored in IndexedDB (private) + public JWK in localStorage + server.
   - Org key: random 32 bytes; wrapped per member via ECDH(shared) -> HKDF -> AES-GCM.
   - Record encryption: AES-GCM with org key.
+  - Recovery (Option A): passphrase-derived key encrypts org key; ciphertext stored server-side.
 */
 
 const DB_NAME = "bondfire_zk";
@@ -14,6 +15,32 @@ const DEVICE_KEY_ID = "device_keypair_v1";
 const LS_PUB = "bf_device_public_jwk_v1";
 const LS_ORGKEY_CACHE_PREFIX = "bf_orgkey_cache_v1:";
 
+/* ---------------- base64 helpers ---------------- */
+function b64urlEncodeBytes(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function b64urlDecodeToBytes(s) {
+  if (typeof s !== "string") throw new Error("Invalid base64 payload (not a string)");
+  let t = s.trim().replace(/-/g, "+").replace(/_/g, "/");
+  // padding
+  while (t.length % 4) t += "=";
+  let bin;
+  try {
+    bin = atob(t);
+  } catch {
+    throw new Error("Invalid base64 payload (decode failed)");
+  }
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Back-compat aliases used by various patches/UI
+export const toB64 = b64urlEncodeBytes;
+export const fromB64 = b64urlDecodeToBytes;
 
 export function kidFromJwk(jwk) {
   try {
@@ -24,43 +51,6 @@ export function kidFromJwk(jwk) {
     return b64s.slice(0, 16) || "unknown";
   } catch {
     return "unknown";
-  }
-}
-
-function b64(bytes) {
-  let s = "";
-  bytes.forEach((b) => (s += String.fromCharCode(b)));
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-function unb64(input) {
-  if (input == null) return new Uint8Array();
-  let s = String(input).trim();
-
-  // Strip data URL prefix if it ever sneaks in.
-  if (s.startsWith("data:")) {
-    const idx = s.indexOf(",");
-    if (idx >= 0) s = s.slice(idx + 1);
-  }
-
-  // base64url -> base64
-  s = s.replace(/-/g, "+").replace(/_/g, "/");
-  // remove whitespace/newlines
-  s = s.replace(/\s+/g, "");
-  // keep only legal base64 chars
-  s = s.replace(/[^A-Za-z0-9+/=]/g, "");
-
-  // pad to multiple of 4
-  const pad = s.length % 4;
-  if (pad) s += "=".repeat(4 - pad);
-
-  try {
-    const bin = atob(s);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  } catch (e) {
-    const msg = e?.message || String(e);
-    throw new Error(`Invalid base64 payload (decode failed): ${msg}`);
   }
 }
 
@@ -75,6 +65,7 @@ function openDb() {
     req.onerror = () => reject(req.error);
   });
 }
+
 async function idbGet(key) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -85,6 +76,7 @@ async function idbGet(key) {
     req.onerror = () => reject(req.error);
   });
 }
+
 async function idbSet(key, val) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -121,14 +113,19 @@ export async function ensureDeviceKeypair() {
   await idbSet(DEVICE_KEY_ID, { pubJwk, privJwk });
   localStorage.setItem(LS_PUB, JSON.stringify(pubJwk));
 
-  // register public key with server
-  try { await api("/api/auth/keys", { method: "POST", body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }) }); } catch {}
+  try {
+    await api("/api/auth/keys", { method: "POST", body: JSON.stringify({ public_key: JSON.stringify(pubJwk) }) });
+  } catch {
+    // ignore
+  }
+
   return { pubJwk, privJwk };
 }
 
 async function importPriv(privJwk) {
   return crypto.subtle.importKey("jwk", privJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
 }
+
 async function importPub(pubJwk) {
   return crypto.subtle.importKey("jwk", pubJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
 }
@@ -144,7 +141,7 @@ export async function wrapForMember(orgKeyBytes, memberPublicJwk) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, orgKeyBytes);
 
-  return JSON.stringify({ v: 1, sender_pub: device.pubJwk, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) });
+  return JSON.stringify({ v: 1, sender_pub: device.pubJwk, salt: toB64(salt), iv: toB64(iv), ct: toB64(new Uint8Array(ct)) });
 }
 
 export async function unwrapOrgKey(wrappedStr) {
@@ -152,9 +149,9 @@ export async function unwrapOrgKey(wrappedStr) {
   const priv = await importPriv(device.privJwk);
 
   const wrapped = JSON.parse(wrappedStr);
-  const salt = unb64(wrapped.salt);
-  const iv = unb64(wrapped.iv);
-  const ct = unb64(wrapped.ct);
+  const salt = fromB64(wrapped.salt);
+  const iv = fromB64(wrapped.iv);
+  const ct = fromB64(wrapped.ct);
 
   const senderPubJwk = wrapped.sender_pub;
   if (!senderPubJwk) throw new Error("MISSING_SENDER_PUB");
@@ -172,24 +169,35 @@ export function randomOrgKey() {
   return k;
 }
 
+function assertOrgKeyBytes(orgKeyBytes) {
+  if (!(orgKeyBytes instanceof Uint8Array)) {
+    throw new Error("ORG_KEY_NOT_BYTES");
+  }
+  // We want 32 bytes for AES-256.
+  if (orgKeyBytes.byteLength !== 32 && orgKeyBytes.byteLength !== 16) {
+    throw new Error("ORG_KEY_BAD_LENGTH");
+  }
+}
+
 export async function encryptWithOrgKey(orgKeyBytes, plaintext) {
+  assertOrgKeyBytes(orgKeyBytes);
   const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const pt = new TextEncoder().encode(plaintext);
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, pt);
-  return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(new Uint8Array(ct)) });
+  return JSON.stringify({ v: 1, iv: toB64(iv), ct: toB64(new Uint8Array(ct)) });
 }
 
 export async function decryptWithOrgKey(orgKeyBytes, blobStr) {
-  const blob = (typeof blobStr === "string") ? JSON.parse(blobStr) : (blobStr || {});
+  assertOrgKeyBytes(orgKeyBytes);
+  const blob = typeof blobStr === "string" ? JSON.parse(blobStr) : blobStr || {};
   const key = await crypto.subtle.importKey("raw", orgKeyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
-  const iv = unb64(blob.iv);
-  const ct = unb64(blob.ct);
+  const iv = fromB64(blob.iv);
+  const ct = fromB64(blob.ct);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
   return new TextDecoder().decode(pt);
 }
 
-// Convenience helpers for encrypting structured records.
 export async function encryptJsonWithOrgKey(orgKeyBytes, obj) {
   return encryptWithOrgKey(orgKeyBytes, JSON.stringify(obj));
 }
@@ -200,156 +208,117 @@ export async function decryptJsonWithOrgKey(orgKeyBytes, blobStr) {
 }
 
 export function cacheOrgKey(orgId, keyBytes) {
-  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, b64(keyBytes));
+  // Accept bytes only. If something passes a string here, you're about to brick yourself.
+  if (typeof keyBytes === "string") {
+    // If it is base64, decode to bytes.
+    const decoded = fromB64(keyBytes);
+    keyBytes = decoded;
+  }
+  assertOrgKeyBytes(keyBytes);
+  localStorage.setItem(LS_ORGKEY_CACHE_PREFIX + orgId, toB64(keyBytes));
 }
 
 export function getCachedOrgKey(orgId) {
-  // orgId comes from both HashRouter and BrowserRouter paths. Be defensive.
   const candidates = [];
   try { if (orgId) candidates.push(String(orgId)); } catch {}
   try { if (orgId) candidates.push(encodeURIComponent(String(orgId))); } catch {}
   try { if (orgId) candidates.push(decodeURIComponent(String(orgId))); } catch {}
-  // also try double decode (we've seen it happen in the wild)
   try { if (orgId) candidates.push(decodeURIComponent(decodeURIComponent(String(orgId)))); } catch {}
 
-  // Preferred: canonical cache key written by cacheOrgKey()
   for (const id of candidates) {
     try {
       const b64key = localStorage.getItem(LS_ORGKEY_CACHE_PREFIX + id);
       if (!b64key) continue;
-      return unb64(b64key);
-    } catch {}
+      return fromB64(b64key);
+    } catch {
+      // ignore
+    }
   }
 
-  // Back-compat: older builds stored the raw base64 string under bf_org_key_${orgId}
   for (const id of candidates) {
     try {
       const b64key = localStorage.getItem(`bf_org_key_${id}`);
       if (!b64key) continue;
-      // Some legacy builds stored JSON-encoded byte arrays.
       if (String(b64key).trim().startsWith("[")) {
         try {
           const arr = JSON.parse(b64key);
           if (Array.isArray(arr)) return new Uint8Array(arr);
         } catch {}
       }
-      return unb64(b64key);
-    } catch {}
+      return fromB64(b64key);
+    } catch {
+      // ignore
+    }
   }
 
   return null;
 }
 
-
-/* ---------------- Base64 aliases (legacy callers) ---------------- */
-export function toB64(u8) { return b64(u8); }
-export function fromB64(s) { return unb64(s); }
-
-/* ---------------- Recovery wrap (option A) ----------------
-   Purpose: survive localStorage/IndexedDB wipes.
-   We store a *password-derived* encrypted copy of the org key on the server,
-   scoped to (org_id, user_id). Clearing browser storage then only requires the
-   user to re-enter their recovery passphrase to restore the org key locally.
-*/
-
-function u8(n) {
-  return new Uint8Array(n);
-}
-
-async function pbkdf2Key(passphrase, saltU8, iterations) {
-  const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey(
+/* ---------------- Recovery (Option A) ---------------- */
+async function pbkdf2Key(passphrase, saltBytes) {
+  const base = await crypto.subtle.importKey(
     "raw",
-    enc.encode(String(passphrase || "")),
-    { name: "PBKDF2" },
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
     false,
     ["deriveKey"]
   );
-
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: saltU8, iterations, hash: "SHA-256" },
-    baseKey,
+    { name: "PBKDF2", salt: saltBytes, iterations: 210_000, hash: "SHA-256" },
+    base,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
 }
 
-export async function wrapOrgKeyForRecovery(orgKeyB64, passphrase) {
-  if (!orgKeyB64) throw new Error("MISSING_ORG_KEY");
-  if (!passphrase || String(passphrase).length < 8) throw new Error("PASSPHRASE_TOO_SHORT");
-
-  const salt = crypto.getRandomValues(u8(16));
-  const iv = crypto.getRandomValues(u8(12));
-  const iterations = 250_000;
-
-  const key = await pbkdf2Key(passphrase, salt, iterations);
-  const orgKeyBytes = fromB64(orgKeyB64);
-
+export async function wrapOrgKeyForRecovery(orgKeyBytes, passphrase) {
+  if (!passphrase || String(passphrase).length < 8) throw new Error("Passphrase too short (min 8 chars).");
+  assertOrgKeyBytes(orgKeyBytes);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await pbkdf2Key(passphrase, salt);
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, orgKeyBytes);
-
-  const payload = {
+  return {
     v: 1,
+    kdf: { name: "PBKDF2", hash: "SHA-256", iterations: 210000 },
+    salt: toB64(salt),
     iv: toB64(iv),
     ct: toB64(new Uint8Array(ct)),
-  };
-
-  return {
-    wrapped_key: toB64(new TextEncoder().encode(JSON.stringify(payload))),
-    salt: toB64(salt),
-    kdf: JSON.stringify({ name: "PBKDF2", hash: "SHA-256", iterations }),
   };
 }
 
 export async function unwrapOrgKeyFromRecovery(recoveryRow, passphrase) {
-  if (!recoveryRow?.wrapped_key || !recoveryRow?.salt || !recoveryRow?.kdf) {
-    throw new Error("NO_RECOVERY_BLOB");
-  }
-  if (!passphrase) throw new Error("MISSING_PASSPHRASE");
+  if (!passphrase) throw new Error("Missing passphrase");
+  const payload = recoveryRow?.payload || recoveryRow?.wrapped || recoveryRow;
+  if (!payload) throw new Error("Missing recovery payload");
 
-  let kdf;
-  try {
-    kdf = JSON.parse(String(recoveryRow.kdf || "{}"));
-  } catch {
-    kdf = {};
-  }
-  const iterations = Number(kdf.iterations || 250000) || 250000;
+  const v = payload.v ?? payload.version ?? 1;
+  if (Number(v) !== 1) throw new Error("Unsupported recovery version");
 
-  const salt = fromB64(String(recoveryRow.salt));
-  const wrappedBytes = fromB64(String(recoveryRow.wrapped_key));
-  const payloadStr = new TextDecoder().decode(wrappedBytes);
+  const salt = fromB64(payload.salt);
+  const iv = fromB64(payload.iv);
+  const ct = fromB64(payload.ct);
 
-  let payload;
-  try {
-    payload = JSON.parse(payloadStr);
-  } catch {
-    throw new Error("BAD_RECOVERY_BLOB");
-  }
-
-  const iv = fromB64(String(payload.iv || ""));
-  const ct = fromB64(String(payload.ct || ""));
-
-  const key = await pbkdf2Key(passphrase, salt, iterations);
+  const key = await pbkdf2Key(passphrase, salt);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
-
-  return toB64(new Uint8Array(pt));
+  const bytes = new Uint8Array(pt);
+  assertOrgKeyBytes(bytes);
+  return bytes;
 }
 
-export async function saveRecoveryToServer(orgId, wrapped) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  if (!wrapped?.wrapped_key) throw new Error("MISSING_WRAPPED_KEY");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, {
+export async function saveRecoveryToServer(orgId, wrappedPayload) {
+  // Server should store this *for the current user + org*.
+  return api(`/api/orgs/${orgId}/zk/recovery`, {
     method: "POST",
-    body: JSON.stringify(wrapped),
+    body: JSON.stringify({ payload: wrappedPayload }),
   });
 }
 
 export async function loadRecoveryFromServer(orgId) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`);
+  return api(`/api/orgs/${orgId}/zk/recovery`, { method: "GET" });
 }
 
 export async function deleteRecoveryFromServer(orgId) {
-  if (!orgId) throw new Error("MISSING_ORG_ID");
-  return api(`/api/orgs/${encodeURIComponent(orgId)}/recovery`, { method: "DELETE" });
+  return api(`/api/orgs/${orgId}/zk/recovery`, { method: "DELETE" });
 }
