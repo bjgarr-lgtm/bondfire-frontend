@@ -7,26 +7,27 @@ import { ensureZkSchema } from "../../../_lib/zkSchema.js";
 
 export async function onRequestGet(ctx) {
   try {
-    const { params, env, request } = ctx;
+    const { params, env } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
-    if (!gate.ok) return gate.resp;
+    const gate = await requireOrgRole(ctx, orgId, "member");
     const userId = gate.user.sub;
 
     const { db } = await ensureZkSchema(env);
 
-    const cols = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
-    const names = new Set((cols?.results || []).map((c) => c.name));
-    const hasRecoveryPayload = names.has("recovery_payload");
+    // Compatibility: older environments created org_key_recovery with
+    // (wrapped_key, salt, kdf, updated_at) instead of (recovery_payload, updated_at).
+    const info = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
+    const cols = new Set((info?.results || []).map((c) => c.name));
+    const hasRecoveryPayload = cols.has("recovery_payload");
 
     const row = await db
       .prepare(
         hasRecoveryPayload
-          ? `SELECT recovery_payload AS payload_text, updated_at
+          ? `SELECT recovery_payload, updated_at
                FROM org_key_recovery
               WHERE org_id = ? AND user_id = ?`
-          : `SELECT wrapped_key AS payload_text, updated_at
+          : `SELECT wrapped_key AS recovery_payload, updated_at
                FROM org_key_recovery
               WHERE org_id = ? AND user_id = ?`
       )
@@ -37,19 +38,21 @@ export async function onRequestGet(ctx) {
       return ok({ has_recovery: false, updated_at: null });
     }
 
-    let payload = null;
-    try {
-      payload = JSON.parse(row.payload_text);
-    } catch {
-      // Keep it raw if somehow not JSON (older builds)
-      payload = row.payload_text;
+    const raw = row?.recovery_payload;
+    let payload = raw;
+    if (typeof raw === "string") {
+      const t = raw.trim();
+      if (t.startsWith("{") || t.startsWith("[")) {
+        try {
+          payload = JSON.parse(t);
+        } catch {
+          payload = raw;
+        }
+      }
     }
 
-    return ok({
-      has_recovery: true,
-      updated_at: row.updated_at,
-      payload,
-    });
+    // Frontend expects { payload: { v, kdf, salt, iv, ct } }
+    return ok({ has_recovery: true, updated_at: row.updated_at, payload });
   } catch (e) {
     return bad(500, e?.message || String(e));
   }
@@ -60,23 +63,22 @@ export async function onRequestPost(ctx) {
     const { params, env, request } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
-    if (!gate.ok) return gate.resp;
+    const gate = await requireOrgRole(ctx, orgId, "member");
     const userId = gate.user.sub;
 
     const { db } = await ensureZkSchema(env);
 
-    const cols = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
-    const names = new Set((cols?.results || []).map((c) => c.name));
-    const hasRecoveryPayload = names.has("recovery_payload");
-
     const body = await readJSON(request);
     // Accept { payload }, { recovery }, { wrapped }, or raw object.
-    const payload = body?.payload ?? body?.recovery ?? body?.wrapped ?? body;
-    if (!payload) return bad(400, "MISSING_RECOVERY_PAYLOAD");
+    const recovery = body?.payload ?? body?.recovery ?? body?.wrapped ?? body;
+    if (!recovery) return bad(400, "MISSING_RECOVERY_PAYLOAD");
 
-    const payloadText = typeof payload === "string" ? payload : JSON.stringify(payload);
+    const payloadText = typeof recovery === "string" ? recovery : JSON.stringify(recovery);
     const now = Date.now();
+
+    const info = await db.prepare("PRAGMA table_info(org_key_recovery)").all();
+    const cols = new Set((info?.results || []).map((c) => c.name));
+    const hasRecoveryPayload = cols.has("recovery_payload");
 
     if (hasRecoveryPayload) {
       await db
@@ -90,14 +92,7 @@ export async function onRequestPost(ctx) {
         .bind(orgId, userId, payloadText, now)
         .run();
     } else {
-      // Legacy schema compatibility: org_key_recovery(org_id,user_id,wrapped_key,salt,kdf,updated_at)
-      // We store the full JSON blob into wrapped_key so the client can round-trip its v1 payload.
-      const salt = typeof payload === "object" && payload?.salt ? String(payload.salt) : "legacy";
-      const kdf =
-        typeof payload === "object" && payload?.kdf
-          ? JSON.stringify(payload.kdf)
-          : JSON.stringify({ name: "PBKDF2", hash: "SHA-256", iterations: 210000 });
-
+      // Legacy schema from /api/orgs/:orgId/recovery expects NOT NULL wrapped_key/salt/kdf.
       await db
         .prepare(
           `INSERT INTO org_key_recovery (org_id, user_id, wrapped_key, salt, kdf, updated_at)
@@ -108,7 +103,7 @@ export async function onRequestPost(ctx) {
              kdf = excluded.kdf,
              updated_at = excluded.updated_at`
         )
-        .bind(orgId, userId, payloadText, salt, kdf, now)
+        .bind(orgId, userId, payloadText, "-", "-", now)
         .run();
     }
 
@@ -120,11 +115,10 @@ export async function onRequestPost(ctx) {
 
 export async function onRequestDelete(ctx) {
   try {
-    const { params, env, request } = ctx;
+    const { params, env } = ctx;
     const orgId = params.orgId;
 
-    const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
-    if (!gate.ok) return gate.resp;
+    const gate = await requireOrgRole(ctx, orgId, "member");
     const userId = gate.user.sub;
 
     const { db } = await ensureZkSchema(env);
