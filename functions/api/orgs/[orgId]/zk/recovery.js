@@ -141,18 +141,27 @@ export async function onRequestPost(ctx) {
         )
         .bind(orgId, userId, payloadText, now)
         .run();
-    } else {
-      await db
-        .prepare(
-          `INSERT INTO org_key_recovery (org_id, user_id, wrapped_key, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(org_id, user_id) DO UPDATE SET
-             wrapped_key = excluded.wrapped_key,
-             updated_at = excluded.updated_at`
-        )
-        .bind(orgId, userId, payloadText, now)
-        .run();
-    }
+      } else {
+        await db
+          .prepare(
+            `INSERT INTO org_key_recovery (org_id, user_id, wrapped_key, salt, kdf, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(org_id, user_id) DO UPDATE SET
+              wrapped_key = excluded.wrapped_key,
+              salt = excluded.salt,
+              kdf = excluded.kdf,
+              updated_at = excluded.updated_at`
+          )
+          .bind(
+            orgId,
+            userId,
+            payloadText,
+            "",   // satisfy NOT NULL salt
+            "",   // satisfy NOT NULL kdf
+            now
+          )
+          .run();
+      }
 
     return ok({ has_recovery: true, updated_at: now, payload });
   } catch (e) {
