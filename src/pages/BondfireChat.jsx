@@ -74,13 +74,50 @@ function verifiedKeyFor(userId, deviceId) {
   return `bf_mx_verified_${u}_${d}`;
 }
 
+function safeKeyPart(s) {
+  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+}
+
+// Persistent salt so we can safely "rotate" IndexedDB namespaces when the SDK
+// detects the classic "account in the store doesn't match" mismatch.
+function storeSaltKey(orgId, userId, deviceId) {
+  return `bf_mx_store_salt_${safeKeyPart(orgId)}_${safeKeyPart(userId)}_${safeKeyPart(deviceId)}`;
+}
+
+function makeSalt() {
+  try {
+    return crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  } catch {
+    return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function getOrCreateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const existing = readJSON(k, "");
+  if (existing) return existing;
+  const salt = makeSalt();
+  writeJSON(k, salt);
+  return salt;
+}
+
+function rotateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const salt = makeSalt();
+  writeJSON(k, salt);
+  return salt;
+}
+
 const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
 }
 
 function safeIdForEvent(ev) {
-  return ev?.getId?.() || `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`;
+  return (
+    ev?.getId?.() ||
+    `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`
+  );
 }
 
 function eventToMsg(ev) {
@@ -153,6 +190,7 @@ export default function BondfireChat() {
   const verifierRef = useRef(null);
   const activeRoomIdRef = useRef(null);
   const stoppedRef = useRef(false);
+  const recoveryAttemptRef = useRef(0);
 
   const log = (...a) => setStatus(`[${ts()}] ${a.join(" ")}`);
 
@@ -184,8 +222,10 @@ export default function BondfireChat() {
 
   const markThisDeviceVerified = React.useCallback(() => {
     try {
-      const uidKey = clientRef.current?.getUserId?.() || saved?.userId || userId || "";
-      const didKey = clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
+      const uidKey =
+        clientRef.current?.getUserId?.() || saved?.userId || userId || "";
+      const didKey =
+        clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
       const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
@@ -194,13 +234,18 @@ export default function BondfireChat() {
     }
   }, [saved?.userId, saved?.deviceId, userId, deviceId]);
 
-  /* ---------- boot / resume (MOUNT-ONLY) ---------- */
-  useEffect(() => {
-    // do not start without session
-    if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
+  function teardownClient(client) {
+    try {
+      client?.removeAllListeners?.();
+    } catch {}
+    try {
+      client?.stopClient?.();
+    } catch {}
+  }
 
-    // if a client already exists, do nothing
-    if (clientRef.current) return;
+  /* ---------- boot / resume ---------- */
+  useEffect(() => {
+    if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
 
     stoppedRef.current = false;
 
@@ -209,13 +254,10 @@ export default function BondfireChat() {
     const token = saved.accessToken;
     const did = saved.deviceId || "";
 
-    // Keep state aligned with storage
     setUserId(uid);
     setAccessToken(token);
     setDeviceId(did);
 
-    // Reuse an existing Matrix client for this tab to avoid the fake
-    // "Connecting…" + "verify again" nonsense when you switch tabs.
     const g = getGlobalMatrix();
     const canReuse =
       g &&
@@ -225,22 +267,106 @@ export default function BondfireChat() {
       g.accessToken === token &&
       (g.deviceId || "") === did;
 
-    let client = null;
+    // If we can reuse, just bind listeners to the existing client.
+    // If not, create a new client once (and only retry once on crypto-store mismatch).
+    let client = canReuse ? g.client : null;
+
     let store = null;
     let cryptoStore = null;
-    if (canReuse) {
-      client = g.client;
-      log("Connected (resumed)");
-    } else {
+
+    const bindListeners = () => {
+      if (!client) return;
+
+      function refreshRooms() {
+        try {
+          const rs = client
+            .getVisibleRooms()
+            .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
+            .sort(
+              (a, b) =>
+                (b.getLastActiveTimestamp?.() || 0) -
+                (a.getLastActiveTimestamp?.() || 0)
+            );
+
+          setRooms(
+            rs.map((r) => ({
+              id: r.roomId,
+              name: r.name || r.getCanonicalAlias?.() || r.roomId,
+              encrypted: !!r.isEncrypted?.(),
+            }))
+          );
+        } catch {
+          // ignore
+        }
+      }
+
+      function onTimeline(ev, room, toStartOfTimeline) {
+        if (stoppedRef.current) return;
+        if (toStartOfTimeline) return;
+        if (ev?.getType?.() !== "m.room.message") return;
+
+        const current = activeRoomIdRef.current;
+        if (!current || room?.roomId !== current) return;
+
+        const m = eventToMsg(ev);
+        setMessages((prev) => {
+          if (prev.some((x) => x.id === m.id)) return prev;
+          return [...prev, m];
+        });
+      }
+
+      function onVerificationReq(req) {
+        setVerificationReq(req);
+        setSasData(null);
+        setVerifyMsg("");
+        log("Verification request from", req.otherUserId, req.otherDeviceId);
+
+        req.on?.("change", () => {
+          setVerificationReq(req);
+        });
+      }
+
+      function onSync(state) {
+        if (state === "PREPARED") {
+          setReady(true);
+          setStatus(canReuse ? "Connected (resumed)" : "Connected");
+          refreshRooms();
+        }
+      }
+
+      client.on("sync", onSync);
+      client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+      client.on("Room.timeline", onTimeline);
+
+      return () => {
+        try {
+          client.removeListener?.("sync", onSync);
+          client.removeListener?.(
+            CryptoEvent.VerificationRequestReceived,
+            onVerificationReq
+          );
+          client.removeListener?.("Room.timeline", onTimeline);
+        } catch {}
+      };
+    };
+
+    let unbind = null;
+
+    const startFreshClient = async () => {
+      // Important: do NOT create multiple clients in a render loop.
+      // This function is only called from inside this effect.
+      const salt = getOrCreateStoreSalt(orgId, uid, did);
+      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}_${safeKeyPart(salt)}`;
+
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${uid}`,
+        dbName: `bf_mx_store_${storeKey}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${uid}`
+        `bf_mx_crypto_${storeKey}`
       );
 
       client = createClient({
@@ -252,6 +378,7 @@ export default function BondfireChat() {
         cryptoStore,
       });
 
+      clientRef.current = client;
       setGlobalMatrix({
         client,
         baseUrl,
@@ -261,119 +388,82 @@ export default function BondfireChat() {
       });
 
       log("Connecting…");
-    }
 
-    clientRef.current = client;
-
-    function refreshRooms() {
       try {
-        const rs = client
-          .getVisibleRooms()
-          .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
-          .sort(
-            (a, b) =>
-              (b.getLastActiveTimestamp?.() || 0) -
-              (a.getLastActiveTimestamp?.() || 0)
+        await store.startup();
+      } catch (e) {
+        log("Store startup failed:", e?.message || e);
+      }
+
+      try {
+        if (typeof client.initRustCrypto === "function") {
+          await client.initRustCrypto();
+          setCryptoReady(true);
+        } else if (typeof client.initCrypto === "function") {
+          await client.initCrypto();
+          setCryptoReady(true);
+        } else {
+          setCryptoReady(false);
+          log("Crypto init not available");
+        }
+      } catch (e) {
+        setCryptoReady(false);
+        const msg = String(e?.message || e);
+        log("Crypto init failed:", msg);
+
+        // Auto-recover from IndexedDB store mismatch ONCE, without a reload loop.
+        if (
+          msg.toLowerCase().includes("account in the store") &&
+          msg.toLowerCase().includes("doesn't match") &&
+          recoveryAttemptRef.current < 1
+        ) {
+          recoveryAttemptRef.current += 1;
+
+          // Rotate salt, teardown this client, and start again.
+          try {
+            rotateStoreSalt(orgId, uid, did);
+          } catch {}
+
+          try {
+            teardownClient(client);
+          } catch {}
+
+          try {
+            clearGlobalMatrix();
+          } catch {}
+
+          // Clear ref so we don't keep using the bad client.
+          clientRef.current = null;
+          client = null;
+
+          setStatus(
+            `[${ts()}] Crypto store mismatch. Resetting local store and reconnecting…`
           );
 
-        setRooms(
-          rs.map((r) => ({
-            id: r.roomId,
-            name: r.name || r.getCanonicalAlias?.() || r.roomId,
-            encrypted: !!r.isEncrypted?.(),
-          }))
-        );
-      } catch (e) {
-        // ignore
-      }
-    }
-
-    function onTimeline(ev, room, toStartOfTimeline) {
-      if (stoppedRef.current) return;
-      if (toStartOfTimeline) return;
-      if (ev?.getType?.() !== "m.room.message") return;
-
-      const current = activeRoomIdRef.current;
-      if (!current || room?.roomId !== current) return;
-
-      const m = eventToMsg(ev);
-
-      // De-dupe and update
-      setMessages((prev) => {
-        if (prev.some((x) => x.id === m.id)) return prev;
-        return [...prev, m];
-      });
-    }
-
-    function onVerificationReq(req) {
-      setVerificationReq(req);
-      setSasData(null);
-      setVerifyMsg("");
-      log("Verification request from", req.otherUserId, req.otherDeviceId);
-
-      req.on?.("change", () => {
-        // keep state warm
-        setVerificationReq(req);
-      });
-    }
-
-    function onSync(state) {
-      if (state === "PREPARED") {
-        setReady(true);
-        setStatus("Connected");
-        refreshRooms();
-      }
-    }
-
-    (async () => {
-      if (!canReuse) {
-        try {
-          await store.startup();
-        } catch (e) {
-          log("Store startup failed:", e?.message || e);
+          // Small delay to let IndexedDB close cleanly.
+          await new Promise((r) => setTimeout(r, 150));
+          if (stoppedRef.current) return;
+          await startFreshClient();
+          return;
         }
-
-        try {
-          if (typeof client.initRustCrypto === "function") {
-            await client.initRustCrypto();
-            setCryptoReady(true);
-          } else if (typeof client.initCrypto === "function") {
-            await client.initCrypto();
-            setCryptoReady(true);
-          } else {
-            setCryptoReady(false);
-            log("Crypto init not available");
-          }
-        } catch (e) {
-          setCryptoReady(false);
-          log("Crypto init failed:", e?.message || e);
-        }
-      } else {
-        // Client is already running; crypto may already be initialized.
-        setCryptoReady(true);
       }
-
 
       // Determine whether THIS device is verified (best-effort).
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
-        const myDid = client.getDeviceId?.() || did || saved?.deviceId || "";
+        const myDid = client.getDeviceId?.() || did || "";
         const key = verifiedKeyFor(myUid, myDid);
 
         let verified = key ? !!readJSON(key, false) : false;
 
-        // Some matrix-js-sdk builds expose a verification-status helper. If present, trust it.
         if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
           const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
-          if (typeof res?.isVerified === "function") {
-            verified = !!res.isVerified();
-          } else {
-            verified =
-              res === true ||
-              res?.verified === true ||
-              res?.isCrossSigningVerified === true;
-          }
+          verified =
+            res === true ||
+            res?.isVerified === true ||
+            res?.verified === true ||
+            res?.isCrossSigningVerified === true;
         }
 
         setDeviceVerified(!!verified);
@@ -381,92 +471,98 @@ export default function BondfireChat() {
         // ignore
       }
 
-      // If a verification request already exists (e.g. app reloaded mid-flow),
-      // hydrate it so the UI actually shows something.
+      // Hydrate any in-progress verification
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
-        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid);
-        if (pending && pending.length) onVerificationReq(pending[0]);
+        const pending =
+          crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+        if (pending.length) {
+          setVerificationReq(pending[0]);
+        }
       } catch {
         // ignore
       }
 
-      client.on("sync", onSync);
+      unbind = bindListeners();
+      client.startClient({ initialSyncLimit: 30 });
+    };
 
-      client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
-      client.on("Room.timeline", onTimeline);
+    (async () => {
+      if (canReuse) {
+        clientRef.current = client;
+        setCryptoReady(true);
+        setStatus("Connected (resumed)");
+        unbind = bindListeners();
 
-      if (!canReuse) client.startClient({ initialSyncLimit: 30 });
+        // Best-effort verification flag
+        try {
+          const crypto = client.getCrypto?.();
+          const myUid = client.getUserId?.() || uid;
+          const myDid = client.getDeviceId?.() || did || "";
+          const key = verifiedKeyFor(myUid, myDid);
+          let verified = key ? !!readJSON(key, false) : false;
+
+          if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
+            const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
+            verified =
+              res === true ||
+              res?.isVerified === true ||
+              res?.verified === true ||
+              res?.isCrossSigningVerified === true;
+          }
+
+          setDeviceVerified(!!verified);
+        } catch {
+          // ignore
+        }
+      } else {
+        await startFreshClient();
+      }
     })();
 
     return () => {
       stoppedRef.current = true;
       try {
-        // Keep the client alive globally; just detach listeners bound to this component.
-        client.removeListener?.("sync", onSync);
-        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
-        client.removeListener?.("Room.timeline", onTimeline);
+        unbind?.();
       } catch {}
+      // Keep the global client alive. Just detach UI bindings.
       clientRef.current = null;
     };
-  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId]);
+  }, [orgId, saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId]);
 
   /* -------- verification actions -------- */
   async function requestOwnVerification() {
-    const client = clientRef.current;
+    const client = clientRef.current || getGlobalMatrix()?.client;
     if (!client) return;
     try {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
-
-      if (!crypto) {
-        setVerifyMsg("Crypto is not initialized. Try reloading or use another Matrix client to verify.");
+      if (!crypto?.requestOwnUserVerification) {
+        setVerifyMsg(
+          "This Matrix SDK build can't request verification (missing requestOwnUserVerification)."
+        );
         return;
       }
-
-      // Best case: modern CryptoApi
-      if (typeof crypto.requestOwnUserVerification === "function") {
-        const req = await crypto.requestOwnUserVerification();
-        setVerificationReq(req);
-        setSasData(null);
-        setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
-        return;
-      }
-
-      // Fallback: request verification against another known device.
-      if (typeof crypto.requestDeviceVerification === "function") {
-        const myUid = client.getUserId?.() || saved?.userId || userId;
-        const myDid = client.getDeviceId?.() || saved?.deviceId;
-        const devices = client.getStoredDevicesForUser?.(myUid) || [];
-        const other = devices.find((d) => d?.deviceId && d.deviceId !== myDid);
-
-        if (!other?.deviceId) {
-          setVerifyMsg("No other device found for this Matrix account. Open Element (or another client) on a second device and start verification there.");
-          return;
-        }
-
-        const req = await crypto.requestDeviceVerification(myUid, other.deviceId);
-        setVerificationReq(req);
-        setSasData(null);
-        setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
-        return;
-      }
-
-      // Legacy crypto: can't initiate from here.
-      setVerifyMsg("This Matrix crypto build cannot initiate verification. Start it from Element (or another client) and then accept here.");
+      const req = await crypto.requestOwnUserVerification();
+      setVerificationReq(req);
+      setSasData(null);
+      setVerifyMsg(
+        "Verification request sent. Accept it on your other device, then click Start SAS."
+      );
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
   }
 
   function checkPendingVerification() {
-    const client = clientRef.current;
+    const client = clientRef.current || getGlobalMatrix()?.client;
     if (!client) return;
     try {
       const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
-      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      const pending =
+        crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
         setVerificationReq(pending[0]);
         setVerifyMsg("Found an in-progress verification. Continue below.");
@@ -497,7 +593,6 @@ export default function BondfireChat() {
     const req = verificationReq;
     if (!req) return;
 
-    // If we already started a verifier, do not double-start.
     if (verifierRef.current) {
       setVerifyMsg("SAS already started. Use Confirm or Doesn’t match.");
       return;
@@ -511,14 +606,11 @@ export default function BondfireChat() {
       verifierRef.current = verifier;
 
       verifier.on(VerifierEvent.ShowSas, (sas) => {
-        // matrix-js-sdk gives { sas: {emoji|decimal}, confirm, mismatch }
         const payload = sas?.sas || {};
         const emoji = Array.isArray(payload.emoji)
           ? payload.emoji
               .map((e) => {
-                // tuple form: ["🐶", "dog"]
                 if (Array.isArray(e)) return [e[0], e[1]];
-                // object form: { emoji: "🐶", description: "dog" }
                 if (e && typeof e === "object") return [e.emoji, e.description || e.name];
                 return null;
               })
@@ -544,12 +636,11 @@ export default function BondfireChat() {
         cleanupVerification(`Cancelled: ${e?.reason || "unknown"}`);
       });
 
-      // Some flows do not emit Done cleanly on this side.
       verifier.on?.("change", () => {
         try {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
-        cleanupVerification("Verified ✅");
+            cleanupVerification("Verified ✅");
           }
         } catch {
           // ignore
@@ -567,7 +658,6 @@ export default function BondfireChat() {
     try {
       await sasData?.confirm?.();
       setVerifyMsg("Confirmed. Waiting for other device…");
-      // In case other side never sends Done back, clear after a bit.
       setTimeout(() => {
         if (verifierRef.current) markThisDeviceVerified();
         cleanupVerification("Verified ✅");
@@ -614,6 +704,8 @@ export default function BondfireChat() {
       setDeviceId(next.deviceId);
 
       setPassword("");
+
+      // Force a route refresh without a full reload.
       window.location.hash = window.location.hash;
     } catch (err) {
       log("Login failed:", err?.message || "Unknown error");
@@ -621,15 +713,13 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_`);
+    removeKey(`bf_matrix_${orgId}`);
 
-    // also clear local verified flag for this device
     try {
       const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
-    } catch {
-      // ignore
-    }
+    } catch {}
+
     setDeviceVerified(false);
 
     setUserId("");
@@ -643,23 +733,23 @@ export default function BondfireChat() {
     setMsg("");
     cleanupVerification("");
 
-    if (clientRef.current) {
-      try {
-        clientRef.current.stopClient();
-        clientRef.current.removeAllListeners();
-      } catch {}
-      clientRef.current = null;
-    }
-
+    // Do NOT stop the global client here unless you explicitly want to blow it away.
+    // Logout means “forget this session in Bondfire”, so we kill the global client too.
+    const g = getGlobalMatrix();
+    if (g?.client) teardownClient(g.client);
     clearGlobalMatrix();
 
     log("Logged out");
   };
 
   const resetMatrixStorage = () => {
-    // fixes the "store account mismatch" trap
-    // kill session + also nuke local indexeddb/crypto by changing dbName key space
-    removeKey(`bf_matrix_${orgId}`);
+    // Rotate salt so next boot uses a fresh IndexedDB namespace.
+    try {
+      const uid = saved?.userId || userId || "";
+      const did = saved?.deviceId || deviceId || "";
+      if (uid && did) rotateStoreSalt(orgId, uid, did);
+    } catch {}
+
     logout();
   };
 
@@ -668,7 +758,7 @@ export default function BondfireChat() {
     setActiveRoomId(roomId);
     setMessages([]);
 
-    const client = clientRef.current;
+    const client = clientRef.current || getGlobalMatrix()?.client;
     if (!client) return;
 
     const room = client.getRoom(roomId);
@@ -679,19 +769,17 @@ export default function BondfireChat() {
       (e) => e.getType?.() === "m.room.message"
     );
 
-    const mapped = evs.map(eventToMsg);
-    setMessages(mapped);
+    setMessages(evs.map(eventToMsg));
   };
 
   const send = async (e) => {
     e.preventDefault();
-    const client = clientRef.current;
+    const client = clientRef.current || getGlobalMatrix()?.client;
     if (!client || !activeRoomId || !msg.trim()) return;
 
     const body = msg.trim();
     setMsg("");
 
-    // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
@@ -724,6 +812,11 @@ export default function BondfireChat() {
     const sorted = [...base].sort((a, b) => a.ts - b.ts);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
+
+  const supportsOwnVerification = useMemo(() => {
+    const c = clientRef.current || getGlobalMatrix()?.client;
+    return !!c?.getCrypto?.()?.requestOwnUserVerification;
+  }, [cryptoReady, ready, userId, deviceId, orgId]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -770,13 +863,19 @@ export default function BondfireChat() {
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
-              <div className="helper">This device is verified for this account. You should be able to read and send E2EE messages in encrypted rooms. 🔒</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="btn" onClick={requestOwnVerification}>
-                  Re-verify (optional)
-                </button>
+              <div className="helper">
+                This device is verified for this account. You should be able to read
+                and send E2EE messages in encrypted rooms. 🔒
               </div>
-            </>) : verificationReq ? (
+              {supportsOwnVerification ? (
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button className="btn" onClick={requestOwnVerification}>
+                    Re-verify (optional)
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : verificationReq ? (
             <>
               <div className="helper">
                 From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
@@ -811,10 +910,7 @@ export default function BondfireChat() {
                     </div>
                   ) : (
                     <div className="helper" style={{ marginTop: 12 }}>
-                      Code:{" "}
-                      {Array.isArray(sasData.decimal)
-                        ? sasData.decimal.join(" ")
-                        : ""}
+                      Code: {Array.isArray(sasData.decimal) ? sasData.decimal.join(" ") : ""}
                     </div>
                   )}
 
@@ -846,7 +942,12 @@ export default function BondfireChat() {
                 below or start it from the other side.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="btn" onClick={requestOwnVerification}>
+                <button
+                  className="btn"
+                  onClick={requestOwnVerification}
+                  disabled={!supportsOwnVerification}
+                  title={!supportsOwnVerification ? "Not supported by this Matrix SDK build" : ""}
+                >
                   Request verification
                 </button>
                 <button className="btn" onClick={checkPendingVerification}>
@@ -907,14 +1008,7 @@ export default function BondfireChat() {
             marginTop: 12,
           }}
         >
-
-          <aside
-            className="card"
-            style={{
-              padding: 12,
-              minHeight: 0,
-            }}
-          >
+          <aside className="card" style={{ padding: 12, minHeight: 0 }}>
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -971,7 +1065,6 @@ export default function BondfireChat() {
               flexDirection: "column",
             }}
           >
-
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
@@ -995,9 +1088,7 @@ export default function BondfireChat() {
                       {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
                       {m.encrypted ? "🔒" : ""}
                     </div>
-                    <div>
-                      {m.body || <span className="helper">(undecryptable)</span>}
-                    </div>
+                    <div>{m.body || <span className="helper">(undecryptable)</span>}</div>
                   </div>
                 ))
               )}
