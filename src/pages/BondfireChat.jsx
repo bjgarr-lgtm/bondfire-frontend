@@ -13,12 +13,12 @@ import {
   canAcceptVerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api";
 
+// Hardcoded homeserver: one less field for humans to mess up.
+const BF_MATRIX_HS_URL = "https://matrix-client.matrix.org";
+
 // Keep a single Matrix client alive per browser tab so switching away from the
 // Chat page doesn't make it look like you're reconnecting or re-verifying.
 const BF_MATRIX_GLOBAL = "__bf_matrix_client__";
-
-// Bondfire is opinionated: one homeserver for everyone.
-const BF_MATRIX_HS_URL = "https://matrix-client.matrix.org";
 
 function getGlobalMatrix() {
   try {
@@ -89,13 +89,22 @@ function safeIdForEvent(ev) {
   );
 }
 
+// mxc -> http(s)
+function mxcToHttp(client, mxc, size = 64) {
+  try {
+    if (!client || !mxc) return "";
+    if (typeof client.mxcUrlToHttp === "function") {
+      return client.mxcUrlToHttp(mxc, size, size, "crop");
+    }
+  } catch {}
+  return "";
+}
+
 function eventToMsg(ev) {
   const content = ev?.getContent?.() || {};
   const body = content?.body;
   const msgtype = content?.msgtype;
 
-  // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
-  // and/or provides isDecryptionFailure(). Some homeservers also stuff a human-readable string into body.
   const undecryptable =
     !!ev?.isDecryptionFailure?.() ||
     msgtype === "m.bad.encrypted" ||
@@ -112,40 +121,25 @@ function eventToMsg(ev) {
   };
 }
 
-function initialsForMxid(mxid) {
-  const s = String(mxid || "").trim();
-  if (!s) return "?";
-  const cleaned = s.replace(/^@/, "").split(":")[0];
-  if (!cleaned) return "?";
-  return cleaned.slice(0, 2).toUpperCase();
-}
-
-function pickBgFromString(s) {
-  // stable, boring, usable
-  const str = String(s || "");
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
-  const hue = h % 360;
-  return `hsl(${hue} 35% 28%)`;
-}
-
 /* --------------- component --------------- */
 export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
+  // Ensure any existing saved session has the hardcoded HS url filled.
   const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
   const saved = savedRaw
-    ? { ...savedRaw, hsUrl: savedRaw.hsUrl || BF_MATRIX_HS_URL }
+    ? {
+        ...savedRaw,
+        hsUrl: BF_MATRIX_HS_URL,
+      }
     : null;
 
-  // Backfill hsUrl for older saves so boot can always start.
-  if (savedRaw && (!savedRaw.hsUrl || savedRaw.hsUrl !== saved.hsUrl)) {
+  if (savedRaw && savedRaw.hsUrl !== BF_MATRIX_HS_URL) {
     writeJSON(`bf_matrix_${orgId}`, saved);
   }
 
   // login form
-  // Homeserver is fixed (BF_MATRIX_HS_URL)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -163,7 +157,7 @@ export default function BondfireChat() {
 
   // verification
   const [verificationReq, setVerificationReq] = useState(null);
-  const [sasData, setSasData] = useState(null); // {emoji, decimal, confirm, mismatch}
+  const [sasData, setSasData] = useState(null);
   const [verifyMsg, setVerifyMsg] = useState("");
 
   // rooms / messages
@@ -172,9 +166,8 @@ export default function BondfireChat() {
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // profile cache for avatars + display names
-  const [avatarMap, setAvatarMap] = useState(() => ({})); // userId -> http url
-  const [nameMap, setNameMap] = useState(() => ({})); // userId -> displayname
+  // avatars
+  const [avatarMap, setAvatarMap] = useState({}); // sender -> http url
 
   // UI toggles (persist per-org)
   const [hideUndecryptable, setHideUndecryptable] = useState(
@@ -204,78 +197,6 @@ export default function BondfireChat() {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
-  /* ---------- profile helpers ---------- */
-  const mxcToHttp = React.useCallback((mxc) => {
-    const c = clientRef.current;
-    if (!c || !mxc) return "";
-    try {
-      if (typeof c.mxcUrlToHttp === "function") return c.mxcUrlToHttp(mxc, 64, 64, "crop");
-      if (typeof c.getHttpUriForMxc === "function") return c.getHttpUriForMxc(mxc, 64, 64, "crop");
-      return "";
-    } catch {
-      return "";
-    }
-  }, []);
-
-  const ensureProfile = React.useCallback(async (mxid) => {
-    const u = String(mxid || "").trim();
-    if (!u) return;
-    if (avatarMap[u] || nameMap[u]) return;
-
-    const c = clientRef.current;
-    if (!c) return;
-
-    try {
-      const user = c.getUser?.(u);
-      const mxc = user?.avatarUrl || user?.avatar_url || "";
-      const dn = user?.displayName || user?.name || "";
-
-      if (dn) {
-        setNameMap((prev) => (prev[u] ? prev : { ...prev, [u]: dn }));
-      }
-      if (mxc) {
-        const http = mxcToHttp(mxc);
-        if (http) setAvatarMap((prev) => (prev[u] ? prev : { ...prev, [u]: http }));
-      }
-
-      // If we already found both, stop here.
-      if ((dn || nameMap[u]) && (mxc || avatarMap[u])) return;
-
-      // Otherwise ask the server (cached by sdk).
-      const prof = await c.getProfileInfo?.(u);
-      const avatarUrl = prof?.avatar_url || "";
-      const displayname = prof?.displayname || "";
-
-      if (displayname) {
-        setNameMap((prev) => (prev[u] ? prev : { ...prev, [u]: displayname }));
-      }
-      if (avatarUrl) {
-        const http = mxcToHttp(avatarUrl);
-        if (http) setAvatarMap((prev) => (prev[u] ? prev : { ...prev, [u]: http }));
-      }
-    } catch {
-      // ignore
-    }
-  }, [avatarMap, nameMap, mxcToHttp]);
-
-  useEffect(() => {
-    // prime cache for senders in current message list
-    const uniq = Array.from(new Set(messages.map((m) => m.sender).filter(Boolean)));
-    uniq.forEach((u) => {
-      ensureProfile(u);
-    });
-  }, [messages, ensureProfile]);
-
-  const displayNameFor = React.useCallback((mxid) => {
-    const u = String(mxid || "").trim();
-    return nameMap[u] || u;
-  }, [nameMap]);
-
-  const avatarFor = React.useCallback((mxid) => {
-    const u = String(mxid || "").trim();
-    return avatarMap[u] || "";
-  }, [avatarMap]);
-
   /* ---------- cleanup verification ---------- */
   const cleanupVerification = (finalMsg = "") => {
     setSasData(null);
@@ -294,7 +215,10 @@ export default function BondfireChat() {
       const uidKey =
         clientRef.current?.getUserId?.() || saved?.userId || userId || "";
       const didKey =
-        clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
+        clientRef.current?.getDeviceId?.() ||
+        saved?.deviceId ||
+        deviceId ||
+        "";
       const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
@@ -303,29 +227,51 @@ export default function BondfireChat() {
     }
   }, [saved?.userId, saved?.deviceId, userId, deviceId]);
 
+  async function ensureCrypto(client) {
+    try {
+      if (!client) return false;
+
+      const existing = client.getCrypto?.();
+      if (existing) {
+        setCryptoReady(true);
+        return true;
+      }
+
+      if (typeof client.initRustCrypto === "function") {
+        await client.initRustCrypto();
+      } else if (typeof client.initCrypto === "function") {
+        await client.initCrypto();
+      } else {
+        setCryptoReady(false);
+        return false;
+      }
+
+      const readyCrypto = !!client.getCrypto?.();
+      setCryptoReady(readyCrypto);
+      return readyCrypto;
+    } catch (e) {
+      setCryptoReady(false);
+      log("Crypto init failed:", e?.message || e);
+      return false;
+    }
+  }
+
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
-    // do not start without session
-    if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
-
-    // if a client already exists, do nothing
+    if (!saved?.userId || !saved?.accessToken) return;
     if (clientRef.current) return;
 
     stoppedRef.current = false;
 
-    const baseUrl = saved.hsUrl;
+    const baseUrl = BF_MATRIX_HS_URL;
     const uid = saved.userId;
     const token = saved.accessToken;
-    // Older sessions may not have persisted deviceId.
     const did = saved.deviceId || "";
 
-    // Keep state aligned with storage
     setUserId(uid);
     setAccessToken(token);
     setDeviceId(did);
 
-    // Reuse an existing Matrix client for this tab to avoid the fake
-    // "Connecting…" + "verify again" nonsense when you switch tabs.
     const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
     const canReuse =
@@ -339,20 +285,24 @@ export default function BondfireChat() {
     let client = null;
     let store = null;
     let cryptoStore = null;
+
     if (canReuse) {
       client = g.client;
-      // If deviceId wasn't stored previously, capture it now so verification
-      // state keys are stable.
       if (!did && g?.deviceId) setDeviceId(g.deviceId);
       log("Connected (resumed)");
     } else {
+      const dbKey = `${uid}_${did || "nodevice"}`;
+
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${uid}`,
+        dbName: `bf_mx_store_${dbKey}`,
       });
 
-      cryptoStore = new IndexedDBCryptoStore(window.indexedDB, `bf_mx_crypto_${uid}`);
+      cryptoStore = new IndexedDBCryptoStore(
+        window.indexedDB,
+        `bf_mx_crypto_${dbKey}`
+      );
 
       client = createClient({
         baseUrl,
@@ -399,6 +349,24 @@ export default function BondfireChat() {
       }
     }
 
+    async function maybeHydrateAvatar(sender) {
+      const s = String(sender || "");
+      if (!s) return;
+      setAvatarMap((prev) => {
+        if (prev[s] !== undefined) return prev;
+        return { ...prev, [s]: "" };
+      });
+
+      try {
+        const profile = await client.getProfileInfo?.(s);
+        const mxc = profile?.avatar_url;
+        const url = mxcToHttp(client, mxc, 64);
+        if (url) setAvatarMap((prev) => ({ ...prev, [s]: url }));
+      } catch {
+        // ignore
+      }
+    }
+
     function onTimeline(ev, room, toStartOfTimeline) {
       if (stoppedRef.current) return;
       if (toStartOfTimeline) return;
@@ -409,7 +377,8 @@ export default function BondfireChat() {
 
       const m = eventToMsg(ev);
 
-      // De-dupe and update
+      maybeHydrateAvatar(m.sender);
+
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         return [...prev, m];
@@ -423,7 +392,6 @@ export default function BondfireChat() {
       log("Verification request from", req.otherUserId, req.otherDeviceId);
 
       req.on?.("change", () => {
-        // keep state warm
         setVerificationReq(req);
       });
     }
@@ -437,34 +405,16 @@ export default function BondfireChat() {
     }
 
     (async () => {
-      if (!canReuse) {
+      if (!canReuse && store) {
         try {
           await store.startup();
         } catch (e) {
           log("Store startup failed:", e?.message || e);
         }
-
-        try {
-          if (typeof client.initRustCrypto === "function") {
-            await client.initRustCrypto();
-            setCryptoReady(true);
-          } else if (typeof client.initCrypto === "function") {
-            await client.initCrypto();
-            setCryptoReady(true);
-          } else {
-            setCryptoReady(false);
-            log("Crypto init not available");
-          }
-        } catch (e) {
-          setCryptoReady(false);
-          log("Crypto init failed:", e?.message || e);
-        }
-      } else {
-        // Client is already running; crypto may already be initialized.
-        setCryptoReady(true);
       }
 
-      // Determine whether THIS device is verified (best-effort).
+      await ensureCrypto(client);
+
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
@@ -473,7 +423,6 @@ export default function BondfireChat() {
 
         let verified = key ? !!readJSON(key, false) : false;
 
-        // Some matrix-js-sdk builds expose a verification-status helper. If present, trust it.
         if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
           const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
           verified =
@@ -488,8 +437,6 @@ export default function BondfireChat() {
         // ignore
       }
 
-      // If a verification request already exists (e.g. app reloaded mid-flow),
-      // hydrate it so the UI actually shows something.
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
@@ -500,7 +447,6 @@ export default function BondfireChat() {
       }
 
       client.on("sync", onSync);
-
       client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
       client.on("Room.timeline", onTimeline);
 
@@ -510,7 +456,6 @@ export default function BondfireChat() {
     return () => {
       stoppedRef.current = true;
       try {
-        // Keep the client alive globally; just detach listeners bound to this component.
         client.removeListener?.("sync", onSync);
         client.removeListener?.(
           CryptoEvent.VerificationRequestReceived,
@@ -520,7 +465,7 @@ export default function BondfireChat() {
       } catch {}
       clientRef.current = null;
     };
-  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId]);
+  }, [saved?.userId, saved?.accessToken, saved?.deviceId]);
 
   /* -------- verification actions -------- */
   async function requestOwnVerification() {
@@ -529,12 +474,21 @@ export default function BondfireChat() {
     try {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
-      if (!crypto?.requestOwnUserVerification) {
+
+      if (!crypto) {
         setVerifyMsg(
-          "This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate."
+          "Crypto not ready. If this stays stuck, hit Reset Matrix storage."
         );
         return;
       }
+
+      if (!crypto.requestOwnUserVerification) {
+        setVerifyMsg(
+          "This Matrix SDK build can’t request verification here. Start verification from Element, then click Check pending."
+        );
+        return;
+      }
+
       const req = await crypto.requestOwnUserVerification();
       setVerificationReq(req);
       setSasData(null);
@@ -552,8 +506,7 @@ export default function BondfireChat() {
     try {
       const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
-      const pending =
-        crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
         setVerificationReq(pending[0]);
         setVerifyMsg("Found an in-progress verification. Continue below.");
@@ -584,7 +537,6 @@ export default function BondfireChat() {
     const req = verificationReq;
     if (!req) return;
 
-    // If we already started a verifier, do not double-start.
     if (verifierRef.current) {
       setVerifyMsg("SAS already started. Use Confirm or Doesn’t match.");
       return;
@@ -598,16 +550,12 @@ export default function BondfireChat() {
       verifierRef.current = verifier;
 
       verifier.on(VerifierEvent.ShowSas, (sas) => {
-        // matrix-js-sdk gives { sas: {emoji|decimal}, confirm, mismatch }
         const payload = sas?.sas || {};
         const emoji = Array.isArray(payload.emoji)
           ? payload.emoji
               .map((e) => {
-                // tuple form: ["🐶", "dog"]
                 if (Array.isArray(e)) return [e[0], e[1]];
-                // object form: { emoji: "🐶", description: "dog" }
-                if (e && typeof e === "object")
-                  return [e.emoji, e.description || e.name];
+                if (e && typeof e === "object") return [e.emoji, e.description || e.name];
                 return null;
               })
               .filter((pair) => Array.isArray(pair) && pair[0])
@@ -632,16 +580,13 @@ export default function BondfireChat() {
         cleanupVerification(`Cancelled: ${e?.reason || "unknown"}`);
       });
 
-      // Some flows do not emit Done cleanly on this side.
       verifier.on?.("change", () => {
         try {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
             cleanupVerification("Verified ✅");
           }
-        } catch {
-          // ignore
-        }
+        } catch {}
       });
 
       await verifier.verify();
@@ -655,7 +600,6 @@ export default function BondfireChat() {
     try {
       await sasData?.confirm?.();
       setVerifyMsg("Confirmed. Waiting for other device…");
-      // In case other side never sends Done back, clear after a bit.
       setTimeout(() => {
         if (verifierRef.current) markThisDeviceVerified();
         cleanupVerification("Verified ✅");
@@ -675,7 +619,7 @@ export default function BondfireChat() {
   }
 
   /* -------------- session -------------- */
-  const loggedIn = !!(saved?.hsUrl && saved?.userId && saved?.accessToken);
+  const loggedIn = !!(saved?.userId && saved?.accessToken);
 
   const login = async (e) => {
     e.preventDefault();
@@ -709,18 +653,15 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_`);
+    removeKey(`bf_matrix_${orgId}`);
 
-    // also clear local verified flag for this device
     try {
       const k = verifiedKeyFor(
         saved?.userId || userId || "",
         saved?.deviceId || deviceId || ""
       );
       if (k) removeKey(k);
-    } catch {
-      // ignore
-    }
+    } catch {}
     setDeviceVerified(false);
 
     setUserId("");
@@ -732,6 +673,7 @@ export default function BondfireChat() {
     setActiveRoomId(null);
     setMessages([]);
     setMsg("");
+    setAvatarMap({});
     cleanupVerification("");
 
     if (clientRef.current) {
@@ -748,8 +690,6 @@ export default function BondfireChat() {
   };
 
   const resetMatrixStorage = () => {
-    // fixes the "store account mismatch" trap
-    // kill session + also nuke local indexeddb/crypto by changing dbName key space
     removeKey(`bf_matrix_${orgId}`);
     logout();
   };
@@ -771,6 +711,19 @@ export default function BondfireChat() {
     );
 
     const mapped = evs.map(eventToMsg);
+
+    mapped.slice(0, 40).forEach((m) => {
+      if (!m?.sender) return;
+      // fire and forget
+      (async () => {
+        try {
+          const profile = await client.getProfileInfo?.(m.sender);
+          const url = mxcToHttp(client, profile?.avatar_url, 64);
+          if (url) setAvatarMap((prev) => ({ ...prev, [m.sender]: url }));
+        } catch {}
+      })();
+    });
+
     setMessages(mapped);
   };
 
@@ -782,18 +735,12 @@ export default function BondfireChat() {
     const body = msg.trim();
     setMsg("");
 
-    const room = client.getRoom(activeRoomId);
-    const shouldShowEncryptedLock = !!(room?.isEncrypted?.() && cryptoReady);
-
-    // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
       sender: saved?.userId || userId || "",
       ts: Date.now(),
-      encrypted: shouldShowEncryptedLock,
-      undecryptable: false,
-      msgtype: "m.text",
+      encrypted: true,
     };
     setMessages((prev) => [...prev, optimistic]);
 
@@ -822,6 +769,41 @@ export default function BondfireChat() {
     const sorted = [...base].sort((a, b) => a.ts - b.ts);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
+
+  const renderAvatar = (sender) => {
+    const url = avatarMap[sender];
+    const initials = String(sender || "?")
+      .replace(/^@/, "")
+      .slice(0, 2)
+      .toUpperCase();
+
+    return (
+      <div
+        style={{
+          height: 28,
+          width: 28,
+          borderRadius: 999,
+          overflow: "hidden",
+          background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          display: "grid",
+          placeItems: "center",
+          flex: "0 0 auto",
+        }}
+        title={sender}
+      >
+        {url ? (
+          <img
+            src={url}
+            alt=""
+            style={{ height: "100%", width: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <span style={{ fontSize: 11, opacity: 0.85 }}>{initials}</span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -864,7 +846,7 @@ export default function BondfireChat() {
           {!cryptoReady ? (
             <div className="helper">
               Crypto isn’t ready yet, so verification can’t start. If this stays
-              yellow, your homeserver or build is missing E2EE support.
+              yellow, something is broken in crypto init (or you’re still on a stale cached build).
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
@@ -995,14 +977,12 @@ export default function BondfireChat() {
       {!loggedIn ? (
         <section className="card" style={{ marginTop: 12, padding: 12 }}>
           <h3 className="section-title" style={{ marginTop: 0 }}>
-            Sign in to your Matrix homeserver
+            Sign in to chat
           </h3>
-          <form
-            onSubmit={login}
-            className="grid"
-            style={{ gap: 8, maxWidth: 520 }}
-          >
-            <div className="helper">Homeserver: {BF_MATRIX_HS_URL}</div>
+          <div className="helper" style={{ marginBottom: 8 }}>
+            Homeserver: {BF_MATRIX_HS_URL}
+          </div>
+          <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
               placeholder="Username (localpart, without @ and domain)"
@@ -1026,21 +1006,14 @@ export default function BondfireChat() {
           style={{
             display: "grid",
             gridTemplateColumns:
-              window.matchMedia &&
-              window.matchMedia("(max-width: 820px)").matches
+              window.matchMedia && window.matchMedia("(max-width: 820px)").matches
                 ? "1fr"
                 : "280px 1fr",
             gap: 12,
             marginTop: 12,
           }}
         >
-          <aside
-            className="card"
-            style={{
-              padding: 12,
-              minHeight: 0,
-            }}
-          >
+          <aside className="card" style={{ padding: 12, minHeight: 0 }}>
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -1090,18 +1063,14 @@ export default function BondfireChat() {
               padding: 12,
               minHeight: 420,
               height:
-                window.matchMedia &&
-                window.matchMedia("(max-width: 820px)").matches
+                window.matchMedia && window.matchMedia("(max-width: 820px)").matches
                   ? "calc(100dvh - 220px)"
                   : "auto",
               display: "flex",
               flexDirection: "column",
             }}
           >
-            <h3
-              className="section-title"
-              style={{ marginTop: 0, marginBottom: 8 }}
-            >
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
             </h3>
@@ -1118,74 +1087,40 @@ export default function BondfireChat() {
               {shownMessages.length === 0 ? (
                 <div className="helper">No messages yet.</div>
               ) : (
-                shownMessages.map((m) => {
-                  const avatar = avatarFor(m.sender);
-                  const displayName = displayNameFor(m.sender);
-                  const initials = initialsForMxid(m.sender);
-                  const bg = pickBgFromString(m.sender);
-
-                  return (
-                    <div
-                      key={m.id}
-                      style={{
-                        display: "flex",
-                        gap: 10,
-                        marginBottom: 10,
-                        alignItems: "flex-start",
-                      }}
-                    >
-                      {avatar ? (
-                        <img
-                          src={avatar}
-                          alt={displayName}
-                          style={{
-                            width: 30,
-                            height: 30,
-                            borderRadius: 999,
-                            objectFit: "cover",
-                            border: "1px solid rgba(255,255,255,0.14)",
-                            marginTop: 2,
-                            flex: "0 0 auto",
-                          }}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div
-                          title={displayName}
-                          style={{
-                            width: 30,
-                            height: 30,
-                            borderRadius: 999,
-                            background: bg,
-                            border: "1px solid rgba(255,255,255,0.14)",
-                            display: "grid",
-                            placeItems: "center",
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: "#fff",
-                            marginTop: 2,
-                            flex: "0 0 auto",
-                          }}
-                        >
-                          {initials}
-                        </div>
-                      )}
-
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>
-                          {displayName} · {new Date(m.ts).toLocaleString()}
-                          {m.encrypted ? " 🔒" : ""}
-                        </div>
-                        <div style={{ whiteSpace: "pre-wrap" }}>
-                          {m.body || (
-                            <span className="helper">(undecryptable)</span>
-                          )}
-                        </div>
+                shownMessages.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{ marginBottom: 10, display: "flex", gap: 10 }}
+                  >
+                    {renderAvatar(m.sender)}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#6b7280",
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: "#cbd5e1" }}>
+                          {m.sender}
+                        </span>
+                        <span>·</span>
+                        <span>{new Date(m.ts).toLocaleString()}</span>
+                        {m.encrypted ? (
+                          <span title="Encrypted message">🔒</span>
+                        ) : null}
+                      </div>
+                      <div style={{ wordBreak: "break-word" }}>
+                        {m.body || (
+                          <span className="helper">(undecryptable)</span>
+                        )}
                       </div>
                     </div>
-                  );
-                })
+                  </div>
+                ))
               )}
             </div>
 
