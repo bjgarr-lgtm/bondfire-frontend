@@ -871,7 +871,7 @@ export default function BondfireChat() {
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
-              placeholder="Homeserver base URL (e.g. https://matrix.org)"
+              placeholder="Homeserver base URL (e.g. https://matrix-client.matrix.org)"
               value={hsUrl}
               onChange={(e) => setHsUrl(e.target.value)}
               required
