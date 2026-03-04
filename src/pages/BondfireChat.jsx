@@ -1,11 +1,7 @@
-// this is src/pages/BondfireChat.jsx
+// src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  createClient,
-  IndexedDBStore,
-  IndexedDBCryptoStore,
-} from "matrix-js-sdk";
+import { createClient, IndexedDBStore, IndexedDBCryptoStore } from "matrix-js-sdk";
 
 import {
   CryptoEvent,
@@ -13,8 +9,8 @@ import {
   canAcceptVerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api";
 
-// Hardcoded homeserver: one less field for humans to mess up.
-const BF_MATRIX_HS_URL = "https://matrix-client.matrix.org";
+// Hardcoded homeserver (per your requirement)
+const DEFAULT_HS_URL = "https://matrix-client.matrix.org";
 
 // Keep a single Matrix client alive per browser tab so switching away from the
 // Chat page doesn't make it look like you're reconnecting or re-verifying.
@@ -69,12 +65,41 @@ function parseOrgIdFromHash() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+function safeKeyPart(s) {
+  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+}
+
 // Local flag so the UI can remember that THIS browser device was verified.
 // This is not the source of truth for encryption, it is a convenience signal.
 function verifiedKeyFor(userId, deviceId) {
-  const u = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
-  const d = String(deviceId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  const u = safeKeyPart(userId);
+  const d = safeKeyPart(deviceId);
   return `bf_mx_verified_${u}_${d}`;
+}
+
+// Persistent salt so we can rotate IndexedDB namespaces if the SDK store ever mismatches.
+function storeSaltKey(orgId, userId, deviceId) {
+  return `bf_mx_store_salt_${safeKeyPart(orgId)}_${safeKeyPart(userId)}_${safeKeyPart(deviceId)}`;
+}
+
+function getOrCreateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const existing = readJSON(k, "");
+  if (existing) return existing;
+  const salt =
+    (globalThis.crypto && crypto.randomUUID && crypto.randomUUID()) ||
+    `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  writeJSON(k, salt);
+  return salt;
+}
+
+function rotateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const salt =
+    (globalThis.crypto && crypto.randomUUID && crypto.randomUUID()) ||
+    `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  writeJSON(k, salt);
+  return salt;
 }
 
 const ts = legibleNow;
@@ -89,26 +114,18 @@ function safeIdForEvent(ev) {
   );
 }
 
-// mxc -> http(s)
-function mxcToHttp(client, mxc, size = 64) {
-  try {
-    if (!client || !mxc) return "";
-    if (typeof client.mxcUrlToHttp === "function") {
-      return client.mxcUrlToHttp(mxc, size, size, "crop");
-    }
-  } catch {}
-  return "";
-}
-
 function eventToMsg(ev) {
   const content = ev?.getContent?.() || {};
   const body = content?.body;
   const msgtype = content?.msgtype;
 
+  // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
+  // and/or provides isDecryptionFailure().
   const undecryptable =
     !!ev?.isDecryptionFailure?.() ||
     msgtype === "m.bad.encrypted" ||
-    (typeof body === "string" && /unable to decrypt|decryptionerror/i.test(body));
+    (typeof body === "string" &&
+      /unable to decrypt|decryptionerror/i.test(body));
 
   return {
     id: safeIdForEvent(ev),
@@ -121,25 +138,26 @@ function eventToMsg(ev) {
   };
 }
 
+function initials(mxid) {
+  const s = String(mxid || "").trim();
+  if (!s) return "?";
+  // "@name:server" -> "name"
+  const core = s.startsWith("@") ? s.slice(1).split(":")[0] : s.split(":")[0];
+  const parts = core.replace(/[_\-.]/g, " ").split(/\s+/).filter(Boolean);
+  const a = (parts[0] || "?").slice(0, 1).toUpperCase();
+  const b = (parts[1] || "").slice(0, 1).toUpperCase();
+  return (a + b).slice(0, 2);
+}
+
 /* --------------- component --------------- */
 export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  // Ensure any existing saved session has the hardcoded HS url filled.
-  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
-  const saved = savedRaw
-    ? {
-        ...savedRaw,
-        hsUrl: BF_MATRIX_HS_URL,
-      }
-    : null;
+  const saved = readJSON(`bf_matrix_${orgId}`, null);
 
-  if (savedRaw && savedRaw.hsUrl !== BF_MATRIX_HS_URL) {
-    writeJSON(`bf_matrix_${orgId}`, saved);
-  }
-
-  // login form
+  // login form (homeserver is fixed)
+  const [hsUrl, setHsUrl] = useState(DEFAULT_HS_URL);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -157,7 +175,7 @@ export default function BondfireChat() {
 
   // verification
   const [verificationReq, setVerificationReq] = useState(null);
-  const [sasData, setSasData] = useState(null);
+  const [sasData, setSasData] = useState(null); // {emoji, decimal, confirm, mismatch}
   const [verifyMsg, setVerifyMsg] = useState("");
 
   // rooms / messages
@@ -166,8 +184,8 @@ export default function BondfireChat() {
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // avatars
-  const [avatarMap, setAvatarMap] = useState({}); // sender -> http url
+  // avatars cache: mxid -> http url (or "")
+  const [avatarMap, setAvatarMap] = useState({});
 
   // UI toggles (persist per-org)
   const [hideUndecryptable, setHideUndecryptable] = useState(
@@ -197,6 +215,143 @@ export default function BondfireChat() {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
+  /* ---------- derived helpers ---------- */
+  const loggedIn = !!(saved?.hsUrl && saved?.userId && saved?.accessToken);
+
+  const getClient = () => clientRef.current;
+
+  const refreshRooms = React.useCallback(() => {
+    const client = getClient();
+    if (!client) return;
+
+    try {
+      const rs = client
+        .getVisibleRooms()
+        .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
+        .sort(
+          (a, b) =>
+            (b.getLastActiveTimestamp?.() || 0) -
+            (a.getLastActiveTimestamp?.() || 0)
+        );
+
+      setRooms(
+        rs.map((r) => ({
+          id: r.roomId,
+          name: r.name || r.getCanonicalAlias?.() || r.roomId,
+          encrypted: !!r.isEncrypted?.(),
+        }))
+      );
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const updateAvatarFor = React.useCallback(
+    (mxid) => {
+      const client = getClient();
+      if (!client) return;
+      const uid = String(mxid || "").trim();
+      if (!uid) return;
+
+      setAvatarMap((prev) => {
+        if (Object.prototype.hasOwnProperty.call(prev, uid)) return prev;
+        return { ...prev, [uid]: "" };
+      });
+
+      // Try room member first (more accurate per-room)
+      try {
+        const roomId = activeRoomIdRef.current;
+        const room = roomId ? client.getRoom(roomId) : null;
+        const member = room?.getMember?.(uid) || null;
+        const mxc =
+          member?.getAvatarUrl?.(client.getHomeserverUrl?.(), 48, 48, "crop") ||
+          member?.avatarUrl ||
+          null;
+
+        if (mxc) {
+          const http =
+            typeof client.mxcUrlToHttp === "function"
+              ? client.mxcUrlToHttp(mxc, 48, 48, "crop")
+              : mxc;
+          setAvatarMap((prev) => ({ ...prev, [uid]: http || "" }));
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback: user object
+      try {
+        const user = client.getUser?.(uid) || null;
+        const mxc = user?.avatarUrl || null;
+        if (mxc) {
+          const http =
+            typeof client.mxcUrlToHttp === "function"
+              ? client.mxcUrlToHttp(mxc, 48, 48, "crop")
+              : mxc;
+          setAvatarMap((prev) => ({ ...prev, [uid]: http || "" }));
+        }
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
+
+  const refreshVerificationState = React.useCallback(async () => {
+    const client = getClient();
+    if (!client) return;
+
+    // Capture deviceId if we didn't have it (stabilizes local verified key names)
+    try {
+      const did = client.getDeviceId?.() || "";
+      if (did && did !== deviceId) {
+        setDeviceId(did);
+        if (saved?.hsUrl && saved?.userId && saved?.accessToken) {
+          writeJSON(`bf_matrix_${orgId}`, {
+            hsUrl: saved.hsUrl,
+            userId: saved.userId,
+            accessToken: saved.accessToken,
+            deviceId: did,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const crypto = client.getCrypto?.();
+      if (!crypto) {
+        setCryptoReady(false);
+        return;
+      }
+
+      setCryptoReady(true);
+
+      const myUid = client.getUserId?.() || saved?.userId || userId || "";
+      const myDid = client.getDeviceId?.() || saved?.deviceId || deviceId || "";
+      const key = verifiedKeyFor(myUid, myDid);
+
+      let verified = key ? !!readJSON(key, false) : false;
+
+      // Prefer SDK truth if available
+      if (typeof crypto.getDeviceVerificationStatus === "function") {
+        const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
+        verified =
+          res === true ||
+          res?.isVerified === true ||
+          res?.verified === true ||
+          res?.isCrossSigningVerified === true;
+      }
+
+      setDeviceVerified(!!verified);
+    } catch {
+      // If crypto exists but something throws, do NOT flip to "not ready" and panic the UI.
+      // Just keep whatever we had.
+    }
+  }, [orgId, saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, userId, deviceId]);
+
   /* ---------- cleanup verification ---------- */
   const cleanupVerification = (finalMsg = "") => {
     setSasData(null);
@@ -212,13 +367,9 @@ export default function BondfireChat() {
 
   const markThisDeviceVerified = React.useCallback(() => {
     try {
-      const uidKey =
-        clientRef.current?.getUserId?.() || saved?.userId || userId || "";
-      const didKey =
-        clientRef.current?.getDeviceId?.() ||
-        saved?.deviceId ||
-        deviceId ||
-        "";
+      const c = getClient();
+      const uidKey = c?.getUserId?.() || saved?.userId || userId || "";
+      const didKey = c?.getDeviceId?.() || saved?.deviceId || deviceId || "";
       const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
@@ -227,51 +378,27 @@ export default function BondfireChat() {
     }
   }, [saved?.userId, saved?.deviceId, userId, deviceId]);
 
-  async function ensureCrypto(client) {
-    try {
-      if (!client) return false;
-
-      const existing = client.getCrypto?.();
-      if (existing) {
-        setCryptoReady(true);
-        return true;
-      }
-
-      if (typeof client.initRustCrypto === "function") {
-        await client.initRustCrypto();
-      } else if (typeof client.initCrypto === "function") {
-        await client.initCrypto();
-      } else {
-        setCryptoReady(false);
-        return false;
-      }
-
-      const readyCrypto = !!client.getCrypto?.();
-      setCryptoReady(readyCrypto);
-      return readyCrypto;
-    } catch (e) {
-      setCryptoReady(false);
-      log("Crypto init failed:", e?.message || e);
-      return false;
-    }
-  }
-
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
-    if (!saved?.userId || !saved?.accessToken) return;
+    // do not start without session
+    if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
+
+    // if a client already exists, do nothing
     if (clientRef.current) return;
 
     stoppedRef.current = false;
 
-    const baseUrl = BF_MATRIX_HS_URL;
+    const baseUrl = saved.hsUrl;
     const uid = saved.userId;
     const token = saved.accessToken;
     const did = saved.deviceId || "";
 
+    // Keep state aligned with storage
     setUserId(uid);
     setAccessToken(token);
     setDeviceId(did);
 
+    // Reuse an existing Matrix client for this tab
     const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
     const canReuse =
@@ -288,20 +415,27 @@ export default function BondfireChat() {
 
     if (canReuse) {
       client = g.client;
-      if (!did && g?.deviceId) setDeviceId(g.deviceId);
       log("Connected (resumed)");
+      clientRef.current = client;
+      // On reuse, re-evaluate crypto + verification immediately (no false UI panic).
+      setTimeout(() => {
+        refreshRooms();
+        refreshVerificationState();
+      }, 0);
     } else {
-      const dbKey = `${uid}_${did || "nodevice"}`;
+      // Stronger store names: org + user + device + persistent salt
+      const salt = getOrCreateStoreSalt(orgId, uid, did || "nodevice");
+      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did || "nodevice")}_${safeKeyPart(salt)}`;
 
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${dbKey}`,
+        dbName: `bf_mx_store_${storeKey}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${dbKey}`
+        `bf_mx_crypto_${storeKey}`
       );
 
       client = createClient({
@@ -321,50 +455,9 @@ export default function BondfireChat() {
         deviceId: did,
       });
 
+      clientRef.current = client;
+
       log("Connecting…");
-    }
-
-    clientRef.current = client;
-
-    function refreshRooms() {
-      try {
-        const rs = client
-          .getVisibleRooms()
-          .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
-          .sort(
-            (a, b) =>
-              (b.getLastActiveTimestamp?.() || 0) -
-              (a.getLastActiveTimestamp?.() || 0)
-          );
-
-        setRooms(
-          rs.map((r) => ({
-            id: r.roomId,
-            name: r.name || r.getCanonicalAlias?.() || r.roomId,
-            encrypted: !!r.isEncrypted?.(),
-          }))
-        );
-      } catch {
-        // ignore
-      }
-    }
-
-    async function maybeHydrateAvatar(sender) {
-      const s = String(sender || "");
-      if (!s) return;
-      setAvatarMap((prev) => {
-        if (prev[s] !== undefined) return prev;
-        return { ...prev, [s]: "" };
-      });
-
-      try {
-        const profile = await client.getProfileInfo?.(s);
-        const mxc = profile?.avatar_url;
-        const url = mxcToHttp(client, mxc, 64);
-        if (url) setAvatarMap((prev) => ({ ...prev, [s]: url }));
-      } catch {
-        // ignore
-      }
     }
 
     function onTimeline(ev, room, toStartOfTimeline) {
@@ -377,7 +470,7 @@ export default function BondfireChat() {
 
       const m = eventToMsg(ev);
 
-      maybeHydrateAvatar(m.sender);
+      updateAvatarFor(m.sender);
 
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
@@ -401,94 +494,123 @@ export default function BondfireChat() {
         setReady(true);
         setStatus("Connected");
         refreshRooms();
+        refreshVerificationState();
       }
     }
 
     (async () => {
-      if (!canReuse && store) {
+      if (!canReuse) {
         try {
           await store.startup();
         } catch (e) {
           log("Store startup failed:", e?.message || e);
         }
-      }
 
-      await ensureCrypto(client);
+        try {
+          if (typeof client.initRustCrypto === "function") {
+            await client.initRustCrypto();
+            setCryptoReady(true);
+          } else if (typeof client.initCrypto === "function") {
+            await client.initCrypto();
+            setCryptoReady(true);
+          } else {
+            setCryptoReady(false);
+            log("Crypto init not available");
+          }
+        } catch (e) {
+          setCryptoReady(false);
+          const msg = String(e?.message || e);
+          log("Crypto init failed:", msg);
 
-      try {
-        const crypto = client.getCrypto?.();
-        const myUid = client.getUserId?.() || uid;
-        const myDid = client.getDeviceId?.() || did || saved?.deviceId || "";
-        const key = verifiedKeyFor(myUid, myDid);
-
-        let verified = key ? !!readJSON(key, false) : false;
-
-        if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
-          const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
-          verified =
-            res === true ||
-            res?.isVerified === true ||
-            res?.verified === true ||
-            res?.isCrossSigningVerified === true;
+          // Auto-recover from store mismatch by rotating salt + reloading once.
+          if (
+            msg.toLowerCase().includes("account in the store") &&
+            msg.toLowerCase().includes("doesn't match")
+          ) {
+            try {
+              rotateStoreSalt(orgId, uid, did || "nodevice");
+            } catch {}
+            try {
+              client.stopClient?.();
+              client.removeAllListeners?.();
+            } catch {}
+            try {
+              clearGlobalMatrix();
+            } catch {}
+            setStatus(`[${ts()}] Resetting local crypto store (mismatch). Reloading…`);
+            setTimeout(() => {
+              try {
+                window.location.reload();
+              } catch {}
+            }, 250);
+            return;
+          }
         }
 
-        setDeviceVerified(!!verified);
-      } catch {
-        // ignore
+        client.on("sync", onSync);
+        client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+        client.on("Room.timeline", onTimeline);
+
+        client.startClient({ initialSyncLimit: 30 });
+      } else {
+        client.on("sync", onSync);
+        client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+        client.on("Room.timeline", onTimeline);
       }
 
+      // If a verification request already exists, hydrate it.
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
-        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid);
-        if (pending && pending.length) onVerificationReq(pending[0]);
+        const pending =
+          crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+        if (pending.length) onVerificationReq(pending[0]);
       } catch {
         // ignore
       }
 
-      client.on("sync", onSync);
-      client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
-      client.on("Room.timeline", onTimeline);
-
-      if (!canReuse) client.startClient({ initialSyncLimit: 30 });
+      // Pull my avatar early
+      try {
+        updateAvatarFor(client.getUserId?.() || uid);
+      } catch {
+        // ignore
+      }
     })();
+
+    // When you tab away/back, refresh the truth (crypto can still be fine, UI just got dumb).
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        refreshRooms();
+        refreshVerificationState();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
 
     return () => {
       stoppedRef.current = true;
+      document.removeEventListener("visibilitychange", onVis);
       try {
         client.removeListener?.("sync", onSync);
-        client.removeListener?.(
-          CryptoEvent.VerificationRequestReceived,
-          onVerificationReq
-        );
+        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
         client.removeListener?.("Room.timeline", onTimeline);
       } catch {}
       clientRef.current = null;
     };
-  }, [saved?.userId, saved?.accessToken, saved?.deviceId]);
+  }, [orgId, saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, refreshRooms, refreshVerificationState, updateAvatarFor]);
 
   /* -------- verification actions -------- */
   async function requestOwnVerification() {
-    const client = clientRef.current;
+    const client = getClient();
     if (!client) return;
     try {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
-
-      if (!crypto) {
+      if (!crypto?.requestOwnUserVerification) {
         setVerifyMsg(
-          "Crypto not ready. If this stays stuck, hit Reset Matrix storage."
+          "Verification request API missing in this SDK build. Start verification from Element (recommended), then come back."
         );
         return;
       }
-
-      if (!crypto.requestOwnUserVerification) {
-        setVerifyMsg(
-          "This Matrix SDK build can’t request verification here. Start verification from Element, then click Check pending."
-        );
-        return;
-      }
-
       const req = await crypto.requestOwnUserVerification();
       setVerificationReq(req);
       setSasData(null);
@@ -496,17 +618,25 @@ export default function BondfireChat() {
         "Verification request sent. Accept it on your other device, then click Start SAS."
       );
     } catch (e) {
-      setVerifyMsg(e?.message || String(e));
+      const msg = String(e?.message || e);
+      if (msg.toLowerCase().includes("no existing cross-signing key")) {
+        setVerifyMsg(
+          "Cross-signing keys not ready yet. Element usually bootstraps this. Wait a moment, then try again."
+        );
+      } else {
+        setVerifyMsg(msg);
+      }
     }
   }
 
   function checkPendingVerification() {
-    const client = clientRef.current;
+    const client = getClient();
     if (!client) return;
     try {
       const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
-      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      const pending =
+        crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
         setVerificationReq(pending[0]);
         setVerifyMsg("Found an in-progress verification. Continue below.");
@@ -555,7 +685,8 @@ export default function BondfireChat() {
           ? payload.emoji
               .map((e) => {
                 if (Array.isArray(e)) return [e[0], e[1]];
-                if (e && typeof e === "object") return [e.emoji, e.description || e.name];
+                if (e && typeof e === "object")
+                  return [e.emoji, e.description || e.name];
                 return null;
               })
               .filter((pair) => Array.isArray(pair) && pair[0])
@@ -574,10 +705,12 @@ export default function BondfireChat() {
       verifier.on(VerifierEvent.Done, () => {
         markThisDeviceVerified();
         cleanupVerification("Verified ✅");
+        refreshVerificationState();
       });
 
       verifier.on(VerifierEvent.Cancel, (e) => {
         cleanupVerification(`Cancelled: ${e?.reason || "unknown"}`);
+        refreshVerificationState();
       });
 
       verifier.on?.("change", () => {
@@ -585,8 +718,11 @@ export default function BondfireChat() {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
             cleanupVerification("Verified ✅");
+            refreshVerificationState();
           }
-        } catch {}
+        } catch {
+          // ignore
+        }
       });
 
       await verifier.verify();
@@ -603,7 +739,8 @@ export default function BondfireChat() {
       setTimeout(() => {
         if (verifierRef.current) markThisDeviceVerified();
         cleanupVerification("Verified ✅");
-      }, 6500);
+        refreshVerificationState();
+      }, 1500);
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
@@ -613,18 +750,17 @@ export default function BondfireChat() {
     try {
       await sasData?.mismatch?.();
       cleanupVerification("Mismatch sent.");
+      refreshVerificationState();
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
   }
 
   /* -------------- session -------------- */
-  const loggedIn = !!(saved?.userId && saved?.accessToken);
-
   const login = async (e) => {
     e.preventDefault();
     try {
-      const baseUrl = BF_MATRIX_HS_URL;
+      const baseUrl = DEFAULT_HS_URL;
       const localpart = username.trim();
       const temp = createClient({ baseUrl });
       const res = await temp.login("m.login.password", {
@@ -656,12 +792,15 @@ export default function BondfireChat() {
     removeKey(`bf_matrix_${orgId}`);
 
     try {
+      const c = getClient();
       const k = verifiedKeyFor(
-        saved?.userId || userId || "",
-        saved?.deviceId || deviceId || ""
+        c?.getUserId?.() || saved?.userId || userId || "",
+        c?.getDeviceId?.() || saved?.deviceId || deviceId || ""
       );
       if (k) removeKey(k);
-    } catch {}
+    } catch {
+      // ignore
+    }
     setDeviceVerified(false);
 
     setUserId("");
@@ -685,11 +824,16 @@ export default function BondfireChat() {
     }
 
     clearGlobalMatrix();
-
     log("Logged out");
   };
 
   const resetMatrixStorage = () => {
+    // rotate salt so next boot uses a fresh IndexedDB namespace
+    try {
+      const uid = saved?.userId || userId || "";
+      const did = saved?.deviceId || deviceId || "nodevice";
+      if (uid) rotateStoreSalt(orgId, uid, did);
+    } catch {}
     removeKey(`bf_matrix_${orgId}`);
     logout();
   };
@@ -699,11 +843,19 @@ export default function BondfireChat() {
     setActiveRoomId(roomId);
     setMessages([]);
 
-    const client = clientRef.current;
+    const client = getClient();
     if (!client) return;
 
     const room = client.getRoom(roomId);
     if (!room) return;
+
+    // Update avatar cache for current room members (best-effort)
+    try {
+      const members = room.getMembers?.() || [];
+      members.slice(0, 100).forEach((m) => updateAvatarFor(m?.userId));
+    } catch {
+      // ignore
+    }
 
     const tl = room.getLiveTimeline?.();
     const evs = (tl?.getEvents?.() || []).filter(
@@ -711,25 +863,14 @@ export default function BondfireChat() {
     );
 
     const mapped = evs.map(eventToMsg);
-
-    mapped.slice(0, 40).forEach((m) => {
-      if (!m?.sender) return;
-      // fire and forget
-      (async () => {
-        try {
-          const profile = await client.getProfileInfo?.(m.sender);
-          const url = mxcToHttp(client, profile?.avatar_url, 64);
-          if (url) setAvatarMap((prev) => ({ ...prev, [m.sender]: url }));
-        } catch {}
-      })();
-    });
-
+    mapped.forEach((m) => updateAvatarFor(m.sender));
     setMessages(mapped);
   };
 
   const send = async (e) => {
     e.preventDefault();
-    const client = clientRef.current;
+    const client = getClient();
+    const room = rooms.find((r) => r.id === activeRoomId) || null;
     if (!client || !activeRoomId || !msg.trim()) return;
 
     const body = msg.trim();
@@ -740,7 +881,8 @@ export default function BondfireChat() {
       body,
       sender: saved?.userId || userId || "",
       ts: Date.now(),
-      encrypted: true,
+      encrypted: !!room?.encrypted,
+      undecryptable: false,
     };
     setMessages((prev) => [...prev, optimistic]);
 
@@ -770,37 +912,41 @@ export default function BondfireChat() {
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
 
-  const renderAvatar = (sender) => {
-    const url = avatarMap[sender];
-    const initials = String(sender || "?")
-      .replace(/^@/, "")
-      .slice(0, 2)
-      .toUpperCase();
-
+  const Avatar = ({ mxid }) => {
+    const url = avatarMap[mxid] || "";
+    if (url) {
+      return (
+        <img
+          src={url}
+          alt=""
+          style={{
+            height: 28,
+            width: 28,
+            borderRadius: 999,
+            objectFit: "cover",
+            border: "1px solid rgba(255,255,255,0.12)",
+          }}
+        />
+      );
+    }
     return (
       <div
+        title={mxid}
         style={{
           height: 28,
           width: 28,
           borderRadius: 999,
-          overflow: "hidden",
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.12)",
           display: "grid",
           placeItems: "center",
-          flex: "0 0 auto",
+          fontSize: 11,
+          fontWeight: 800,
+          background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          color: "#fff",
+          userSelect: "none",
         }}
-        title={sender}
       >
-        {url ? (
-          <img
-            src={url}
-            alt=""
-            style={{ height: "100%", width: "100%", objectFit: "cover" }}
-          />
-        ) : (
-          <span style={{ fontSize: 11, opacity: 0.85 }}>{initials}</span>
-        )}
+        {initials(mxid)}
       </div>
     );
   };
@@ -831,7 +977,7 @@ export default function BondfireChat() {
       {loggedIn && (
         <div className="helper" style={{ marginTop: 8 }}>
           <strong>Signed in as:</strong> {saved?.userId || userId} ·{" "}
-          <strong>Device:</strong> {saved?.deviceId || deviceId || "(loading)"}{" "}
+          <strong>Device:</strong> {deviceId || saved?.deviceId || "(loading)"}{" "}
           {!cryptoReady ? "🟡" : deviceVerified ? "🔒" : "🔓"}
         </div>
       )}
@@ -845,8 +991,8 @@ export default function BondfireChat() {
 
           {!cryptoReady ? (
             <div className="helper">
-              Crypto isn’t ready yet, so verification can’t start. If this stays
-              yellow, something is broken in crypto init (or you’re still on a stale cached build).
+              Crypto isn’t ready yet. If this persists, your crypto store may be
+              mismatched. Try Reset Matrix storage.
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
@@ -945,8 +1091,7 @@ export default function BondfireChat() {
             <>
               <div className="helper">
                 No active verification request. If you have another device (or
-                another client) for this Matrix account, request verification
-                below or start it from the other side.
+                Element) signed in, start verification from either side.
               </div>
               <div
                 style={{
@@ -977,12 +1122,14 @@ export default function BondfireChat() {
       {!loggedIn ? (
         <section className="card" style={{ marginTop: 12, padding: 12 }}>
           <h3 className="section-title" style={{ marginTop: 0 }}>
-            Sign in to chat
+            Sign in to Matrix
           </h3>
-          <div className="helper" style={{ marginBottom: 8 }}>
-            Homeserver: {BF_MATRIX_HS_URL}
-          </div>
-          <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
+          <form
+            onSubmit={login}
+            className="grid"
+            style={{ gap: 8, maxWidth: 520 }}
+          >
+            <input className="input" value={DEFAULT_HS_URL} disabled />
             <input
               className="input"
               placeholder="Username (localpart, without @ and domain)"
@@ -1006,7 +1153,8 @@ export default function BondfireChat() {
           style={{
             display: "grid",
             gridTemplateColumns:
-              window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+              window.matchMedia &&
+              window.matchMedia("(max-width: 820px)").matches
                 ? "1fr"
                 : "280px 1fr",
             gap: 12,
@@ -1063,14 +1211,18 @@ export default function BondfireChat() {
               padding: 12,
               minHeight: 420,
               height:
-                window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+                window.matchMedia &&
+                window.matchMedia("(max-width: 820px)").matches
                   ? "calc(100dvh - 220px)"
                   : "auto",
               display: "flex",
               flexDirection: "column",
             }}
           >
-            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
+            <h3
+              className="section-title"
+              style={{ marginTop: 0, marginBottom: 8 }}
+            >
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
             </h3>
@@ -1092,28 +1244,13 @@ export default function BondfireChat() {
                     key={m.id}
                     style={{ marginBottom: 10, display: "flex", gap: 10 }}
                   >
-                    {renderAvatar(m.sender)}
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#6b7280",
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span style={{ fontWeight: 700, color: "#cbd5e1" }}>
-                          {m.sender}
-                        </span>
-                        <span>·</span>
-                        <span>{new Date(m.ts).toLocaleString()}</span>
-                        {m.encrypted ? (
-                          <span title="Encrypted message">🔒</span>
-                        ) : null}
+                    <Avatar mxid={m.sender} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>
+                        {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
+                        {m.encrypted ? "🔒" : ""}
                       </div>
-                      <div style={{ wordBreak: "break-word" }}>
+                      <div>
                         {m.body || (
                           <span className="helper">(undecryptable)</span>
                         )}
