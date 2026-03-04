@@ -17,6 +17,9 @@ import {
 // Chat page doesn't make it look like you're reconnecting or re-verifying.
 const BF_MATRIX_GLOBAL = "__bf_matrix_client__";
 
+// Bondfire is opinionated: one homeserver for everyone.
+const BF_MATRIX_HS_URL = "https://matrix-client.matrix.org";
+
 function getGlobalMatrix() {
   try {
     return window[BF_MATRIX_GLOBAL] || null;
@@ -80,7 +83,10 @@ function legibleNow() {
 }
 
 function safeIdForEvent(ev) {
-  return ev?.getId?.() || `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`;
+  return (
+    ev?.getId?.() ||
+    `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`
+  );
 }
 
 function eventToMsg(ev) {
@@ -106,15 +112,40 @@ function eventToMsg(ev) {
   };
 }
 
+function initialsForMxid(mxid) {
+  const s = String(mxid || "").trim();
+  if (!s) return "?";
+  const cleaned = s.replace(/^@/, "").split(":")[0];
+  if (!cleaned) return "?";
+  return cleaned.slice(0, 2).toUpperCase();
+}
+
+function pickBgFromString(s) {
+  // stable, boring, usable
+  const str = String(s || "");
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return `hsl(${hue} 35% 28%)`;
+}
+
 /* --------------- component --------------- */
 export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  const saved = readJSON(`bf_matrix_${orgId}`, null);
+  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
+  const saved = savedRaw
+    ? { ...savedRaw, hsUrl: savedRaw.hsUrl || BF_MATRIX_HS_URL }
+    : null;
+
+  // Backfill hsUrl for older saves so boot can always start.
+  if (savedRaw && (!savedRaw.hsUrl || savedRaw.hsUrl !== saved.hsUrl)) {
+    writeJSON(`bf_matrix_${orgId}`, saved);
+  }
 
   // login form
-  const [hsUrl, setHsUrl] = useState("");
+  // Homeserver is fixed (BF_MATRIX_HS_URL)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -140,6 +171,10 @@ export default function BondfireChat() {
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
+
+  // profile cache for avatars + display names
+  const [avatarMap, setAvatarMap] = useState(() => ({})); // userId -> http url
+  const [nameMap, setNameMap] = useState(() => ({})); // userId -> displayname
 
   // UI toggles (persist per-org)
   const [hideUndecryptable, setHideUndecryptable] = useState(
@@ -169,6 +204,78 @@ export default function BondfireChat() {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
+  /* ---------- profile helpers ---------- */
+  const mxcToHttp = React.useCallback((mxc) => {
+    const c = clientRef.current;
+    if (!c || !mxc) return "";
+    try {
+      if (typeof c.mxcUrlToHttp === "function") return c.mxcUrlToHttp(mxc, 64, 64, "crop");
+      if (typeof c.getHttpUriForMxc === "function") return c.getHttpUriForMxc(mxc, 64, 64, "crop");
+      return "";
+    } catch {
+      return "";
+    }
+  }, []);
+
+  const ensureProfile = React.useCallback(async (mxid) => {
+    const u = String(mxid || "").trim();
+    if (!u) return;
+    if (avatarMap[u] || nameMap[u]) return;
+
+    const c = clientRef.current;
+    if (!c) return;
+
+    try {
+      const user = c.getUser?.(u);
+      const mxc = user?.avatarUrl || user?.avatar_url || "";
+      const dn = user?.displayName || user?.name || "";
+
+      if (dn) {
+        setNameMap((prev) => (prev[u] ? prev : { ...prev, [u]: dn }));
+      }
+      if (mxc) {
+        const http = mxcToHttp(mxc);
+        if (http) setAvatarMap((prev) => (prev[u] ? prev : { ...prev, [u]: http }));
+      }
+
+      // If we already found both, stop here.
+      if ((dn || nameMap[u]) && (mxc || avatarMap[u])) return;
+
+      // Otherwise ask the server (cached by sdk).
+      const prof = await c.getProfileInfo?.(u);
+      const avatarUrl = prof?.avatar_url || "";
+      const displayname = prof?.displayname || "";
+
+      if (displayname) {
+        setNameMap((prev) => (prev[u] ? prev : { ...prev, [u]: displayname }));
+      }
+      if (avatarUrl) {
+        const http = mxcToHttp(avatarUrl);
+        if (http) setAvatarMap((prev) => (prev[u] ? prev : { ...prev, [u]: http }));
+      }
+    } catch {
+      // ignore
+    }
+  }, [avatarMap, nameMap, mxcToHttp]);
+
+  useEffect(() => {
+    // prime cache for senders in current message list
+    const uniq = Array.from(new Set(messages.map((m) => m.sender).filter(Boolean)));
+    uniq.forEach((u) => {
+      ensureProfile(u);
+    });
+  }, [messages, ensureProfile]);
+
+  const displayNameFor = React.useCallback((mxid) => {
+    const u = String(mxid || "").trim();
+    return nameMap[u] || u;
+  }, [nameMap]);
+
+  const avatarFor = React.useCallback((mxid) => {
+    const u = String(mxid || "").trim();
+    return avatarMap[u] || "";
+  }, [avatarMap]);
+
   /* ---------- cleanup verification ---------- */
   const cleanupVerification = (finalMsg = "") => {
     setSasData(null);
@@ -184,8 +291,10 @@ export default function BondfireChat() {
 
   const markThisDeviceVerified = React.useCallback(() => {
     try {
-      const uidKey = clientRef.current?.getUserId?.() || saved?.userId || userId || "";
-      const didKey = clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
+      const uidKey =
+        clientRef.current?.getUserId?.() || saved?.userId || userId || "";
+      const didKey =
+        clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
       const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
@@ -243,10 +352,7 @@ export default function BondfireChat() {
         dbName: `bf_mx_store_${uid}`,
       });
 
-      cryptoStore = new IndexedDBCryptoStore(
-        window.indexedDB,
-        `bf_mx_crypto_${uid}`
-      );
+      cryptoStore = new IndexedDBCryptoStore(window.indexedDB, `bf_mx_crypto_${uid}`);
 
       client = createClient({
         baseUrl,
@@ -288,7 +394,7 @@ export default function BondfireChat() {
             encrypted: !!r.isEncrypted?.(),
           }))
         );
-      } catch (e) {
+      } catch {
         // ignore
       }
     }
@@ -358,7 +464,6 @@ export default function BondfireChat() {
         setCryptoReady(true);
       }
 
-
       // Determine whether THIS device is verified (best-effort).
       try {
         const crypto = client.getCrypto?.();
@@ -407,7 +512,10 @@ export default function BondfireChat() {
       try {
         // Keep the client alive globally; just detach listeners bound to this component.
         client.removeListener?.("sync", onSync);
-        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+        client.removeListener?.(
+          CryptoEvent.VerificationRequestReceived,
+          onVerificationReq
+        );
         client.removeListener?.("Room.timeline", onTimeline);
       } catch {}
       clientRef.current = null;
@@ -422,13 +530,17 @@ export default function BondfireChat() {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
       if (!crypto?.requestOwnUserVerification) {
-        setVerifyMsg("This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate.");
+        setVerifyMsg(
+          "This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate."
+        );
         return;
       }
       const req = await crypto.requestOwnUserVerification();
       setVerificationReq(req);
       setSasData(null);
-      setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
+      setVerifyMsg(
+        "Verification request sent. Accept it on your other device, then click Start SAS."
+      );
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
@@ -440,7 +552,8 @@ export default function BondfireChat() {
     try {
       const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
-      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      const pending =
+        crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
         setVerificationReq(pending[0]);
         setVerifyMsg("Found an in-progress verification. Continue below.");
@@ -493,7 +606,8 @@ export default function BondfireChat() {
                 // tuple form: ["🐶", "dog"]
                 if (Array.isArray(e)) return [e[0], e[1]];
                 // object form: { emoji: "🐶", description: "dog" }
-                if (e && typeof e === "object") return [e.emoji, e.description || e.name];
+                if (e && typeof e === "object")
+                  return [e.emoji, e.description || e.name];
                 return null;
               })
               .filter((pair) => Array.isArray(pair) && pair[0])
@@ -523,7 +637,7 @@ export default function BondfireChat() {
         try {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
-        cleanupVerification("Verified ✅");
+            cleanupVerification("Verified ✅");
           }
         } catch {
           // ignore
@@ -566,7 +680,7 @@ export default function BondfireChat() {
   const login = async (e) => {
     e.preventDefault();
     try {
-      const baseUrl = hsUrl.trim();
+      const baseUrl = BF_MATRIX_HS_URL;
       const localpart = username.trim();
       const temp = createClient({ baseUrl });
       const res = await temp.login("m.login.password", {
@@ -599,7 +713,10 @@ export default function BondfireChat() {
 
     // also clear local verified flag for this device
     try {
-      const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
+      const k = verifiedKeyFor(
+        saved?.userId || userId || "",
+        saved?.deviceId || deviceId || ""
+      );
       if (k) removeKey(k);
     } catch {
       // ignore
@@ -665,13 +782,18 @@ export default function BondfireChat() {
     const body = msg.trim();
     setMsg("");
 
+    const room = client.getRoom(activeRoomId);
+    const shouldShowEncryptedLock = !!(room?.isEncrypted?.() && cryptoReady);
+
     // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
       sender: saved?.userId || userId || "",
       ts: Date.now(),
-      encrypted: true,
+      encrypted: shouldShowEncryptedLock,
+      undecryptable: false,
+      msgtype: "m.text",
     };
     setMessages((prev) => [...prev, optimistic]);
 
@@ -694,7 +816,9 @@ export default function BondfireChat() {
   );
 
   const shownMessages = useMemo(() => {
-    const base = hideUndecryptable ? messages.filter((m) => !m.undecryptable) : messages;
+    const base = hideUndecryptable
+      ? messages.filter((m) => !m.undecryptable)
+      : messages;
     const sorted = [...base].sort((a, b) => a.ts - b.ts);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
@@ -744,16 +868,28 @@ export default function BondfireChat() {
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
-              <div className="helper">This device is verified for this account. You should be able to read and send E2EE messages in encrypted rooms. 🔒</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <div className="helper">
+                This device is verified for this account. You should be able to
+                read and send E2EE messages in encrypted rooms. 🔒
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 12,
+                  flexWrap: "wrap",
+                }}
+              >
                 <button className="btn" onClick={requestOwnVerification}>
                   Re-verify (optional)
                 </button>
               </div>
-            </>) : verificationReq ? (
+            </>
+          ) : verificationReq ? (
             <>
               <div className="helper">
-                From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
+                From: {verificationReq.otherUserId} ·{" "}
+                {verificationReq.otherDeviceId}
               </div>
 
               {sasData?.emoji || sasData?.decimal ? (
@@ -778,8 +914,12 @@ export default function BondfireChat() {
                             minWidth: 56,
                           }}
                         >
-                          <div style={{ fontSize: 28, lineHeight: 1 }}>{emoji}</div>
-                          <div style={{ fontSize: 11, opacity: 0.8 }}>{name}</div>
+                          <div style={{ fontSize: 28, lineHeight: 1 }}>
+                            {emoji}
+                          </div>
+                          <div style={{ fontSize: 11, opacity: 0.8 }}>
+                            {name}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -802,7 +942,14 @@ export default function BondfireChat() {
                   </div>
                 </>
               ) : (
-                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <button className="btn" onClick={acceptVerification}>
                     Accept
                   </button>
@@ -819,7 +966,14 @@ export default function BondfireChat() {
                 another client) for this Matrix account, request verification
                 below or start it from the other side.
               </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 12,
+                  flexWrap: "wrap",
+                }}
+              >
                 <button className="btn" onClick={requestOwnVerification}>
                   Request verification
                 </button>
@@ -843,14 +997,12 @@ export default function BondfireChat() {
           <h3 className="section-title" style={{ marginTop: 0 }}>
             Sign in to your Matrix homeserver
           </h3>
-          <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
-            <input
-              className="input"
-              placeholder="Homeserver base URL (e.g. https://matrix.org)"
-              value={hsUrl}
-              onChange={(e) => setHsUrl(e.target.value)}
-              required
-            />
+          <form
+            onSubmit={login}
+            className="grid"
+            style={{ gap: 8, maxWidth: 520 }}
+          >
+            <div className="helper">Homeserver: {BF_MATRIX_HS_URL}</div>
             <input
               className="input"
               placeholder="Username (localpart, without @ and domain)"
@@ -874,14 +1026,14 @@ export default function BondfireChat() {
           style={{
             display: "grid",
             gridTemplateColumns:
-              window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+              window.matchMedia &&
+              window.matchMedia("(max-width: 820px)").matches
                 ? "1fr"
                 : "280px 1fr",
             gap: 12,
             marginTop: 12,
           }}
         >
-
           <aside
             className="card"
             style={{
@@ -938,15 +1090,18 @@ export default function BondfireChat() {
               padding: 12,
               minHeight: 420,
               height:
-                window.matchMedia && window.matchMedia("(max-width: 820px)").matches
+                window.matchMedia &&
+                window.matchMedia("(max-width: 820px)").matches
                   ? "calc(100dvh - 220px)"
                   : "auto",
               display: "flex",
               flexDirection: "column",
             }}
           >
-
-            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
+            <h3
+              className="section-title"
+              style={{ marginTop: 0, marginBottom: 8 }}
+            >
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
             </h3>
@@ -963,17 +1118,74 @@ export default function BondfireChat() {
               {shownMessages.length === 0 ? (
                 <div className="helper">No messages yet.</div>
               ) : (
-                shownMessages.map((m) => (
-                  <div key={m.id} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
-                      {m.encrypted ? "🔒" : ""}
+                shownMessages.map((m) => {
+                  const avatar = avatarFor(m.sender);
+                  const displayName = displayNameFor(m.sender);
+                  const initials = initialsForMxid(m.sender);
+                  const bg = pickBgFromString(m.sender);
+
+                  return (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        marginBottom: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={displayName}
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 999,
+                            objectFit: "cover",
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            marginTop: 2,
+                            flex: "0 0 auto",
+                          }}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div
+                          title={displayName}
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 999,
+                            background: bg,
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            display: "grid",
+                            placeItems: "center",
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "#fff",
+                            marginTop: 2,
+                            flex: "0 0 auto",
+                          }}
+                        >
+                          {initials}
+                        </div>
+                      )}
+
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                          {displayName} · {new Date(m.ts).toLocaleString()}
+                          {m.encrypted ? " 🔒" : ""}
+                        </div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>
+                          {m.body || (
+                            <span className="helper">(undecryptable)</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      {m.body || <span className="helper">(undecryptable)</span>}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
