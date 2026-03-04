@@ -1,16 +1,17 @@
 // src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { createClient, IndexedDBStore, IndexedDBCryptoStore } from "matrix-js-sdk";
+import {
+  createClient,
+  IndexedDBStore,
+  IndexedDBCryptoStore,
+} from "matrix-js-sdk";
 
 import {
   CryptoEvent,
   VerifierEvent,
   canAcceptVerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api";
-
-// Hardcoded homeserver (per your requirement)
-const DEFAULT_HS_URL = "https://matrix-client.matrix.org";
 
 // Keep a single Matrix client alive per browser tab so switching away from the
 // Chat page doesn't make it look like you're reconnecting or re-verifying.
@@ -65,41 +66,12 @@ function parseOrgIdFromHash() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-function safeKeyPart(s) {
-  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
-}
-
 // Local flag so the UI can remember that THIS browser device was verified.
 // This is not the source of truth for encryption, it is a convenience signal.
 function verifiedKeyFor(userId, deviceId) {
-  const u = safeKeyPart(userId);
-  const d = safeKeyPart(deviceId);
+  const u = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  const d = String(deviceId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
   return `bf_mx_verified_${u}_${d}`;
-}
-
-// Persistent salt so we can rotate IndexedDB namespaces if the SDK store ever mismatches.
-function storeSaltKey(orgId, userId, deviceId) {
-  return `bf_mx_store_salt_${safeKeyPart(orgId)}_${safeKeyPart(userId)}_${safeKeyPart(deviceId)}`;
-}
-
-function getOrCreateStoreSalt(orgId, userId, deviceId) {
-  const k = storeSaltKey(orgId, userId, deviceId);
-  const existing = readJSON(k, "");
-  if (existing) return existing;
-  const salt =
-    (globalThis.crypto && crypto.randomUUID && crypto.randomUUID()) ||
-    `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  writeJSON(k, salt);
-  return salt;
-}
-
-function rotateStoreSalt(orgId, userId, deviceId) {
-  const k = storeSaltKey(orgId, userId, deviceId);
-  const salt =
-    (globalThis.crypto && crypto.randomUUID && crypto.randomUUID()) ||
-    `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  writeJSON(k, salt);
-  return salt;
 }
 
 const ts = legibleNow;
@@ -120,7 +92,7 @@ function eventToMsg(ev) {
   const msgtype = content?.msgtype;
 
   // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
-  // and/or provides isDecryptionFailure().
+  // and/or provides isDecryptionFailure(). Some homeservers also stuff a human-readable string into body.
   const undecryptable =
     !!ev?.isDecryptionFailure?.() ||
     msgtype === "m.bad.encrypted" ||
@@ -138,15 +110,55 @@ function eventToMsg(ev) {
   };
 }
 
-function initials(mxid) {
-  const s = String(mxid || "").trim();
-  if (!s) return "?";
-  // "@name:server" -> "name"
-  const core = s.startsWith("@") ? s.slice(1).split(":")[0] : s.split(":")[0];
-  const parts = core.replace(/[_\-.]/g, " ").split(/\s+/).filter(Boolean);
-  const a = (parts[0] || "?").slice(0, 1).toUpperCase();
-  const b = (parts[1] || "").slice(0, 1).toUpperCase();
-  return (a + b).slice(0, 2);
+function normalizeMxid(u) {
+  // Guard against older bad saves like "@user:server:deviceId".
+  // A valid MXID is "@localpart:server".
+  const s = String(u || "").trim();
+  if (!s) return "";
+  const parts = s.split(":");
+  if (parts.length <= 2) return s;
+  return `${parts[0]}:${parts[1]}`;
+}
+
+async function getDeviceVerifiedTruth(client) {
+  // Best-effort across sdk versions.
+  try {
+    const crypto = client?.getCrypto?.();
+    const uid = client?.getUserId?.();
+    const did = client?.getDeviceId?.();
+    if (!crypto || !uid || !did) return null;
+
+    // Newer: crypto.getDeviceVerificationStatus(userId, deviceId)
+    if (typeof crypto.getDeviceVerificationStatus === "function") {
+      const res = await crypto.getDeviceVerificationStatus(uid, did);
+      if (res === true) return true;
+      if (res === false) return false;
+      if (res && typeof res === "object") {
+        if (res.isVerified === true) return true;
+        if (res.verified === true) return true;
+        if (res.isCrossSigningVerified === true) return true;
+        if (res.isVerified === false) return false;
+        if (res.verified === false) return false;
+      }
+    }
+
+    // Older (sometimes): crypto.getDeviceVerification(userId, deviceId)
+    if (typeof crypto.getDeviceVerification === "function") {
+      const res = await crypto.getDeviceVerification(uid, did);
+      if (res === true) return true;
+      if (res === false) return false;
+      if (res && typeof res === "object") {
+        if (res.verified === true) return true;
+        if (res.isVerified === true) return true;
+        if (res.verified === false) return false;
+        if (res.isVerified === false) return false;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /* --------------- component --------------- */
@@ -154,10 +166,18 @@ export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  const saved = readJSON(`bf_matrix_${orgId}`, null);
+  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
+  const saved = savedRaw
+    ? { ...savedRaw, userId: normalizeMxid(savedRaw.userId) }
+    : null;
 
-  // login form (homeserver is fixed)
-  const [hsUrl, setHsUrl] = useState(DEFAULT_HS_URL);
+  if (savedRaw?.userId && saved?.userId && savedRaw.userId !== saved.userId) {
+    writeJSON(`bf_matrix_${orgId}`, saved);
+  }
+
+  // login form
+  const HS_DEFAULT = "https://matrix-client.matrix.org";
+  const [hsUrl, setHsUrl] = useState(HS_DEFAULT);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -184,8 +204,8 @@ export default function BondfireChat() {
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // avatars cache: mxid -> http url (or "")
-  const [avatarMap, setAvatarMap] = useState({});
+  // member cache for display names + avatars
+  const [memberCache, setMemberCache] = useState({}); // { [roomId]: { [mxid]: {name, avatarUrl} } }
 
   // UI toggles (persist per-org)
   const [hideUndecryptable, setHideUndecryptable] = useState(
@@ -215,168 +235,6 @@ export default function BondfireChat() {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
-  /* ---------- derived helpers ---------- */
-  const loggedIn = !!(saved?.hsUrl && saved?.userId && saved?.accessToken);
-
-  const getClient = () => clientRef.current;
-
-  const refreshRooms = React.useCallback(() => {
-  const client = clientRef.current;
-  if (!client) return;
-
-  try {
-    // matrix-js-sdk has getVisibleRooms() but it can return [] after remounts
-    // depending on sync timing. Fall back to getRooms().
-    let rs = [];
-    try {
-      if (typeof client.getVisibleRooms === "function") {
-        rs = client.getVisibleRooms() || [];
-      }
-    } catch {
-      rs = [];
-    }
-
-    if (!Array.isArray(rs) || rs.length === 0) {
-      try {
-        rs = client.getRooms?.() || [];
-      } catch {
-        rs = [];
-      }
-    }
-
-    const joined = (rs || [])
-      .filter((r) => {
-        try {
-          const m = r.getMyMembership?.() || r.myMembership;
-          return m === "join" || m === "invite";
-        } catch {
-          return false;
-        }
-      })
-      .sort((a, b) => {
-        const ta = a.getLastActiveTimestamp?.() || 0;
-        const tb = b.getLastActiveTimestamp?.() || 0;
-        return tb - ta;
-      });
-
-    setRooms(
-      joined.map((r) => ({
-        id: r.roomId,
-        name: r.name || r.getCanonicalAlias?.() || r.roomId,
-        encrypted: !!r.isEncrypted?.(),
-      }))
-    );
-  } catch {
-    // ignore
-  }
-}, []);
-
-  const updateAvatarFor = React.useCallback(
-    (mxid) => {
-      const client = getClient();
-      if (!client) return;
-      const uid = String(mxid || "").trim();
-      if (!uid) return;
-
-      setAvatarMap((prev) => {
-        if (Object.prototype.hasOwnProperty.call(prev, uid)) return prev;
-        return { ...prev, [uid]: "" };
-      });
-
-      // Try room member first (more accurate per-room)
-      try {
-        const roomId = activeRoomIdRef.current;
-        const room = roomId ? client.getRoom(roomId) : null;
-        const member = room?.getMember?.(uid) || null;
-        const mxc =
-          member?.getAvatarUrl?.(client.getHomeserverUrl?.(), 48, 48, "crop") ||
-          member?.avatarUrl ||
-          null;
-
-        if (mxc) {
-          const http =
-            typeof client.mxcUrlToHttp === "function"
-              ? client.mxcUrlToHttp(mxc, 48, 48, "crop")
-              : mxc;
-          setAvatarMap((prev) => ({ ...prev, [uid]: http || "" }));
-          return;
-        }
-      } catch {
-        // ignore
-      }
-
-      // Fallback: user object
-      try {
-        const user = client.getUser?.(uid) || null;
-        const mxc = user?.avatarUrl || null;
-        if (mxc) {
-          const http =
-            typeof client.mxcUrlToHttp === "function"
-              ? client.mxcUrlToHttp(mxc, 48, 48, "crop")
-              : mxc;
-          setAvatarMap((prev) => ({ ...prev, [uid]: http || "" }));
-        }
-      } catch {
-        // ignore
-      }
-    },
-    []
-  );
-
-  const refreshVerificationState = React.useCallback(async () => {
-    const client = getClient();
-    if (!client) return;
-
-    // Capture deviceId if we didn't have it (stabilizes local verified key names)
-    try {
-      const did = client.getDeviceId?.() || "";
-      if (did && did !== deviceId) {
-        setDeviceId(did);
-        if (saved?.hsUrl && saved?.userId && saved?.accessToken) {
-          writeJSON(`bf_matrix_${orgId}`, {
-            hsUrl: saved.hsUrl,
-            userId: saved.userId,
-            accessToken: saved.accessToken,
-            deviceId: did,
-          });
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      const crypto = client.getCrypto?.();
-      if (!crypto) {
-        setCryptoReady(false);
-        return;
-      }
-
-      setCryptoReady(true);
-
-      const myUid = client.getUserId?.() || saved?.userId || userId || "";
-      const myDid = client.getDeviceId?.() || saved?.deviceId || deviceId || "";
-      const key = verifiedKeyFor(myUid, myDid);
-
-      let verified = key ? !!readJSON(key, false) : false;
-
-      // Prefer SDK truth if available
-      if (typeof crypto.getDeviceVerificationStatus === "function") {
-        const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
-        verified =
-          res === true ||
-          res?.isVerified === true ||
-          res?.verified === true ||
-          res?.isCrossSigningVerified === true;
-      }
-
-      setDeviceVerified(!!verified);
-    } catch {
-      // If crypto exists but something throws, do NOT flip to "not ready" and panic the UI.
-      // Just keep whatever we had.
-    }
-  }, [orgId, saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, userId, deviceId]);
-
   /* ---------- cleanup verification ---------- */
   const cleanupVerification = (finalMsg = "") => {
     setSasData(null);
@@ -392,9 +250,10 @@ export default function BondfireChat() {
 
   const markThisDeviceVerified = React.useCallback(() => {
     try {
-      const c = getClient();
-      const uidKey = c?.getUserId?.() || saved?.userId || userId || "";
-      const didKey = c?.getDeviceId?.() || saved?.deviceId || deviceId || "";
+      const uidKey =
+        clientRef.current?.getUserId?.() || saved?.userId || userId || "";
+      const didKey =
+        clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
       const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
@@ -402,6 +261,97 @@ export default function BondfireChat() {
       setDeviceVerified(true);
     }
   }, [saved?.userId, saved?.deviceId, userId, deviceId]);
+
+  const refreshRooms = React.useCallback(() => {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const rs = client
+        .getVisibleRooms()
+        .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
+        .sort(
+          (a, b) =>
+            (b.getLastActiveTimestamp?.() || 0) -
+            (a.getLastActiveTimestamp?.() || 0)
+        );
+
+      setRooms(
+        rs.map((r) => ({
+          id: r.roomId,
+          name: r.name || r.getCanonicalAlias?.() || r.roomId,
+          encrypted: !!r.isEncrypted?.(),
+        }))
+      );
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const refreshVerificationTruth = React.useCallback(async () => {
+    const client = clientRef.current;
+    if (!client) return;
+
+    // If crypto isn't there yet, don't clobber the UI.
+    try {
+      const crypto = client.getCrypto?.();
+      if (!crypto) return;
+    } catch {
+      return;
+    }
+
+    const truth = await getDeviceVerifiedTruth(client);
+    if (truth === true) {
+      setDeviceVerified(true);
+      try {
+        const k = verifiedKeyFor(client.getUserId?.(), client.getDeviceId?.());
+        if (k) writeJSON(k, true);
+      } catch {}
+    } else if (truth === false) {
+      setDeviceVerified(false);
+    }
+  }, []);
+
+  function cacheMember(roomId, mxid, info) {
+    setMemberCache((prev) => {
+      const r = prev[roomId] || {};
+      const existing = r[mxid] || {};
+      const next = { ...existing, ...info };
+      if (
+        existing.name === next.name &&
+        existing.avatarUrl === next.avatarUrl
+      ) {
+        return prev;
+      }
+      return { ...prev, [roomId]: { ...r, [mxid]: next } };
+    });
+  }
+
+  function getMemberInfo(roomId, mxid) {
+    const cached = memberCache?.[roomId]?.[mxid];
+    if (cached) return cached;
+
+    const client = clientRef.current;
+    if (!client) return { name: mxid, avatarUrl: "" };
+
+    try {
+      const room = client.getRoom(roomId);
+      const m = room?.getMember?.(mxid);
+      const name = m?.name || mxid;
+
+      let avatarUrl = "";
+      const mxc = m?.getMxcAvatarUrl?.() || m?.events?.member?.getContent?.()?.avatar_url;
+      if (mxc && typeof client.mxcUrlToHttp === "function") {
+        // Keep it tiny. It's an avatar, not a movie.
+        avatarUrl = client.mxcUrlToHttp(mxc, 48, 48, "crop") || "";
+      }
+
+      const info = { name, avatarUrl };
+      cacheMember(roomId, mxid, info);
+      return info;
+    } catch {
+      return { name: mxid, avatarUrl: "" };
+    }
+  }
 
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
@@ -416,6 +366,7 @@ export default function BondfireChat() {
     const baseUrl = saved.hsUrl;
     const uid = saved.userId;
     const token = saved.accessToken;
+    // Older sessions may not have persisted deviceId.
     const did = saved.deviceId || "";
 
     // Keep state aligned with storage
@@ -423,7 +374,6 @@ export default function BondfireChat() {
     setAccessToken(token);
     setDeviceId(did);
 
-    // Reuse an existing Matrix client for this tab
     const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
     const canReuse =
@@ -440,27 +390,18 @@ export default function BondfireChat() {
 
     if (canReuse) {
       client = g.client;
+      if (!did && g?.deviceId) setDeviceId(g.deviceId);
       log("Connected (resumed)");
-      clientRef.current = client;
-      // On reuse, re-evaluate crypto + verification immediately (no false UI panic).
-      setTimeout(() => {
-        refreshRooms();
-        refreshVerificationState();
-      }, 0);
     } else {
-      // Stronger store names: org + user + device + persistent salt
-      const salt = getOrCreateStoreSalt(orgId, uid, did || "nodevice");
-      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did || "nodevice")}_${safeKeyPart(salt)}`;
-
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${storeKey}`,
+        dbName: `bf_mx_store_${uid}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${storeKey}`
+        `bf_mx_crypto_${uid}`
       );
 
       client = createClient({
@@ -480,10 +421,10 @@ export default function BondfireChat() {
         deviceId: did,
       });
 
-      clientRef.current = client;
-
       log("Connecting…");
     }
+
+    clientRef.current = client;
 
     function onTimeline(ev, room, toStartOfTimeline) {
       if (stoppedRef.current) return;
@@ -495,8 +436,7 @@ export default function BondfireChat() {
 
       const m = eventToMsg(ev);
 
-      updateAvatarFor(m.sender);
-
+      // De-dupe and update
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         return [...prev, m];
@@ -519,8 +459,13 @@ export default function BondfireChat() {
         setReady(true);
         setStatus("Connected");
         refreshRooms();
-        refreshVerificationState();
+        refreshVerificationTruth();
       }
+    }
+
+    function onRoomUpdate() {
+      // room list updates (invites, joins, etc)
+      refreshRooms();
     }
 
     (async () => {
@@ -544,106 +489,86 @@ export default function BondfireChat() {
           }
         } catch (e) {
           setCryptoReady(false);
-          const msg = String(e?.message || e);
-          log("Crypto init failed:", msg);
-
-          // Auto-recover from store mismatch by rotating salt + reloading once.
-          if (
-            msg.toLowerCase().includes("account in the store") &&
-            msg.toLowerCase().includes("doesn't match")
-          ) {
-            try {
-              rotateStoreSalt(orgId, uid, did || "nodevice");
-            } catch {}
-            try {
-              client.stopClient?.();
-              client.removeAllListeners?.();
-            } catch {}
-            try {
-              clearGlobalMatrix();
-            } catch {}
-            setStatus(`[${ts()}] Resetting local crypto store (mismatch). Reloading…`);
-            setTimeout(() => {
-              try {
-                window.location.reload();
-              } catch {}
-            }, 250);
-            return;
-          }
+          log("Crypto init failed:", e?.message || e);
         }
-
-        client.on("sync", onSync);
-        client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
-        client.on("Room.timeline", onTimeline);
-
-// Keep room list fresh even when the component remounts and "sync PREPARED"
-// doesn't fire again (because the client is already running).
-client.on("Room", refreshRooms);
-client.on("Room.name", refreshRooms);
-client.on("Room.myMembership", refreshRooms);
-
-        client.startClient({ initialSyncLimit: 30 });
       } else {
-        client.on("sync", onSync);
-        client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
-        client.on("Room.timeline", onTimeline);
+        // Reused client: crypto might already be ready, but don't lie if it's not.
+        try {
+          setCryptoReady(!!client.getCrypto?.());
+        } catch {
+          setCryptoReady(false);
+        }
       }
 
-      // If a verification request already exists, hydrate it.
+      // Always do these on boot and on reuse so the UI reflects truth.
+      refreshRooms();
+      refreshVerificationTruth();
+
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
-        const pending =
-          crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
-        if (pending.length) onVerificationReq(pending[0]);
+        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(
+          myUid
+        );
+        if (pending && pending.length) onVerificationReq(pending[0]);
       } catch {
         // ignore
       }
 
-      // Pull my avatar early
-      try {
-        updateAvatarFor(client.getUserId?.() || uid);
-      } catch {
-        // ignore
-      }
+      client.on("sync", onSync);
+      client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+      client.on("Room.timeline", onTimeline);
+
+      // room list updates
+      client.on?.("Room", onRoomUpdate);
+      client.on?.("Room.myMembership", onRoomUpdate);
+
+      if (!canReuse) client.startClient({ initialSyncLimit: 30 });
     })();
-
-    // When you tab away/back, refresh the truth (crypto can still be fine, UI just got dumb).
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
-        refreshRooms();
-        refreshVerificationState();
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onVis);
 
     return () => {
       stoppedRef.current = true;
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onVis);
       try {
         client.removeListener?.("sync", onSync);
-        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
+        client.removeListener?.(
+          CryptoEvent.VerificationRequestReceived,
+          onVerificationReq
+        );
         client.removeListener?.("Room.timeline", onTimeline);
-        client.removeListener?.("Room", refreshRooms);
-        client.removeListener?.("Room.name", refreshRooms);
-        client.removeListener?.("Room.myMembership", refreshRooms);
+        client.removeListener?.("Room", onRoomUpdate);
+        client.removeListener?.("Room.myMembership", onRoomUpdate);
       } catch {}
       clientRef.current = null;
     };
-  }, [orgId, saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, refreshRooms, refreshVerificationState, updateAvatarFor]);
+  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, refreshRooms, refreshVerificationTruth]);
+
+  // When you tab away and back, do a light refresh so we don't "look unverified"
+  // while still working.
+  useEffect(() => {
+    function onVis() {
+      if (document.visibilityState === "visible") {
+        refreshRooms();
+        refreshVerificationTruth();
+      }
+    }
+    window.addEventListener("focus", onVis);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", onVis);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [refreshRooms, refreshVerificationTruth]);
 
   /* -------- verification actions -------- */
   async function requestOwnVerification() {
-    const client = getClient();
+    const client = clientRef.current;
     if (!client) return;
     try {
       setVerifyMsg("");
       const crypto = client.getCrypto?.();
       if (!crypto?.requestOwnUserVerification) {
         setVerifyMsg(
-          "Verification request API missing in this SDK build. Start verification from Element (recommended), then come back."
+          "This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate."
         );
         return;
       }
@@ -654,19 +579,12 @@ client.on("Room.myMembership", refreshRooms);
         "Verification request sent. Accept it on your other device, then click Start SAS."
       );
     } catch (e) {
-      const msg = String(e?.message || e);
-      if (msg.toLowerCase().includes("no existing cross-signing key")) {
-        setVerifyMsg(
-          "Cross-signing keys not ready yet. Element usually bootstraps this. Wait a moment, then try again."
-        );
-      } else {
-        setVerifyMsg(msg);
-      }
+      setVerifyMsg(e?.message || String(e));
     }
   }
 
   function checkPendingVerification() {
-    const client = getClient();
+    const client = clientRef.current;
     if (!client) return;
     try {
       const crypto = client.getCrypto?.();
@@ -741,12 +659,10 @@ client.on("Room.myMembership", refreshRooms);
       verifier.on(VerifierEvent.Done, () => {
         markThisDeviceVerified();
         cleanupVerification("Verified ✅");
-        refreshVerificationState();
       });
 
       verifier.on(VerifierEvent.Cancel, (e) => {
         cleanupVerification(`Cancelled: ${e?.reason || "unknown"}`);
-        refreshVerificationState();
       });
 
       verifier.on?.("change", () => {
@@ -754,7 +670,6 @@ client.on("Room.myMembership", refreshRooms);
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
             cleanupVerification("Verified ✅");
-            refreshVerificationState();
           }
         } catch {
           // ignore
@@ -775,8 +690,7 @@ client.on("Room.myMembership", refreshRooms);
       setTimeout(() => {
         if (verifierRef.current) markThisDeviceVerified();
         cleanupVerification("Verified ✅");
-        refreshVerificationState();
-      }, 1500);
+      }, 6500);
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
@@ -786,17 +700,18 @@ client.on("Room.myMembership", refreshRooms);
     try {
       await sasData?.mismatch?.();
       cleanupVerification("Mismatch sent.");
-      refreshVerificationState();
     } catch (e) {
       setVerifyMsg(e?.message || String(e));
     }
   }
 
   /* -------------- session -------------- */
+  const loggedIn = !!(saved?.hsUrl && saved?.userId && saved?.accessToken);
+
   const login = async (e) => {
     e.preventDefault();
     try {
-      const baseUrl = DEFAULT_HS_URL;
+      const baseUrl = HS_DEFAULT;
       const localpart = username.trim();
       const temp = createClient({ baseUrl });
       const res = await temp.login("m.login.password", {
@@ -806,7 +721,7 @@ client.on("Room.myMembership", refreshRooms);
 
       const next = {
         hsUrl: baseUrl,
-        userId: res.user_id,
+        userId: normalizeMxid(res.user_id),
         accessToken: res.access_token,
         deviceId: res.device_id || "",
       };
@@ -828,15 +743,13 @@ client.on("Room.myMembership", refreshRooms);
     removeKey(`bf_matrix_${orgId}`);
 
     try {
-      const c = getClient();
       const k = verifiedKeyFor(
-        c?.getUserId?.() || saved?.userId || userId || "",
-        c?.getDeviceId?.() || saved?.deviceId || deviceId || ""
+        saved?.userId || userId || "",
+        saved?.deviceId || deviceId || ""
       );
       if (k) removeKey(k);
-    } catch {
-      // ignore
-    }
+    } catch {}
+
     setDeviceVerified(false);
 
     setUserId("");
@@ -848,7 +761,6 @@ client.on("Room.myMembership", refreshRooms);
     setActiveRoomId(null);
     setMessages([]);
     setMsg("");
-    setAvatarMap({});
     cleanupVerification("");
 
     if (clientRef.current) {
@@ -864,12 +776,6 @@ client.on("Room.myMembership", refreshRooms);
   };
 
   const resetMatrixStorage = () => {
-    // rotate salt so next boot uses a fresh IndexedDB namespace
-    try {
-      const uid = saved?.userId || userId || "";
-      const did = saved?.deviceId || deviceId || "nodevice";
-      if (uid) rotateStoreSalt(orgId, uid, did);
-    } catch {}
     removeKey(`bf_matrix_${orgId}`);
     logout();
   };
@@ -879,19 +785,30 @@ client.on("Room.myMembership", refreshRooms);
     setActiveRoomId(roomId);
     setMessages([]);
 
-    const client = getClient();
+    const client = clientRef.current;
     if (!client) return;
 
     const room = client.getRoom(roomId);
     if (!room) return;
 
-    // Update avatar cache for current room members (best-effort)
+    // Warm member cache for this room so avatars show instantly.
     try {
-      const members = room.getMembers?.() || [];
-      members.slice(0, 100).forEach((m) => updateAvatarFor(m?.userId));
-    } catch {
-      // ignore
-    }
+      const members = room.getJoinedMembers?.() || [];
+      members.forEach((m) => {
+        const mxid = m?.userId;
+        if (!mxid) return;
+
+        let avatarUrl = "";
+        const mxc =
+          m?.getMxcAvatarUrl?.() ||
+          m?.events?.member?.getContent?.()?.avatar_url;
+        if (mxc && typeof client.mxcUrlToHttp === "function") {
+          avatarUrl = client.mxcUrlToHttp(mxc, 48, 48, "crop") || "";
+        }
+
+        cacheMember(roomId, mxid, { name: m?.name || mxid, avatarUrl });
+      });
+    } catch {}
 
     const tl = room.getLiveTimeline?.();
     const evs = (tl?.getEvents?.() || []).filter(
@@ -899,25 +816,24 @@ client.on("Room.myMembership", refreshRooms);
     );
 
     const mapped = evs.map(eventToMsg);
-    mapped.forEach((m) => updateAvatarFor(m.sender));
     setMessages(mapped);
   };
 
   const send = async (e) => {
     e.preventDefault();
-    const client = getClient();
-    const room = rooms.find((r) => r.id === activeRoomId) || null;
+    const client = clientRef.current;
     if (!client || !activeRoomId || !msg.trim()) return;
 
     const body = msg.trim();
     setMsg("");
 
+    // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
       sender: saved?.userId || userId || "",
       ts: Date.now(),
-      encrypted: !!room?.encrypted,
+      encrypted: true,
       undecryptable: false,
     };
     setMessages((prev) => [...prev, optimistic]);
@@ -948,44 +864,7 @@ client.on("Room.myMembership", refreshRooms);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
 
-  const Avatar = ({ mxid }) => {
-    const url = avatarMap[mxid] || "";
-    if (url) {
-      return (
-        <img
-          src={url}
-          alt=""
-          style={{
-            height: 28,
-            width: 28,
-            borderRadius: 999,
-            objectFit: "cover",
-            border: "1px solid rgba(255,255,255,0.12)",
-          }}
-        />
-      );
-    }
-    return (
-      <div
-        title={mxid}
-        style={{
-          height: 28,
-          width: 28,
-          borderRadius: 999,
-          display: "grid",
-          placeItems: "center",
-          fontSize: 11,
-          fontWeight: 800,
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          color: "#fff",
-          userSelect: "none",
-        }}
-      >
-        {initials(mxid)}
-      </div>
-    );
-  };
+  const deviceLock = !cryptoReady ? "🟡" : deviceVerified ? "🔒" : "🔓";
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -1013,8 +892,8 @@ client.on("Room.myMembership", refreshRooms);
       {loggedIn && (
         <div className="helper" style={{ marginTop: 8 }}>
           <strong>Signed in as:</strong> {saved?.userId || userId} ·{" "}
-          <strong>Device:</strong> {deviceId || saved?.deviceId || "(loading)"}{" "}
-          {!cryptoReady ? "🟡" : deviceVerified ? "🔒" : "🔓"}
+          <strong>Device:</strong> {saved?.deviceId || deviceId || "(loading)"}{" "}
+          {deviceLock}
         </div>
       )}
 
@@ -1027,8 +906,7 @@ client.on("Room.myMembership", refreshRooms);
 
           {!cryptoReady ? (
             <div className="helper">
-              Crypto isn’t ready yet. If this persists, your crypto store may be
-              mismatched. Try Reset Matrix storage.
+              Crypto isn’t ready yet, so verification can’t start.
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
@@ -1160,12 +1038,14 @@ client.on("Room.myMembership", refreshRooms);
           <h3 className="section-title" style={{ marginTop: 0 }}>
             Sign in to Matrix
           </h3>
+          <div className="helper" style={{ marginBottom: 10 }}>
+            Homeserver is fixed to {HS_DEFAULT}
+          </div>
           <form
             onSubmit={login}
             className="grid"
             style={{ gap: 8, maxWidth: 520 }}
           >
-            <input className="input" value={DEFAULT_HS_URL} disabled />
             <input
               className="input"
               placeholder="Username (localpart, without @ and domain)"
@@ -1197,7 +1077,13 @@ client.on("Room.myMembership", refreshRooms);
             marginTop: 12,
           }}
         >
-          <aside className="card" style={{ padding: 12, minHeight: 0 }}>
+          <aside
+            className="card"
+            style={{
+              padding: 12,
+              minHeight: 0,
+            }}
+          >
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -1275,32 +1161,75 @@ client.on("Room.myMembership", refreshRooms);
               {shownMessages.length === 0 ? (
                 <div className="helper">No messages yet.</div>
               ) : (
-                shownMessages.map((m) => (
-                  <div
-                    key={m.id}
-                    style={{ marginBottom: 10, display: "flex", gap: 10 }}
-                  >
-                    <Avatar mxid={m.sender} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
-                        {m.encrypted ? "🔒" : ""}
-                      </div>
-                      <div>
-                        {m.body || (
-                          <span className="helper">(undecryptable)</span>
-                        )}
+                shownMessages.map((m) => {
+                  const info = activeRoomId
+                    ? getMemberInfo(activeRoomId, m.sender)
+                    : { name: m.sender, avatarUrl: "" };
+
+                  return (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        marginBottom: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      {info.avatarUrl ? (
+                        <img
+                          src={info.avatarUrl}
+                          alt=""
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 999,
+                            objectFit: "cover",
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            marginTop: 2,
+                          }}
+                        />
+                      ) : (
+                        <div
+                          aria-hidden="true"
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 999,
+                            background: "rgba(255,255,255,0.08)",
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            marginTop: 2,
+                          }}
+                        />
+                      )}
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                          {info.name} · {new Date(m.ts).toLocaleString()}{" "}
+                          {m.encrypted && !m.undecryptable ? "🔒" : ""}
+                        </div>
+                        <div>
+                          {m.body || (
+                            <span className="helper">(undecryptable)</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
-            <form onSubmit={send} className="row" style={{ gap: 8, marginTop: 8 }}>
+            <form
+              onSubmit={send}
+              className="row"
+              style={{ gap: 8, marginTop: 8 }}
+            >
               <input
                 className="input"
-                placeholder={currentRoom ? "Type a message…" : "Pick a room first"}
+                placeholder={
+                  currentRoom ? "Type a message…" : "Pick a room first"
+                }
                 value={msg}
                 onChange={(e) => setMsg(e.target.value)}
                 disabled={!currentRoom}
