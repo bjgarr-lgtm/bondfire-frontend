@@ -74,6 +74,20 @@ function verifiedKeyFor(userId, deviceId) {
   return `bf_mx_verified_${u}_${d}`;
 }
 
+function normalizeMxid(u) {
+  // Guard against older bad saves like "@user:server:deviceId".
+  // A valid MXID is "@localpart:server".
+  const s = String(u || "").trim();
+  if (!s) return "";
+  const parts = s.split(":");
+  if (parts.length <= 2) return s;
+  return `${parts[0]}:${parts[1]}`;
+}
+
+function safeKeyPart(s) {
+  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+}
+
 const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
@@ -81,43 +95,6 @@ function legibleNow() {
 
 function safeIdForEvent(ev) {
   return ev?.getId?.() || `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`;
-}
-
-function initialsFromLabel(label) {
-  const s = String(label || "").trim();
-  if (!s) return "?";
-  return s
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0])
-    .join("")
-    .toUpperCase();
-}
-
-function getUserAvatarHttp(client, matrixUserId, size = 48) {
-  try {
-    if (!client || !matrixUserId) return null;
-    const u = client.getUser?.(matrixUserId) || null;
-    const mxc = u?.avatarUrl || null;
-    if (!mxc) return null;
-    if (typeof client.mxcUrlToHttp !== "function") return null;
-    return client.mxcUrlToHttp(mxc, size, size, "crop", true);
-  } catch {
-    return null;
-  }
-}
-
-function getRoomAvatarHttp(client, room, size = 48) {
-  try {
-    if (!client || !room) return null;
-    if (typeof room.getAvatarUrl !== "function") return null;
-    const hs = client.getHomeserverUrl?.() || client.baseUrl || "";
-    const url = room.getAvatarUrl(hs, size, size, "crop", true);
-    return url || null;
-  } catch {
-    return null;
-  }
 }
 
 function eventToMsg(ev) {
@@ -148,7 +125,18 @@ export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  const saved = readJSON(`bf_matrix_${orgId}`, null);
+  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
+  const saved = savedRaw
+    ? {
+        ...savedRaw,
+        userId: normalizeMxid(savedRaw.userId),
+      }
+    : null;
+
+  if (savedRaw?.userId && saved?.userId && savedRaw.userId !== saved.userId) {
+    // Persist the correction so we stop poisoning IndexedDB stores with a bogus MXID.
+    writeJSON(`bf_matrix_${orgId}`, saved);
+  }
 
   // login form
   const [hsUrl, setHsUrl] = useState("");
@@ -269,15 +257,19 @@ export default function BondfireChat() {
       client = g.client;
       log("Connected (resumed)");
     } else {
+      // Include orgId + deviceId in the DB names.
+      // This prevents crypto-store/account mismatch errors when you log in with a new device.
+      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}`;
+
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${uid}`,
+        dbName: `bf_mx_store_${storeKey}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${uid}`
+        `bf_mx_crypto_${storeKey}`
       );
 
       client = createClient({
@@ -318,7 +310,6 @@ export default function BondfireChat() {
             id: r.roomId,
             name: r.name || r.getCanonicalAlias?.() || r.roomId,
             encrypted: !!r.isEncrypted?.(),
-            avatar: getRoomAvatarHttp(client, r, 44),
           }))
         );
       } catch (e) {
@@ -853,9 +844,15 @@ export default function BondfireChat() {
                 below or start it from the other side.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="btn" onClick={requestOwnVerification}>
-                  Request verification
-                </button>
+                {client?.getCrypto?.()?.requestOwnUserVerification ? (
+                  <button className="btn" onClick={requestOwnVerification}>
+                    Request verification
+                  </button>
+                ) : (
+                  <button className="btn" disabled title="Not supported by this Matrix SDK build">
+                    Request verification
+                  </button>
+                )}
                 <button className="btn" onClick={checkPendingVerification}>
                   Check pending
                 </button>
@@ -879,7 +876,7 @@ export default function BondfireChat() {
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
-              placeholder= "Homeserver base URL (e.g. https://matrix-client.matrix.org)"
+              placeholder="Homeserver base URL (e.g. https://matrix.org)"
               value={hsUrl}
               onChange={(e) => setHsUrl(e.target.value)}
               required
@@ -955,34 +952,7 @@ export default function BondfireChat() {
                       e.preventDefault();
                       selectRoom(r.id);
                     }}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
                   >
-                    <span
-                      style={{
-                        height: 22,
-                        width: 22,
-                        borderRadius: 999,
-                        overflow: "hidden",
-                        border: "1px solid rgba(255,255,255,0.16)",
-                        background: "rgba(255,255,255,0.06)",
-                        display: "grid",
-                        placeItems: "center",
-                        fontWeight: 800,
-                        flex: "0 0 auto",
-                      }}
-                      title={r.name}
-                    >
-                      {r.avatar ? (
-                        <img
-                          src={r.avatar}
-                          alt=""
-                          style={{ height: "100%", width: "100%", objectFit: "cover" }}
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <span style={{ fontSize: 10, opacity: 0.9 }}>{initialsFromLabel(r.name)}</span>
-                      )}
-                    </span>
                     {r.name}
                     {r.encrypted ? " 🔒" : ""}
                   </a>
@@ -1025,44 +995,9 @@ export default function BondfireChat() {
               ) : (
                 shownMessages.map((m) => (
                   <div key={m.id} style={{ marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6b7280" }}>
-                      {(() => {
-                        const client = clientRef.current;
-                        const avatar = getUserAvatarHttp(client, m.sender, 40);
-                        const initials = initialsFromLabel(m.sender);
-                        return (
-                          <span
-                            style={{
-                              height: 22,
-                              width: 22,
-                              borderRadius: 999,
-                              overflow: "hidden",
-                              border: "1px solid rgba(255,255,255,0.14)",
-                              background: "rgba(255,255,255,0.06)",
-                              display: "grid",
-                              placeItems: "center",
-                              fontWeight: 800,
-                              flex: "0 0 auto",
-                            }}
-                            title={m.sender}
-                          >
-                            {avatar ? (
-                              <img
-                                src={avatar}
-                                alt=""
-                                style={{ height: "100%", width: "100%", objectFit: "cover" }}
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <span style={{ fontSize: 10, opacity: 0.9 }}>{initials}</span>
-                            )}
-                          </span>
-                        );
-                      })()}
-
-                      <span>
-                        {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}
-                      </span>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>
+                      {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
+                      {m.encrypted ? "🔒" : ""}
                     </div>
                     <div>
                       {m.body || <span className="helper">(undecryptable)</span>}

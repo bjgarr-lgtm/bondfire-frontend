@@ -262,48 +262,17 @@ export default function Settings() {
   const [membersMsg, setMembersMsg] = React.useState("");
   const [membersAllowed, setMembersAllowed] = React.useState(false);
   const [membersBusy, setMembersBusy] = React.useState(false);
-  const [membersMeUserId, setMembersMeUserId] = React.useState(null);
-
-  function getMatrixSessionForOrg(orgId) {
-    if (!orgId) return null;
-    try {
-      const raw = localStorage.getItem(`bf_matrix_${orgId}`);
-      if (!raw) return null;
-      const s = JSON.parse(raw);
-      if (!s?.baseUrl || !s?.accessToken || !s?.userId) return null;
-      return s;
-    } catch {
-      return null;
-    }
-  }
-
-  function mxcToHttpThumb(mxc, baseUrl, accessToken, size = 48) {
-    const s = String(mxc || "").trim();
-    if (!s) return null;
-    if (!s.startsWith("mxc://")) return s;
-    const rest = s.slice("mxc://".length);
-    const slash = rest.indexOf("/");
-    if (slash <= 0) return null;
-    const server = rest.slice(0, slash);
-    const mediaId = rest.slice(slash + 1);
-    const url = new URL(`${baseUrl}/_matrix/media/v3/thumbnail/${encodeURIComponent(server)}/${encodeURIComponent(mediaId)}`);
-    url.searchParams.set("width", String(size));
-    url.searchParams.set("height", String(size));
-    url.searchParams.set("method", "crop");
-    // Yes, putting access_token in query is gross, but this is the Matrix browser reality.
-    url.searchParams.set("access_token", accessToken);
-    return url.toString();
-  }
 
   const loadMembers = React.useCallback(async () => {
     if (!orgId) return;
     setMembersMsg("");
     try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+      // Members is an authenticated admin surface, so show plaintext when it exists.
+      // If a row is encrypted-only, we still attempt local decrypt via tryDecryptList().
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members?plaintext=1`, {
         method: "GET",
       });
       const _mem = Array.isArray(r.members) ? r.members : [];
-      setMembersMeUserId(r.meUserId || r.meUser_id || null);
       setMembers(await tryDecryptList(orgId, _mem));
       setMembersAllowed(true);
     } catch (e) {
@@ -319,53 +288,6 @@ export default function Settings() {
       }
     }
   }, [orgId]);
-
-  const setMyAvatarFromMatrix = async () => {
-    if (!orgId) return;
-    setMembersBusy(true);
-    setMembersMsg("");
-    try {
-      const s = getMatrixSessionForOrg(orgId);
-      if (!s) throw new Error("Matrix session not found for this org. Open Chat once first.");
-
-      const url = new URL(`${s.baseUrl}/_matrix/client/v3/profile/${encodeURIComponent(s.userId)}`);
-      url.searchParams.set("access_token", s.accessToken);
-      const prof = await fetch(url.toString()).then((x) => x.json());
-      const avatar_url = String(prof?.avatar_url || "").trim() || null;
-
-      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
-        method: "PUT",
-        body: { avatar_url },
-      });
-
-      setMembersMsg("Updated avatar.");
-      setTimeout(() => setMembersMsg(""), 900);
-      await loadMembers();
-    } catch (e) {
-      setMembersMsg(e.message || "Failed to update avatar");
-    } finally {
-      setMembersBusy(false);
-    }
-  };
-
-  const clearMyAvatar = async () => {
-    if (!orgId) return;
-    setMembersBusy(true);
-    setMembersMsg("");
-    try {
-      await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
-        method: "PUT",
-        body: { avatar_url: null },
-      });
-      setMembersMsg("Cleared avatar.");
-      setTimeout(() => setMembersMsg(""), 900);
-      await loadMembers();
-    } catch (e) {
-      setMembersMsg(e.message || "Failed to clear avatar");
-    } finally {
-      setMembersBusy(false);
-    }
-  };
 
   const setMemberRole = async (userId, nextRole, currentRole, email) => {
     if (!orgId) return;
@@ -997,26 +919,6 @@ React.useEffect(() => {
                 <button className="btn" type="button" onClick={loadMembers} disabled={membersBusy}>
                   {membersBusy ? "Refreshing…" : "Refresh"}
                 </button>
-
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={setMyAvatarFromMatrix}
-                  disabled={membersBusy}
-                  title="Pull your Element (Matrix) profile photo and use it as your Bondfire member avatar"
-                >
-                  Use chat avatar
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={clearMyAvatar}
-                  disabled={membersBusy}
-                  title="Clear your member avatar"
-                >
-                  Clear avatar
-                </button>
-
                 {membersMsg ? (
                   <span className={membersMsg.toLowerCase().includes("fail") ? "error" : "helper"}>
                     {membersMsg}
@@ -1032,7 +934,6 @@ React.useEffect(() => {
                         <table className="table">
                           <thead>
                             <tr>
-                              <th style={{ width: 52 }} />
                               <th>Email</th>
                               <th>Name</th>
                               <th>Role</th>
@@ -1040,52 +941,8 @@ React.useEffect(() => {
                             </tr>
                           </thead>
                           <tbody>
-                            {members.map((m) => {
-                              const ms = getMatrixSessionForOrg(orgId);
-                              const avatar = ms
-                                ? mxcToHttpThumb(m.avatar_url, ms.baseUrl, ms.accessToken, 40)
-                                : (m.avatar_url || null);
-
-                              const labelName = String(m.name || "").trim();
-                              const labelEmail = String(m.email || "").trim();
-                              const initialsSrc = (labelName || labelEmail || "?").trim();
-                              const initials = initialsSrc
-                                .split(/\s+/)
-                                .filter(Boolean)
-                                .slice(0, 2)
-                                .map((x) => x[0])
-                                .join("")
-                                .toUpperCase();
-
-                              return (
+                            {members.map((m) => (
                               <tr key={m.userId}>
-                                <td>
-                                  <div
-                                    style={{
-                                      height: 36,
-                                      width: 36,
-                                      borderRadius: 999,
-                                      overflow: "hidden",
-                                      border: "1px solid rgba(255,255,255,0.18)",
-                                      background: "rgba(255,255,255,0.06)",
-                                      display: "grid",
-                                      placeItems: "center",
-                                      fontWeight: 800,
-                                    }}
-                                    title={labelName || labelEmail || "Member"}
-                                  >
-                                    {avatar ? (
-                                      <img
-                                        src={avatar}
-                                        alt=""
-                                        style={{ height: "100%", width: "100%", objectFit: "cover" }}
-                                        referrerPolicy="no-referrer"
-                                      />
-                                    ) : (
-                                      <span style={{ fontSize: 12, opacity: 0.9 }}>{initials}</span>
-                                    )}
-                                  </div>
-                                </td>
                                 <td>
                                   <code>{m.email || m.userId}</code>
                                 </td>
@@ -1113,68 +970,21 @@ React.useEffect(() => {
                                   )}
                                 </td>
                               </tr>
-                              );
-                            })}
+                            ))}
                           </tbody>
                         </table>
                       </div><div className="bf-cards-mobile" style={{ marginTop: 12 }}>
                           {members.map((m) => (
                             <div key={m.userId || m.email} className="bf-rowcard">
                               <div className="bf-rowcard-top">
-                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                  {(() => {
-                                    const ms = getMatrixSessionForOrg(orgId);
-                                    const avatar = ms
-                                      ? mxcToHttpThumb(m.avatar_url, ms.baseUrl, ms.accessToken, 44)
-                                      : (m.avatar_url || null);
-                                    const labelName = String(m.name || "").trim();
-                                    const labelEmail = String(m.email || "").trim();
-                                    const initialsSrc = (labelName || labelEmail || "?").trim();
-                                    const initials = initialsSrc
-                                      .split(/\s+/)
-                                      .filter(Boolean)
-                                      .slice(0, 2)
-                                      .map((x) => x[0])
-                                      .join("")
-                                      .toUpperCase();
-                                    return (
-                                      <div
-                                        style={{
-                                          height: 40,
-                                          width: 40,
-                                          borderRadius: 999,
-                                          overflow: "hidden",
-                                          border: "1px solid rgba(255,255,255,0.18)",
-                                          background: "rgba(255,255,255,0.06)",
-                                          display: "grid",
-                                          placeItems: "center",
-                                          fontWeight: 800,
-                                          flex: "0 0 auto",
-                                        }}
-                                        title={labelName || labelEmail || "Member"}
-                                      >
-                                        {avatar ? (
-                                          <img
-                                            src={avatar}
-                                            alt=""
-                                            style={{ height: "100%", width: "100%", objectFit: "cover" }}
-                                            referrerPolicy="no-referrer"
-                                          />
-                                        ) : (
-                                          <span style={{ fontSize: 12, opacity: 0.9 }}>{initials}</span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                  <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
-                                </div>
+                                <div className="bf-rowcard-title">{m.name || m.email || "member"}</div>
                                 <button
                                   className="btn"
                                   type="button"
                                   onClick={() => removeMember(m.userId, m.email)}
                                   disabled={membersBusy || m.role === "owner"}
                                 >
-                                  {m.role === "owner" ? "owner" : "Remove"}
+                                  Remove
                                 </button>
                               </div>
 
