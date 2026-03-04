@@ -1,16 +1,34 @@
 // src/lib/api.js
 import { debugLog } from "./debugBus.js";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
 let refreshing = null;
 
+// Robust JSON parsing: tolerate 204 and empty bodies.
+async function readJsonMaybe(res) {
+  if (!res) return null;
+  if (res.status === 204 || res.status === 205) return null;
+
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
 export async function apiFetch(path, opts = {}) {
   const startedAt = Date.now();
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+
   debugLog("api:request", {
     url,
     method: (opts?.method || "GET").toString(),
   });
+
   const init = {
     credentials: "include",
     ...opts,
@@ -20,7 +38,12 @@ export async function apiFetch(path, opts = {}) {
   };
 
   // default json content-type for bodies that are plain objects
-  if (init.body && typeof init.body === "object" && !(init.body instanceof FormData) && !(init.body instanceof Blob)) {
+  if (
+    init.body &&
+    typeof init.body === "object" &&
+    !(init.body instanceof FormData) &&
+    !(init.body instanceof Blob)
+  ) {
     init.headers["Content-Type"] = init.headers["Content-Type"] || "application/json";
     init.body = JSON.stringify(init.body);
   }
@@ -34,7 +57,10 @@ export async function apiFetch(path, opts = {}) {
     refreshing = (async () => {
       try {
         debugLog("api:refresh_start", { url });
-        const r = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+        const r = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
         debugLog("api:refresh_result", { ok: r.ok, status: r.status });
         return r.ok;
       } finally {
@@ -42,6 +68,7 @@ export async function apiFetch(path, opts = {}) {
       }
     })();
   }
+
   const ok = await refreshing;
   if (!ok) {
     debugLog("api:refresh_failed", { url });
@@ -55,13 +82,21 @@ export async function apiFetch(path, opts = {}) {
 
 export async function apiJSON(path, opts) {
   const res = await apiFetch(path, opts);
-  const data = await res.json().catch(() => ({}));
+
+  const data = await readJsonMaybe(res);
+
   if (!res.ok) {
-    const msg = data?.error || `HTTP_${res.status}`;
+    const msg =
+      data?.error ||
+      data?.message ||
+      data?.raw ||
+      `HTTP_${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
     throw err;
   }
-  return data;
+
+  // Maintain old behavior: callers expect an object
+  return data || {};
 }

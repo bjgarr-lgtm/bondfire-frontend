@@ -27,6 +27,22 @@ function saveToken(tok) {
   } catch {}
 }
 
+// Robust JSON parsing: tolerate 204 and empty bodies.
+async function readJsonMaybe(res) {
+  if (!res) return null;
+  if (res.status === 204 || res.status === 205) return null;
+
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Sometimes servers return plain text. Keep it available for debugging.
+    return { raw: text };
+  }
+}
+
 async function tryRefresh() {
   // If your backend doesn't support refresh, this just fails quietly.
   const url = `${API_BASE}/api/auth/refresh`;
@@ -38,7 +54,8 @@ async function tryRefresh() {
   });
 
   if (!res.ok) return null;
-  const data = await res.json().catch(() => ({}));
+
+  const data = await readJsonMaybe(res);
 
   // Support either cookie-only refresh or token-in-body refresh.
   if (data?.token) saveToken(data.token);
@@ -72,7 +89,7 @@ export async function api(path, opts = {}) {
       const text = await firstRes.text().catch(() => "");
       throw new Error(text || `Request failed (${firstRes.status})`);
     }
-    return firstRes.json().catch(() => ({}));
+    return readJsonMaybe(firstRes) || {};
   }
 
   // 401: attempt silent refresh once, then retry.
@@ -101,5 +118,6 @@ export async function api(path, opts = {}) {
     const text = await retryRes.text().catch(() => "");
     throw new Error(text || `Unauthorized (${retryRes.status})`);
   }
-  return retryRes.json().catch(() => ({}));
+
+  return readJsonMaybe(retryRes) || {};
 }
