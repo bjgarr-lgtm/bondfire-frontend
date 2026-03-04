@@ -2,6 +2,13 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+// Key change:
+// - Do NOT precache index.html (or any HTML) in the service worker.
+//   Precached HTML is the #1 cause of "Frankenbuilds" (new JS + old HTML or vice versa),
+//   which shows up as random app resets, broken crypto stores, and "crypto not ready".
+// - Also remove SW navigation fallback. You are using hash routing, so the server can
+//   always serve /index.html without the SW trying to be clever.
+
 export default defineConfig({
   plugins: [
     react(),
@@ -25,13 +32,18 @@ export default defineConfig({
         ]
       },
       workbox: {
-        navigateFallback: "/index.html",
-        // Important for SPAs with hash routes (/app/#/orgs etc.)
-        // This keeps the SW from trying to be "helpful" and breaking routing.
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
-        // Ensure updates replace older SW versions promptly.
+        // IMPORTANT:
+        // Do not let Workbox serve HTML for navigations. HashRouter doesn't need it,
+        // and SW-controlled HTML is what causes the "blink/reset" + stale builds.
+        navigateFallback: undefined,
+
+        // Only precache immutable hashed assets. NO html.
+        globPatterns: ["**/*.{js,css,ico,png,svg,webmanifest}"],
+
+        // Keep update behavior conservative. No surprise takeovers mid-session.
         clientsClaim: false,
         skipWaiting: false,
+
         cleanupOutdatedCaches: true,
       }
     })
