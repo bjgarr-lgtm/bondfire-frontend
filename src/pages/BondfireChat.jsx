@@ -74,18 +74,30 @@ function verifiedKeyFor(userId, deviceId) {
   return `bf_mx_verified_${u}_${d}`;
 }
 
-function normalizeMxid(u) {
-  // Guard against older bad saves like "@user:server:deviceId".
-  // A valid MXID is "@localpart:server".
-  const s = String(u || "").trim();
-  if (!s) return "";
-  const parts = s.split(":");
-  if (parts.length <= 2) return s;
-  return `${parts[0]}:${parts[1]}`;
-}
-
 function safeKeyPart(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+}
+
+// Persistent salt so we can safely "rotate" IndexedDB namespaces when the SDK
+// detects the classic "account in the store doesn't match" mismatch.
+function storeSaltKey(orgId, userId, deviceId) {
+  return `bf_mx_store_salt_${safeKeyPart(orgId)}_${safeKeyPart(userId)}_${safeKeyPart(deviceId)}`;
+}
+
+function getOrCreateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const existing = readJSON(k, "");
+  if (existing) return existing;
+  const salt = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  writeJSON(k, salt);
+  return salt;
+}
+
+function rotateStoreSalt(orgId, userId, deviceId) {
+  const k = storeSaltKey(orgId, userId, deviceId);
+  const salt = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  writeJSON(k, salt);
+  return salt;
 }
 
 const ts = legibleNow;
@@ -125,18 +137,7 @@ export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
-  const saved = savedRaw
-    ? {
-        ...savedRaw,
-        userId: normalizeMxid(savedRaw.userId),
-      }
-    : null;
-
-  if (savedRaw?.userId && saved?.userId && savedRaw.userId !== saved.userId) {
-    // Persist the correction so we stop poisoning IndexedDB stores with a bogus MXID.
-    writeJSON(`bf_matrix_${orgId}`, saved);
-  }
+  const saved = readJSON(`bf_matrix_${orgId}`, null);
 
   // login form
   const [hsUrl, setHsUrl] = useState("");
@@ -257,9 +258,12 @@ export default function BondfireChat() {
       client = g.client;
       log("Connected (resumed)");
     } else {
-      // Include orgId + deviceId in the DB names.
-      // This prevents crypto-store/account mismatch errors when you log in with a new device.
-      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}`;
+      // IMPORTANT:
+      // Use a namespaced IndexedDB name that includes org + user + device + a persistent salt.
+      // If the SDK ever detects that the store belongs to another session/device, we can rotate
+      // the salt and seamlessly recover without the user needing to manually nuke storage.
+      const salt = getOrCreateStoreSalt(orgId, uid, did);
+      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}_${safeKeyPart(salt)}`;
 
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
@@ -375,7 +379,36 @@ export default function BondfireChat() {
           }
         } catch (e) {
           setCryptoReady(false);
-          log("Crypto init failed:", e?.message || e);
+          const msg = String(e?.message || e);
+          log("Crypto init failed:", msg);
+
+          // Auto-recover from IndexedDB store mismatch by rotating the salt (new DB namespace)
+          // and reloading the page.
+          if (
+            msg.toLowerCase().includes("account in the store") &&
+            msg.toLowerCase().includes("doesn't match")
+          ) {
+            try {
+              rotateStoreSalt(orgId, uid, did);
+            } catch {}
+
+            try {
+              client.stopClient?.();
+              client.removeAllListeners?.();
+            } catch {}
+
+            try {
+              clearGlobalMatrix();
+            } catch {}
+
+            setStatus(`[${ts()}] Resetting local crypto store (mismatch). Reloading…`);
+            setTimeout(() => {
+              try {
+                window.location.reload();
+              } catch {}
+            }, 250);
+            return;
+          }
         }
       } else {
         // Client is already running; crypto may already be initialized.
@@ -619,7 +652,7 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_`);
+    removeKey(`bf_matrix_${orgId}`);
 
     // also clear local verified flag for this device
     try {
@@ -658,6 +691,12 @@ export default function BondfireChat() {
     // fixes the "store account mismatch" trap
     // kill session + also nuke local indexeddb/crypto by changing dbName key space
     removeKey(`bf_matrix_${orgId}`);
+    try {
+      // rotate the salt so the next boot uses a fresh IndexedDB namespace
+      const uid = saved?.userId || userId || "";
+      const did = saved?.deviceId || deviceId || "";
+      if (uid && did) rotateStoreSalt(orgId, uid, did);
+    } catch {}
     logout();
   };
 
@@ -844,15 +883,9 @@ export default function BondfireChat() {
                 below or start it from the other side.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                {client?.getCrypto?.()?.requestOwnUserVerification ? (
-                  <button className="btn" onClick={requestOwnVerification}>
-                    Request verification
-                  </button>
-                ) : (
-                  <button className="btn" disabled title="Not supported by this Matrix SDK build">
-                    Request verification
-                  </button>
-                )}
+                <button className="btn" onClick={requestOwnVerification}>
+                  Request verification
+                </button>
                 <button className="btn" onClick={checkPendingVerification}>
                   Check pending
                 </button>
