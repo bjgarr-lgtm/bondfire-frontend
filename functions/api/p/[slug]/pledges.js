@@ -54,7 +54,7 @@ export async function onRequest(ctx) {
     const pledger_name = toStr(body.name ?? body.pledger_name, 120) || null;
     const pledger_email = toStr(body.email ?? body.pledger_email, 160) || null;
 
-    const type = toStr(body.type, 140);
+    const type = toStr(body.type ?? body.title, 140);
     const amount = toNumOrNull(body.amount);
     const unit = toStr(body.unit, 64) || null;
     const note = toStr(body.note, 4000) || null;
