@@ -221,30 +221,55 @@ export default function BondfireChat() {
   const getClient = () => clientRef.current;
 
   const refreshRooms = React.useCallback(() => {
-    const client = getClient();
-    if (!client) return;
+  const client = clientRef.current;
+  if (!client) return;
 
+  try {
+    // matrix-js-sdk has getVisibleRooms() but it can return [] after remounts
+    // depending on sync timing. Fall back to getRooms().
+    let rs = [];
     try {
-      const rs = client
-        .getVisibleRooms()
-        .filter((r) => ["join", "invite"].includes(r.getMyMembership()))
-        .sort(
-          (a, b) =>
-            (b.getLastActiveTimestamp?.() || 0) -
-            (a.getLastActiveTimestamp?.() || 0)
-        );
-
-      setRooms(
-        rs.map((r) => ({
-          id: r.roomId,
-          name: r.name || r.getCanonicalAlias?.() || r.roomId,
-          encrypted: !!r.isEncrypted?.(),
-        }))
-      );
+      if (typeof client.getVisibleRooms === "function") {
+        rs = client.getVisibleRooms() || [];
+      }
     } catch {
-      // ignore
+      rs = [];
     }
-  }, []);
+
+    if (!Array.isArray(rs) || rs.length === 0) {
+      try {
+        rs = client.getRooms?.() || [];
+      } catch {
+        rs = [];
+      }
+    }
+
+    const joined = (rs || [])
+      .filter((r) => {
+        try {
+          const m = r.getMyMembership?.() || r.myMembership;
+          return m === "join" || m === "invite";
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => {
+        const ta = a.getLastActiveTimestamp?.() || 0;
+        const tb = b.getLastActiveTimestamp?.() || 0;
+        return tb - ta;
+      });
+
+    setRooms(
+      joined.map((r) => ({
+        id: r.roomId,
+        name: r.name || r.getCanonicalAlias?.() || r.roomId,
+        encrypted: !!r.isEncrypted?.(),
+      }))
+    );
+  } catch {
+    // ignore
+  }
+}, []);
 
   const updateAvatarFor = React.useCallback(
     (mxid) => {
@@ -551,6 +576,12 @@ export default function BondfireChat() {
         client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
         client.on("Room.timeline", onTimeline);
 
+// Keep room list fresh even when the component remounts and "sync PREPARED"
+// doesn't fire again (because the client is already running).
+client.on("Room", refreshRooms);
+client.on("Room.name", refreshRooms);
+client.on("Room.myMembership", refreshRooms);
+
         client.startClient({ initialSyncLimit: 30 });
       } else {
         client.on("sync", onSync);
@@ -585,14 +616,19 @@ export default function BondfireChat() {
       }
     };
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
 
     return () => {
       stoppedRef.current = true;
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
       try {
         client.removeListener?.("sync", onSync);
         client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
         client.removeListener?.("Room.timeline", onTimeline);
+        client.removeListener?.("Room", refreshRooms);
+        client.removeListener?.("Room.name", refreshRooms);
+        client.removeListener?.("Room.myMembership", refreshRooms);
       } catch {}
       clientRef.current = null;
     };
