@@ -83,6 +83,43 @@ function safeIdForEvent(ev) {
   return ev?.getId?.() || `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`;
 }
 
+function initialsFromLabel(label) {
+  const s = String(label || "").trim();
+  if (!s) return "?";
+  return s
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getUserAvatarHttp(client, matrixUserId, size = 48) {
+  try {
+    if (!client || !matrixUserId) return null;
+    const u = client.getUser?.(matrixUserId) || null;
+    const mxc = u?.avatarUrl || null;
+    if (!mxc) return null;
+    if (typeof client.mxcUrlToHttp !== "function") return null;
+    return client.mxcUrlToHttp(mxc, size, size, "crop", true);
+  } catch {
+    return null;
+  }
+}
+
+function getRoomAvatarHttp(client, room, size = 48) {
+  try {
+    if (!client || !room) return null;
+    if (typeof room.getAvatarUrl !== "function") return null;
+    const hs = client.getHomeserverUrl?.() || client.baseUrl || "";
+    const url = room.getAvatarUrl(hs, size, size, "crop", true);
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
 function eventToMsg(ev) {
   const content = ev?.getContent?.() || {};
   const body = content?.body;
@@ -281,6 +318,7 @@ export default function BondfireChat() {
             id: r.roomId,
             name: r.name || r.getCanonicalAlias?.() || r.roomId,
             encrypted: !!r.isEncrypted?.(),
+            avatar: getRoomAvatarHttp(client, r, 44),
           }))
         );
       } catch (e) {
@@ -349,38 +387,8 @@ export default function BondfireChat() {
           log("Crypto init failed:", e?.message || e);
         }
       } else {
-        // Client is already running; don't assume crypto survived route changes.
-        try {
-          const crypto = client.getCrypto?.();
-          setCryptoReady(!!crypto);
-        } catch {
-          setCryptoReady(false);
-        }
-
-        // If crypto isn't present, try a one-shot init using the stored pickle key.
-        // This fixes the "verification disappears after tab change" behavior.
-        if (!client.getCrypto?.()) {
-          try {
-            const rust = await import("@matrix-org/matrix-sdk-crypto-wasm");
-            const { initRustCrypto } = await import("matrix-js-sdk/lib/rust-crypto");
-            await rust.initAsync();
-            const pickleKey = await loadLocalItem(LS_PICKLE_KEY);
-            await initRustCrypto(client, {
-              useIndexedDB: true,
-              pickleKey,
-            });
-            setCryptoReady(!!client.getCrypto?.());
-          } catch (e) {
-            console.warn("Matrix crypto re-init failed", e);
-            setCryptoReady(false);
-          }
-        }
-
-        // When reusing a running client, we might not get another PREPARED sync
-        // event, so set UI state eagerly.
-        setReady(true);
-        setStatus("Connected (resumed)");
-        refreshRooms();
+        // Client is already running; crypto may already be initialized.
+        setCryptoReady(true);
       }
 
 
@@ -947,7 +955,34 @@ export default function BondfireChat() {
                       e.preventDefault();
                       selectRoom(r.id);
                     }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
                   >
+                    <span
+                      style={{
+                        height: 22,
+                        width: 22,
+                        borderRadius: 999,
+                        overflow: "hidden",
+                        border: "1px solid rgba(255,255,255,0.16)",
+                        background: "rgba(255,255,255,0.06)",
+                        display: "grid",
+                        placeItems: "center",
+                        fontWeight: 800,
+                        flex: "0 0 auto",
+                      }}
+                      title={r.name}
+                    >
+                      {r.avatar ? (
+                        <img
+                          src={r.avatar}
+                          alt=""
+                          style={{ height: "100%", width: "100%", objectFit: "cover" }}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span style={{ fontSize: 10, opacity: 0.9 }}>{initialsFromLabel(r.name)}</span>
+                      )}
+                    </span>
                     {r.name}
                     {r.encrypted ? " 🔒" : ""}
                   </a>
@@ -990,9 +1025,44 @@ export default function BondfireChat() {
               ) : (
                 shownMessages.map((m) => (
                   <div key={m.id} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
-                      {m.encrypted ? "🔒" : ""}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6b7280" }}>
+                      {(() => {
+                        const client = clientRef.current;
+                        const avatar = getUserAvatarHttp(client, m.sender, 40);
+                        const initials = initialsFromLabel(m.sender);
+                        return (
+                          <span
+                            style={{
+                              height: 22,
+                              width: 22,
+                              borderRadius: 999,
+                              overflow: "hidden",
+                              border: "1px solid rgba(255,255,255,0.14)",
+                              background: "rgba(255,255,255,0.06)",
+                              display: "grid",
+                              placeItems: "center",
+                              fontWeight: 800,
+                              flex: "0 0 auto",
+                            }}
+                            title={m.sender}
+                          >
+                            {avatar ? (
+                              <img
+                                src={avatar}
+                                alt=""
+                                style={{ height: "100%", width: "100%", objectFit: "cover" }}
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span style={{ fontSize: 10, opacity: 0.9 }}>{initials}</span>
+                            )}
+                          </span>
+                        );
+                      })()}
+
+                      <span>
+                        {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}
+                      </span>
                     </div>
                     <div>
                       {m.body || <span className="helper">(undecryptable)</span>}

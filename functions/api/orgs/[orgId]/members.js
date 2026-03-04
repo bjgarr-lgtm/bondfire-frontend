@@ -4,6 +4,18 @@ import { ensureZkSchema } from "../../_lib/zk.js";
 
 const ALLOWED_ROLES = new Set(["viewer", "member", "admin", "owner"]);
 
+async function ensureMembersSchema(db) {
+  // Avatar URL is intentionally NOT encrypted.
+  // It should usually be a Matrix mxc:// URL (Element profile photo) or https.
+  // D1 doesn't support IF NOT EXISTS on ADD COLUMN, so ignore duplicate errors.
+  try {
+    await db.prepare("ALTER TABLE org_memberships ADD COLUMN avatar_url TEXT").run();
+  } catch (e) {
+    const msg = String(e?.message || e).toLowerCase();
+    if (!msg.includes("duplicate column")) throw e;
+  }
+}
+
 async function readJson(request) {
   try {
     return await request.json();
@@ -30,14 +42,18 @@ export async function onRequest(ctx) {
   // Ensure ZK-related columns exist (safe/no-op if already applied).
   await ensureZkSchema(db);
 
-  const gate = await requireOrgRole({ env, request, orgId, minRole: "admin" });
+  // Ensure member avatar column exists.
+  await ensureMembersSchema(db);
+
+  // Members can view the member list and update their own avatar.
+  // Admin is only required for role changes and removals.
+  const gate = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!gate.ok) return gate.resp;
 
   try {
     if (request.method === "GET") {
-      // This endpoint is admin-gated, so returning plaintext PII here is OK.
-      // (Public pages should never call this route.)
-      const allowPlaintext = true;
+      const url = new URL(request.url);
+      const allowPlaintext = (url.searchParams.get("plaintext") || "") === "1";
 
       const rows = await db
         .prepare(
@@ -49,7 +65,8 @@ export async function onRequest(ctx) {
              m.role AS role,
              m.created_at AS created_at,
              m.encrypted_blob AS encrypted_blob,
-             m.key_version AS key_version
+             m.key_version AS key_version,
+             m.avatar_url AS avatar_url
            FROM org_memberships m
            JOIN users u ON u.id = m.user_id
            WHERE m.org_id = ?
@@ -67,22 +84,25 @@ export async function onRequest(ctx) {
         .all();
 
       return ok({
+        meUserId: gate.user.sub,
         members: (rows.results || []).map((r) => {
           const hasEnc = !!r.encrypted_blob;
           return {
             userId: r.user_id,
             user_id: r.user_id,
-            // If plaintext columns are blank but encrypted data exists, return a
-            // placeholder so the client can decrypt and display.
-            email: allowPlaintext ? (r.email || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
+            // Default: do not ship plaintext PII.
+            // For one-time backfill/encrypt-existing, caller can use ?plaintext=1.
+            email: allowPlaintext ? (r.email || "") : (hasEnc ? "__encrypted__" : ""),
             publicKey: r.public_key || null,
             public_key: r.public_key || null,
-            name: allowPlaintext ? (r.name || (hasEnc ? "__encrypted__" : "")) : (hasEnc ? "__encrypted__" : ""),
+            name: allowPlaintext ? (r.name || "") : (hasEnc ? "__encrypted__" : ""),
             role: r.role || "member",
             createdAt: r.created_at || null,
             encrypted_blob: r.encrypted_blob || null,
             key_version: r.key_version ?? null,
             needs_encryption: !hasEnc,
+            avatar_url: r.avatar_url || null,
+            is_self: String(r.user_id) === String(gate.user.sub),
           };
         }),
       });
@@ -91,16 +111,22 @@ export async function onRequest(ctx) {
     if (request.method === "PUT") {
       const body = await readJson(request);
       const userId = String(body.userId || "").trim();
-      const role = String(body.role || "").trim();
+      const role = body.role !== undefined ? String(body.role || "").trim() : "";
       const encryptedBlob = body.encrypted_blob ? String(body.encrypted_blob) : "";
       const keyVersion = body.key_version != null ? Number(body.key_version) : null;
+      const avatarUrl = body.avatar_url !== undefined ? (String(body.avatar_url || "").trim() || null) : undefined;
 
       if (!userId) return bad(400, "MISSING_USER_ID");
 
-      const hasRoleUpdate = !!role;
+      const hasRoleUpdate = body.role !== undefined;
       const hasZkUpdate = !!encryptedBlob;
-      if (!hasRoleUpdate && !hasZkUpdate) return bad(400, "MISSING_UPDATE");
+      const hasAvatarUpdate = body.avatar_url !== undefined;
+
+      if (!hasRoleUpdate && !hasZkUpdate && !hasAvatarUpdate) return bad(400, "MISSING_UPDATE");
       if (hasRoleUpdate && !ALLOWED_ROLES.has(role)) return bad(400, "INVALID_ROLE");
+
+      const isSelf = String(userId) === String(gate.user.sub);
+      const isAdminish = gate.role === "admin" || gate.role === "owner";
 
       const target = await db
         .prepare("SELECT role FROM org_memberships WHERE org_id = ? AND user_id = ?")
@@ -112,6 +138,7 @@ export async function onRequest(ctx) {
       const targetRole = String(target.role || "member");
 
       if (hasRoleUpdate) {
+        if (!isAdminish) return bad(403, "ADMIN_REQUIRED");
         if (role === "owner" && gate.role !== "owner") return bad(403, "OWNER_REQUIRED");
 
         if (targetRole === "owner" && role !== "owner") {
@@ -126,7 +153,18 @@ export async function onRequest(ctx) {
           .run();
       }
 
+      if (hasAvatarUpdate) {
+        // Self can update self. Admin/owner can update anyone.
+        if (!isSelf && !isAdminish) return bad(403, "ADMIN_REQUIRED");
+        await db
+          .prepare("UPDATE org_memberships SET avatar_url = ? WHERE org_id = ? AND user_id = ?")
+          .bind(avatarUrl, orgId, userId)
+          .run();
+      }
+
       if (hasZkUpdate) {
+        // Self can encrypt their own row. Admin/owner can backfill anyone.
+        if (!isSelf && !isAdminish) return bad(403, "ADMIN_REQUIRED");
         await db
           .prepare(
             "UPDATE org_memberships SET encrypted_blob = ?, key_version = COALESCE(?, key_version) WHERE org_id = ? AND user_id = ?"
@@ -142,6 +180,8 @@ export async function onRequest(ctx) {
       const body = await readJson(request);
       const userId = String(body.userId || "").trim();
       if (!userId) return bad(400, "MISSING_USER_ID");
+
+      if (gate.role !== "admin" && gate.role !== "owner") return bad(403, "ADMIN_REQUIRED");
 
       const target = await db
         .prepare("SELECT role FROM org_memberships WHERE org_id = ? AND user_id = ?")
