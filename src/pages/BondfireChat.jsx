@@ -14,7 +14,7 @@ import {
 } from "matrix-js-sdk/lib/crypto-api";
 
 // Keep a single Matrix client alive per browser tab so switching away from the
-// Chat page does not make it look like you are reconnecting or re-verifying.
+// Chat page doesn't make it look like you're reconnecting or re-verifying.
 const BF_MATRIX_GLOBAL = "__bf_matrix_client__";
 
 function getGlobalMatrix() {
@@ -67,7 +67,7 @@ function parseOrgIdFromHash() {
 }
 
 // Local flag so the UI can remember that THIS browser device was verified.
-// Not the source of truth for encryption. Convenience signal only.
+// This is not the source of truth for encryption, it is a convenience signal.
 function verifiedKeyFor(userId, deviceId) {
   const u = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
   const d = String(deviceId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
@@ -88,6 +88,7 @@ function safeKeyPart(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
 }
 
+const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
 }
@@ -102,7 +103,7 @@ function eventToMsg(ev) {
   const msgtype = content?.msgtype;
 
   // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
-  // and/or provides isDecryptionFailure().
+  // and/or provides isDecryptionFailure(). Some homeservers also stuff a human-readable string into body.
   const undecryptable =
     !!ev?.isDecryptionFailure?.() ||
     msgtype === "m.bad.encrypted" ||
@@ -117,21 +118,6 @@ function eventToMsg(ev) {
     undecryptable,
     msgtype: msgtype || "",
   };
-}
-
-function getCrypto(client) {
-  try {
-    return client?.getCrypto?.() || null;
-  } catch {
-    return null;
-  }
-}
-
-function getRequestOwnUserVerificationFn(client) {
-  const crypto = getCrypto(client);
-  // matrix-js-sdk exposes this on crypto (when available)
-  if (crypto && typeof crypto.requestOwnUserVerification === "function") return crypto.requestOwnUserVerification.bind(crypto);
-  return null;
 }
 
 /* --------------- component --------------- */
@@ -169,9 +155,6 @@ export default function BondfireChat() {
     return k ? !!readJSON(k, false) : false;
   });
 
-  // keep a reactive handle to the client so render logic never references an undefined variable
-  const [clientState, setClientState] = useState(null);
-
   // verification
   const [verificationReq, setVerificationReq] = useState(null);
   const [sasData, setSasData] = useState(null); // {emoji, decimal, confirm, mismatch}
@@ -196,7 +179,7 @@ export default function BondfireChat() {
   const activeRoomIdRef = useRef(null);
   const stoppedRef = useRef(false);
 
-  const log = (...a) => setStatus(`[${legibleNow()}] ${a.join(" ")}`);
+  const log = (...a) => setStatus(`[${ts()}] ${a.join(" ")}`);
 
   /* ---------- persist toggles ---------- */
   useEffect(() => {
@@ -238,7 +221,10 @@ export default function BondfireChat() {
 
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
+    // do not start without session
     if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
+
+    // if a client already exists, do nothing
     if (clientRef.current) return;
 
     stoppedRef.current = false;
@@ -248,10 +234,13 @@ export default function BondfireChat() {
     const token = saved.accessToken;
     const did = saved.deviceId || "";
 
+    // Keep state aligned with storage
     setUserId(uid);
     setAccessToken(token);
     setDeviceId(did);
 
+    // Reuse an existing Matrix client for this tab to avoid the fake
+    // "Connecting…" + "verify again" nonsense when you switch tabs.
     const g = getGlobalMatrix();
     const canReuse =
       g &&
@@ -264,11 +253,12 @@ export default function BondfireChat() {
     let client = null;
     let store = null;
     let cryptoStore = null;
-
     if (canReuse) {
       client = g.client;
       log("Connected (resumed)");
     } else {
+      // Include orgId + deviceId in the DB names.
+      // This prevents crypto-store/account mismatch errors when you log in with a new device.
       const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}`;
 
       store = new IndexedDBStore({
@@ -303,7 +293,6 @@ export default function BondfireChat() {
     }
 
     clientRef.current = client;
-    setClientState(client);
 
     function refreshRooms() {
       try {
@@ -323,7 +312,7 @@ export default function BondfireChat() {
             encrypted: !!r.isEncrypted?.(),
           }))
         );
-      } catch {
+      } catch (e) {
         // ignore
       }
     }
@@ -338,6 +327,7 @@ export default function BondfireChat() {
 
       const m = eventToMsg(ev);
 
+      // De-dupe and update
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         return [...prev, m];
@@ -351,6 +341,7 @@ export default function BondfireChat() {
       log("Verification request from", req.otherUserId, req.otherDeviceId);
 
       req.on?.("change", () => {
+        // keep state warm
         setVerificationReq(req);
       });
     }
@@ -371,44 +362,37 @@ export default function BondfireChat() {
           log("Store startup failed:", e?.message || e);
         }
 
-        // crypto init
         try {
           if (typeof client.initRustCrypto === "function") {
             await client.initRustCrypto();
+            setCryptoReady(true);
           } else if (typeof client.initCrypto === "function") {
             await client.initCrypto();
+            setCryptoReady(true);
           } else {
-            throw new Error("Crypto init not available");
+            setCryptoReady(false);
+            log("Crypto init not available");
           }
-
-          // sanity check: crypto exists
-          const crypto = getCrypto(client);
-          if (!crypto) throw new Error("Crypto not available after init");
-
-          setCryptoReady(true);
         } catch (e) {
           setCryptoReady(false);
           log("Crypto init failed:", e?.message || e);
         }
       } else {
-        // When reusing, crypto might be ready already. Best effort detection.
-        try {
-          const crypto = getCrypto(client);
-          setCryptoReady(!!crypto);
-        } catch {
-          setCryptoReady(false);
-        }
+        // Client is already running; crypto may already be initialized.
+        setCryptoReady(true);
       }
 
-      // Determine whether THIS device is verified (best effort)
+
+      // Determine whether THIS device is verified (best-effort).
       try {
-        const crypto = getCrypto(client);
+        const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
         const myDid = client.getDeviceId?.() || did || saved?.deviceId || "";
         const key = verifiedKeyFor(myUid, myDid);
 
         let verified = key ? !!readJSON(key, false) : false;
 
+        // Some matrix-js-sdk builds expose a verification-status helper. If present, trust it.
         if (crypto && typeof crypto.getDeviceVerificationStatus === "function") {
           const res = await crypto.getDeviceVerificationStatus(myUid, myDid);
           verified =
@@ -423,9 +407,10 @@ export default function BondfireChat() {
         // ignore
       }
 
-      // If a verification request already exists, hydrate it
+      // If a verification request already exists (e.g. app reloaded mid-flow),
+      // hydrate it so the UI actually shows something.
       try {
-        const crypto = getCrypto(client);
+        const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
         const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid);
         if (pending && pending.length) onVerificationReq(pending[0]);
@@ -434,6 +419,7 @@ export default function BondfireChat() {
       }
 
       client.on("sync", onSync);
+
       client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
       client.on("Room.timeline", onTimeline);
 
@@ -443,15 +429,14 @@ export default function BondfireChat() {
     return () => {
       stoppedRef.current = true;
       try {
+        // Keep the client alive globally; just detach listeners bound to this component.
         client.removeListener?.("sync", onSync);
         client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
         client.removeListener?.("Room.timeline", onTimeline);
       } catch {}
-      // Keep the actual Matrix client alive globally. Only clear component ref/state.
       clientRef.current = null;
-      setClientState(null);
     };
-  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, orgId]);
+  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId]);
 
   /* -------- verification actions -------- */
   async function requestOwnVerification() {
@@ -459,14 +444,12 @@ export default function BondfireChat() {
     if (!client) return;
     try {
       setVerifyMsg("");
-      const fn = getRequestOwnUserVerificationFn(client);
-      if (!fn) {
-        setVerifyMsg(
-          "This Matrix SDK build is missing requestOwnUserVerification. Update matrix-js-sdk to a build that includes E2EE verification APIs."
-        );
+      const crypto = client.getCrypto?.();
+      if (!crypto?.requestOwnUserVerification) {
+        setVerifyMsg("This Matrix build can't request verification (missing requestOwnUserVerification). Use another client to initiate.");
         return;
       }
-      const req = await fn();
+      const req = await crypto.requestOwnUserVerification();
       setVerificationReq(req);
       setSasData(null);
       setVerifyMsg("Verification request sent. Accept it on your other device, then click Start SAS.");
@@ -479,7 +462,7 @@ export default function BondfireChat() {
     const client = clientRef.current;
     if (!client) return;
     try {
-      const crypto = getCrypto(client);
+      const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
       const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
@@ -512,8 +495,9 @@ export default function BondfireChat() {
     const req = verificationReq;
     if (!req) return;
 
+    // If we already started a verifier, do not double-start.
     if (verifierRef.current) {
-      setVerifyMsg("SAS already started. Use Confirm or Does not match.");
+      setVerifyMsg("SAS already started. Use Confirm or Doesn’t match.");
       return;
     }
 
@@ -525,11 +509,14 @@ export default function BondfireChat() {
       verifierRef.current = verifier;
 
       verifier.on(VerifierEvent.ShowSas, (sas) => {
+        // matrix-js-sdk gives { sas: {emoji|decimal}, confirm, mismatch }
         const payload = sas?.sas || {};
         const emoji = Array.isArray(payload.emoji)
           ? payload.emoji
               .map((e) => {
+                // tuple form: ["🐶", "dog"]
                 if (Array.isArray(e)) return [e[0], e[1]];
+                // object form: { emoji: "🐶", description: "dog" }
                 if (e && typeof e === "object") return [e.emoji, e.description || e.name];
                 return null;
               })
@@ -555,11 +542,12 @@ export default function BondfireChat() {
         cleanupVerification(`Cancelled: ${e?.reason || "unknown"}`);
       });
 
+      // Some flows do not emit Done cleanly on this side.
       verifier.on?.("change", () => {
         try {
           if (typeof verifier.isDone === "function" && verifier.isDone()) {
             markThisDeviceVerified();
-            cleanupVerification("Verified ✅");
+        cleanupVerification("Verified ✅");
           }
         } catch {
           // ignore
@@ -577,6 +565,7 @@ export default function BondfireChat() {
     try {
       await sasData?.confirm?.();
       setVerifyMsg("Confirmed. Waiting for other device…");
+      // In case other side never sends Done back, clear after a bit.
       setTimeout(() => {
         if (verifierRef.current) markThisDeviceVerified();
         cleanupVerification("Verified ✅");
@@ -621,7 +610,6 @@ export default function BondfireChat() {
       setUserId(next.userId);
       setAccessToken(next.accessToken);
       setDeviceId(next.deviceId);
-      setClientState(null);
 
       setPassword("");
       window.location.hash = window.location.hash;
@@ -631,14 +619,17 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_${orgId}`);
+    removeKey(`bf_matrix_`);
 
+    // also clear local verified flag for this device
     try {
       const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
-    } catch {}
-
+    } catch {
+      // ignore
+    }
     setDeviceVerified(false);
+
     setUserId("");
     setAccessToken("");
     setDeviceId("");
@@ -659,12 +650,13 @@ export default function BondfireChat() {
     }
 
     clearGlobalMatrix();
-    setClientState(null);
 
     log("Logged out");
   };
 
   const resetMatrixStorage = () => {
+    // fixes the "store account mismatch" trap
+    // kill session + also nuke local indexeddb/crypto by changing dbName key space
     removeKey(`bf_matrix_${orgId}`);
     logout();
   };
@@ -681,9 +673,12 @@ export default function BondfireChat() {
     if (!room) return;
 
     const tl = room.getLiveTimeline?.();
-    const evs = (tl?.getEvents?.() || []).filter((e) => e.getType?.() === "m.room.message");
+    const evs = (tl?.getEvents?.() || []).filter(
+      (e) => e.getType?.() === "m.room.message"
+    );
 
-    setMessages(evs.map(eventToMsg));
+    const mapped = evs.map(eventToMsg);
+    setMessages(mapped);
   };
 
   const send = async (e) => {
@@ -694,19 +689,23 @@ export default function BondfireChat() {
     const body = msg.trim();
     setMsg("");
 
+    // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
       sender: saved?.userId || userId || "",
       ts: Date.now(),
       encrypted: true,
-      undecryptable: false,
-      msgtype: "m.text",
     };
     setMessages((prev) => [...prev, optimistic]);
 
     try {
-      await client.sendEvent(activeRoomId, "m.room.message", { msgtype: "m.text", body }, "");
+      await client.sendEvent(
+        activeRoomId,
+        "m.room.message",
+        { msgtype: "m.text", body },
+        ""
+      );
     } catch (err) {
       log("Send failed:", err?.message || "Unknown error");
     }
@@ -723,8 +722,6 @@ export default function BondfireChat() {
     const sorted = [...base].sort((a, b) => a.ts - b.ts);
     return newestFirst ? sorted.reverse() : sorted;
   }, [messages, hideUndecryptable, newestFirst]);
-
-  const canRequestVerification = !!getRequestOwnUserVerificationFn(clientState);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -766,26 +763,18 @@ export default function BondfireChat() {
 
           {!cryptoReady ? (
             <div className="helper">
-              Crypto is not ready yet, so verification cannot start. If this stays yellow, your build is missing E2EE support.
+              Crypto isn’t ready yet, so verification can’t start. If this stays
+              yellow, your homeserver or build is missing E2EE support.
             </div>
           ) : deviceVerified && !verificationReq ? (
             <>
-              <div className="helper">
-                This device is verified for this account. You should be able to read and send E2EE messages in encrypted rooms. 🔒
-              </div>
+              <div className="helper">This device is verified for this account. You should be able to read and send E2EE messages in encrypted rooms. 🔒</div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                {canRequestVerification ? (
-                  <button className="btn" onClick={requestOwnVerification}>
-                    Re-verify (optional)
-                  </button>
-                ) : (
-                  <button className="btn" disabled title="Not supported by this Matrix SDK build">
-                    Re-verify (optional)
-                  </button>
-                )}
+                <button className="btn" onClick={requestOwnVerification}>
+                  Re-verify (optional)
+                </button>
               </div>
-            </>
-          ) : verificationReq ? (
+            </>) : verificationReq ? (
             <>
               <div className="helper">
                 From: {verificationReq.otherUserId} · {verificationReq.otherDeviceId}
@@ -820,7 +809,10 @@ export default function BondfireChat() {
                     </div>
                   ) : (
                     <div className="helper" style={{ marginTop: 12 }}>
-                      Code: {Array.isArray(sasData.decimal) ? sasData.decimal.join(" ") : ""}
+                      Code:{" "}
+                      {Array.isArray(sasData.decimal)
+                        ? sasData.decimal.join(" ")
+                        : ""}
                     </div>
                   )}
 
@@ -829,7 +821,7 @@ export default function BondfireChat() {
                       Confirm match
                     </button>
                     <button className="btn" onClick={mismatchSas}>
-                      Does not match
+                      Doesn’t match
                     </button>
                   </div>
                 </>
@@ -847,17 +839,20 @@ export default function BondfireChat() {
           ) : (
             <>
               <div className="helper">
-                No active verification request. If you have another device (or another client) for this Matrix account, request verification below or start it from the other side.
+                No active verification request. If you have another device (or
+                another client) for this Matrix account, request verification
+                below or start it from the other side.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button
-                  className="btn"
-                  onClick={requestOwnVerification}
-                  disabled={!canRequestVerification}
-                  title={!canRequestVerification ? "Not supported by this Matrix SDK build" : ""}
-                >
-                  Request verification
-                </button>
+                {client?.getCrypto?.()?.requestOwnUserVerification ? (
+                  <button className="btn" onClick={requestOwnVerification}>
+                    Request verification
+                  </button>
+                ) : (
+                  <button className="btn" disabled title="Not supported by this Matrix SDK build">
+                    Request verification
+                  </button>
+                )}
                 <button className="btn" onClick={checkPendingVerification}>
                   Check pending
                 </button>
@@ -881,7 +876,7 @@ export default function BondfireChat() {
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
-              placeholder="Homeserver base URL (e.g. https://matrix.org)"
+              placeholder="Homeserver base URL (e.g. https://matrix-client.matrix.org)"
               value={hsUrl}
               onChange={(e) => setHsUrl(e.target.value)}
               required
@@ -916,7 +911,14 @@ export default function BondfireChat() {
             marginTop: 12,
           }}
         >
-          <aside className="card" style={{ padding: 12, minHeight: 0 }}>
+
+          <aside
+            className="card"
+            style={{
+              padding: 12,
+              minHeight: 0,
+            }}
+          >
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -973,6 +975,7 @@ export default function BondfireChat() {
               flexDirection: "column",
             }}
           >
+
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
@@ -993,9 +996,12 @@ export default function BondfireChat() {
                 shownMessages.map((m) => (
                   <div key={m.id} style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      {m.sender} · {new Date(m.ts).toLocaleString()} {m.encrypted ? "🔒" : ""}
+                      {m.sender} · {new Date(m.ts).toLocaleString()}{" "}
+                      {m.encrypted ? "🔒" : ""}
                     </div>
-                    <div>{m.body || <span className="helper">(undecryptable)</span>}</div>
+                    <div>
+                      {m.body || <span className="helper">(undecryptable)</span>}
+                    </div>
                   </div>
                 ))
               )}
