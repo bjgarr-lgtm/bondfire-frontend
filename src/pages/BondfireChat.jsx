@@ -1,4 +1,4 @@
-// src/pages/BondfireChat.jsx
+// this is src/pages/BondfireChat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
