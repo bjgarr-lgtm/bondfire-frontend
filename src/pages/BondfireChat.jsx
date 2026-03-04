@@ -74,32 +74,6 @@ function verifiedKeyFor(userId, deviceId) {
   return `bf_mx_verified_${u}_${d}`;
 }
 
-function safeKeyPart(s) {
-  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
-}
-
-// Persistent salt so we can safely "rotate" IndexedDB namespaces when the SDK
-// detects the classic "account in the store doesn't match" mismatch.
-function storeSaltKey(orgId, userId, deviceId) {
-  return `bf_mx_store_salt_${safeKeyPart(orgId)}_${safeKeyPart(userId)}_${safeKeyPart(deviceId)}`;
-}
-
-function getOrCreateStoreSalt(orgId, userId, deviceId) {
-  const k = storeSaltKey(orgId, userId, deviceId);
-  const existing = readJSON(k, "");
-  if (existing) return existing;
-  const salt = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  writeJSON(k, salt);
-  return salt;
-}
-
-function rotateStoreSalt(orgId, userId, deviceId) {
-  const k = storeSaltKey(orgId, userId, deviceId);
-  const salt = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  writeJSON(k, salt);
-  return salt;
-}
-
 const ts = legibleNow;
 function legibleNow() {
   return new Date().toLocaleTimeString();
@@ -258,22 +232,15 @@ export default function BondfireChat() {
       client = g.client;
       log("Connected (resumed)");
     } else {
-      // IMPORTANT:
-      // Use a namespaced IndexedDB name that includes org + user + device + a persistent salt.
-      // If the SDK ever detects that the store belongs to another session/device, we can rotate
-      // the salt and seamlessly recover without the user needing to manually nuke storage.
-      const salt = getOrCreateStoreSalt(orgId, uid, did);
-      const storeKey = `${safeKeyPart(orgId)}_${safeKeyPart(uid)}_${safeKeyPart(did)}_${safeKeyPart(salt)}`;
-
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${storeKey}`,
+        dbName: `bf_mx_store_${uid}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${storeKey}`
+        `bf_mx_crypto_${uid}`
       );
 
       client = createClient({
@@ -379,40 +346,41 @@ export default function BondfireChat() {
           }
         } catch (e) {
           setCryptoReady(false);
-          const msg = String(e?.message || e);
-          log("Crypto init failed:", msg);
-
-          // Auto-recover from IndexedDB store mismatch by rotating the salt (new DB namespace)
-          // and reloading the page.
-          if (
-            msg.toLowerCase().includes("account in the store") &&
-            msg.toLowerCase().includes("doesn't match")
-          ) {
-            try {
-              rotateStoreSalt(orgId, uid, did);
-            } catch {}
-
-            try {
-              client.stopClient?.();
-              client.removeAllListeners?.();
-            } catch {}
-
-            try {
-              clearGlobalMatrix();
-            } catch {}
-
-            setStatus(`[${ts()}] Resetting local crypto store (mismatch). Reloading…`);
-            setTimeout(() => {
-              try {
-                window.location.reload();
-              } catch {}
-            }, 250);
-            return;
-          }
+          log("Crypto init failed:", e?.message || e);
         }
       } else {
-        // Client is already running; crypto may already be initialized.
-        setCryptoReady(true);
+        // Client is already running; don't assume crypto survived route changes.
+        try {
+          const crypto = client.getCrypto?.();
+          setCryptoReady(!!crypto);
+        } catch {
+          setCryptoReady(false);
+        }
+
+        // If crypto isn't present, try a one-shot init using the stored pickle key.
+        // This fixes the "verification disappears after tab change" behavior.
+        if (!client.getCrypto?.()) {
+          try {
+            const rust = await import("@matrix-org/matrix-sdk-crypto-wasm");
+            const { initRustCrypto } = await import("matrix-js-sdk/lib/rust-crypto");
+            await rust.initAsync();
+            const pickleKey = await loadLocalItem(LS_PICKLE_KEY);
+            await initRustCrypto(client, {
+              useIndexedDB: true,
+              pickleKey,
+            });
+            setCryptoReady(!!client.getCrypto?.());
+          } catch (e) {
+            console.warn("Matrix crypto re-init failed", e);
+            setCryptoReady(false);
+          }
+        }
+
+        // When reusing a running client, we might not get another PREPARED sync
+        // event, so set UI state eagerly.
+        setReady(true);
+        setStatus("Connected (resumed)");
+        refreshRooms();
       }
 
 
@@ -652,7 +620,7 @@ export default function BondfireChat() {
   };
 
   const logout = () => {
-    removeKey(`bf_matrix_${orgId}`);
+    removeKey(`bf_matrix_`);
 
     // also clear local verified flag for this device
     try {
@@ -691,12 +659,6 @@ export default function BondfireChat() {
     // fixes the "store account mismatch" trap
     // kill session + also nuke local indexeddb/crypto by changing dbName key space
     removeKey(`bf_matrix_${orgId}`);
-    try {
-      // rotate the salt so the next boot uses a fresh IndexedDB namespace
-      const uid = saved?.userId || userId || "";
-      const did = saved?.deviceId || deviceId || "";
-      if (uid && did) rotateStoreSalt(orgId, uid, did);
-    } catch {}
     logout();
   };
 
@@ -909,7 +871,7 @@ export default function BondfireChat() {
           <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
-              placeholder="Homeserver base URL (e.g. https://matrix-client.matrix.org)"
+              placeholder="Homeserver base URL (e.g. https://matrix.org)"
               value={hsUrl}
               onChange={(e) => setHsUrl(e.target.value)}
               required
