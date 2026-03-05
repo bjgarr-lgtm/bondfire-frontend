@@ -55,6 +55,67 @@ function writeJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {}
 }
+
+async function deleteIDB(name) {
+  try {
+    if (!name || !window.indexedDB) return;
+    await new Promise((resolve) => {
+      const req = window.indexedDB.deleteDatabase(name);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => resolve(false);
+      req.onblocked = () => resolve(false);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function nukeMatrixIdbForUser(userId) {
+  // Must match the dbName strings you use in createClient().
+  const uid = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  if (!uid) return;
+
+  const names = [
+    `bf_mx_store_${uid}`,
+    `bf_mx_crypto_${uid}`,
+
+    // Best-effort extra names the SDK might have used in other versions/builds:
+    `matrix-js-sdk:store:${uid}`,
+    `matrix-js-sdk:crypto:${uid}`,
+    `mx_store_${uid}`,
+    `mx_crypto_${uid}`,
+  ];
+
+  for (const n of names) {
+    await deleteIDB(n);
+  }
+
+  // Clear CacheStorage too, because stale sw/cache can keep old wasm/js around.
+  try {
+    if (window.caches?.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+    }
+  } catch {}
+}
+
+async function detectCryptoReady(client) {
+  try {
+    const crypto = client?.getCrypto?.();
+    if (!crypto) return false;
+
+    // matrix-js-sdk variants expose different signals; try a few.
+    if (typeof crypto.isCryptoEnabled === "function") return !!crypto.isCryptoEnabled();
+    if (typeof crypto.getOwnDeviceKeys === "function") {
+      const keys = await crypto.getOwnDeviceKeys();
+      return !!keys;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function removeKey(key) {
   try {
     localStorage.removeItem(key);
@@ -376,13 +437,7 @@ export default function BondfireChat() {
 
     const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
-    const canReuse =
-      g &&
-      g.client &&
-      g.baseUrl === baseUrl &&
-      g.userId === uid &&
-      g.accessToken === token &&
-      sameDevice;
+
 
     let client = null;
     let store = null;
@@ -739,19 +794,32 @@ export default function BondfireChat() {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // clear saved session
     removeKey(`bf_matrix_${orgId}`);
 
+    // also clear local verified flag for this device
     try {
-      const k = verifiedKeyFor(
-        saved?.userId || userId || "",
-        saved?.deviceId || deviceId || ""
-      );
+      const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
     } catch {}
 
     setDeviceVerified(false);
 
+    // stop client HARD
+    const client = clientRef.current;
+    clientRef.current = null;
+
+    try {
+      if (client) {
+        try { client.stopClient?.(); } catch {}
+        try { client.removeAllListeners?.(); } catch {}
+      }
+    } catch {}
+
+    clearGlobalMatrix();
+
+    // wipe UI state
     setUserId("");
     setAccessToken("");
     setDeviceId("");
@@ -763,21 +831,45 @@ export default function BondfireChat() {
     setMsg("");
     cleanupVerification("");
 
-    if (clientRef.current) {
-      try {
-        clientRef.current.stopClient();
-        clientRef.current.removeAllListeners();
-      } catch {}
-      clientRef.current = null;
-    }
-
-    clearGlobalMatrix();
     log("Logged out");
   };
 
-  const resetMatrixStorage = () => {
+  const resetMatrixStorage = async () => {
+    // This is the nuclear option. It should actually be nuclear.
+    const uid = saved?.userId || userId || "";
+    const client = clientRef.current;
+
+    // stop client first so it releases IDB locks
+    try {
+      client?.stopClient?.();
+      client?.removeAllListeners?.();
+    } catch {}
+
+    clientRef.current = null;
+    clearGlobalMatrix();
+
+    // remove session + verified marker
     removeKey(`bf_matrix_${orgId}`);
-    logout();
+    try {
+      const k = verifiedKeyFor(uid, saved?.deviceId || deviceId || "");
+      if (k) removeKey(k);
+    } catch {}
+
+    // delete the actual IDB databases used by matrix-js-sdk in your build
+    await nukeMatrixIdbForUser(uid);
+
+    // wipe UI state
+    setReady(false);
+    setCryptoReady(false);
+    setRooms([]);
+    setActiveRoomId(null);
+    setMessages([]);
+    setMsg("");
+    cleanupVerification("");
+    setDeviceVerified(false);
+
+    // Reload once to ensure wasm + crypto worker state is fresh
+    window.location.replace(window.location.href);
   };
 
   /* -------- rooms / messages -------- */
