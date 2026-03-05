@@ -216,6 +216,31 @@ export default function BondfireChat() {
   );
 
   const clientRef = useRef(null);
+  const ensureCryptoReady = useCallback(async () => {
+    const c = clientRef.current;
+    if (!c) return;
+    let cry = c.getCrypto?.();
+    if (!cry && typeof c.initRustCrypto === "function") {
+      try {
+        await c.initRustCrypto();
+      } catch {
+        // ignore
+      }
+      cry = c.getCrypto?.();
+    }
+    setCryptoReady(!!cry);
+  }, [setCryptoReady]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        ensureCryptoReady().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [ensureCryptoReady]);
+
   const verifierRef = useRef(null);
   const activeRoomIdRef = useRef(null);
   const stoppedRef = useRef(false);
@@ -494,25 +519,7 @@ export default function BondfireChat() {
       } else {
         // Reused client: crypto might already be ready, but don't lie if it's not.
         try {
-          
-// Crypto can take a moment to become available even on a reused client.
-// Keep UI honest by polling briefly.
-const hasCryptoNow = !!client.getCrypto?.();
-setCryptoReady(hasCryptoNow);
-if (!hasCryptoNow) {
-  let tries = 0;
-  const tick = () => {
-    tries += 1;
-    const ok = !!client.getCrypto?.();
-    if (ok) {
-      setCryptoReady(true);
-      return;
-    }
-    if (tries < 30) setTimeout(tick, 350);
-  };
-  setTimeout(tick, 350);
-}
-
+          setCryptoReady(!!client.getCrypto?.());
         } catch {
           setCryptoReady(false);
         }

@@ -394,6 +394,14 @@ export default function Inventory() {
                           className="input"
                           type="number"
                           value={parMap?.[idStr] ?? ""}
+                          onFocus={(e) => {
+                            const v = String(e.target.value || "");
+                            if (v === "0") {
+                              setParMap((prev) => ({ ...prev, [idStr]: "" }));
+                            } else {
+                              try { e.target.select(); } catch {}
+                            }
+                          }}
                           onChange={(e) => {
                             const v = e.target.value;
                             setParMap((prev) => {
@@ -451,6 +459,14 @@ export default function Inventory() {
                       className="input"
                       type="number"
                       value={parMap?.[String(it.id)] ?? ""}
+                      onFocus={(e) => {
+                        const v = String(e.target.value || "");
+                        if (v === "0") {
+                          setParMap((prev) => ({ ...prev, [String(it.id)]: "" }));
+                        } else {
+                          try { e.target.select(); } catch {}
+                        }
+                      }}
                       onChange={(e) => {
                         const v = e.target.value;
                         setParMap((prev) => {

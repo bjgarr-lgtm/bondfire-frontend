@@ -45,8 +45,9 @@ async function readJsonMaybe(res) {
 
 async function tryRefresh() {
   // If your backend doesn't support refresh, this just fails quietly.
-  const url = `${API_BASE}/api/auth/refresh`;
-  const res = await fetch(url, {
+  const rel = `/api/auth/refresh`;
+  const url = API_BASE ? `${API_BASE}${rel}` : rel;
+  const res = await fetch(chosenUrl, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -65,7 +66,13 @@ async function tryRefresh() {
 }
 
 export async function api(path, opts = {}) {
-  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const rel = path.startsWith("/") ? path : `/${path}`;
+  const candidates = (() => {
+    if (path.startsWith("http")) return [path];
+    if (!API_BASE) return [rel];
+    if (rel.startsWith("/api/")) return [rel, `${API_BASE}${rel}`];
+    return [`${API_BASE}${rel}`];
+  })();
 
   const headers = new Headers(opts.headers || {});
   if (!headers.has("Content-Type") && opts.body != null) {
@@ -78,11 +85,27 @@ export async function api(path, opts = {}) {
   }
 
   // Always include cookies if the server uses httpOnly sessions.
-  const firstRes = await fetch(url, {
-    ...opts,
-    headers,
-    credentials: "include",
-  });
+  let chosenUrl = candidates[0];
+  let firstRes = null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const u = candidates[i];
+    chosenUrl = u;
+    try {
+      const r = await fetch(u, { ...opts, headers, credentials: "include" });
+      firstRes = r;
+
+      const shouldTryNext =
+        i < candidates.length - 1 && (r.status === 404 || r.status >= 500);
+
+      if (!shouldTryNext) break;
+    } catch {
+      firstRes = null;
+      // try next
+    }
+  }
+
+  if (!firstRes) throw new Error("Network error");
 
   if (firstRes.status !== 401) {
     if (!firstRes.ok) {
@@ -108,7 +131,7 @@ export async function api(path, opts = {}) {
     headers2.set("Authorization", `Bearer ${token2}`);
   }
 
-  const retryRes = await fetch(url, {
+  const retryRes = await fetch(chosenUrl, {
     ...opts,
     headers: headers2,
     credentials: "include",

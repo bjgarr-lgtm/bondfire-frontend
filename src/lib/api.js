@@ -22,12 +22,20 @@ async function readJsonMaybe(res) {
 
 export async function apiFetch(path, opts = {}) {
   const startedAt = Date.now();
-  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
 
-  debugLog("api:request", {
-    url,
-    method: (opts?.method || "GET").toString(),
-  });
+  const rel = path.startsWith("/") ? path : `/${path}`;
+  const isAbs = path.startsWith("http");
+  const candidates = (() => {
+    if (isAbs) return [path];
+    if (!API_BASE) return [rel];
+
+    // Prefer same-origin Pages Functions for "/api/*" routes.
+    // Fall back to API_BASE for deployments where the API lives elsewhere.
+    if (rel.startsWith("/api/")) return [rel, `${API_BASE}${rel}`];
+
+    // Non-API paths (rare): assume API_BASE.
+    return [`${API_BASE}${rel}`];
+  })();
 
   const init = {
     credentials: "include",
@@ -38,45 +46,76 @@ export async function apiFetch(path, opts = {}) {
   };
 
   // default json content-type for bodies that are plain objects
-  if (
-    init.body &&
-    typeof init.body === "object" &&
-    !(init.body instanceof FormData) &&
-    !(init.body instanceof Blob)
-  ) {
+  if (init.body && typeof init.body === "object" && !(init.body instanceof FormData) && !(init.body instanceof Blob)) {
     init.headers["Content-Type"] = init.headers["Content-Type"] || "application/json";
     init.body = JSON.stringify(init.body);
   }
 
-  const res = await fetch(url, init);
-  debugLog("api:response", { url, status: res.status, ms: Date.now() - startedAt });
-  if (res.status !== 401) return res;
+  // Try each candidate URL until one gives a non-404/5xx response (or is the last option).
+  let lastRes = null;
+  let lastUrl = candidates[0];
+  for (let i = 0; i < candidates.length; i++) {
+    const u = candidates[i];
+    lastUrl = u;
+    try {
+      debugLog("api:request", { url: u, method: (opts?.method || "GET").toString() });
+      const r = await fetch(u, init);
+      debugLog("api:response", { url: u, status: r.status, ms: Date.now() - startedAt });
 
-  // Try one refresh then retry once.
+      lastRes = r;
+
+      // If this looks like the wrong host (common when API_BASE is set but Pages Functions are the real endpoint),
+      // try the fallback.
+      const shouldTryNext =
+        i < candidates.length - 1 &&
+        (r.status === 404 || r.status >= 500);
+
+      if (!shouldTryNext) break;
+    } catch (e) {
+      debugLog("api:network_error", { url: u, message: String(e?.message || e) });
+      lastRes = null;
+      // try next candidate
+    }
+  }
+
+  if (!lastRes) {
+    // bubble up a normal fetch error shape
+    return fetch(lastUrl, init);
+  }
+
+  if (lastRes.status !== 401) return lastRes;
+
+  // 401: Try one refresh then retry once against the SAME URL that returned 401.
   if (!refreshing) {
     refreshing = (async () => {
       try {
-        debugLog("api:refresh_start", { url });
-        const r = await fetch(`${API_BASE}/api/auth/refresh`, {
-          method: "POST",
-          credentials: "include",
-        });
-        debugLog("api:refresh_result", { ok: r.ok, status: r.status });
-        return r.ok;
+        debugLog("api:refresh_start", { url: lastUrl });
+        const refreshUrls = API_BASE ? ["/api/auth/refresh", `${API_BASE}/api/auth/refresh`] : ["/api/auth/refresh"];
+        let ok = false;
+        for (const ru of refreshUrls) {
+          try {
+            const rr = await fetch(ru, { method: "POST", credentials: "include" });
+            debugLog("api:refresh_result", { url: ru, ok: rr.ok, status: rr.status });
+            if (rr.ok) { ok = true; break; }
+          } catch (e) {
+            debugLog("api:refresh_error", { url: ru, message: String(e?.message || e) });
+          }
+        }
+        return ok;
       } finally {
         refreshing = null;
       }
     })();
   }
 
-  const ok = await refreshing;
-  if (!ok) {
-    debugLog("api:refresh_failed", { url });
-    return res;
+  const okRefresh = await refreshing;
+  if (!okRefresh) {
+    debugLog("api:refresh_failed", { url: lastUrl });
+    return lastRes;
   }
 
-  const res2 = await fetch(url, init);
-  debugLog("api:retry_response", { url, status: res2.status });
+  const res2 = await fetch(lastUrl, init);
+  debugLog("api:retry_response", { url: lastUrl, status: res2.status });
   return res2;
 }
 

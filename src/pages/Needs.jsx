@@ -286,7 +286,12 @@ export default function Needs() {
 							<input className="input" placeholder="Title" value={edit.title} onChange={(e) => setEdit((p) => ({ ...p, title: e.target.value }))} />
 							<input className="input" placeholder="Urgency" value={edit.urgency} onChange={(e) => setEdit((p) => ({ ...p, urgency: e.target.value }))} />
 							<input className="input" placeholder="Status" value={edit.status} onChange={(e) => setEdit((p) => ({ ...p, status: e.target.value }))} />
-							<input className="input" type="number" placeholder="Priority" value={edit.priority} onChange={(e) => setEdit((p) => ({ ...p, priority: e.target.value }))} />
+							<input className="input" type="number" placeholder="Priority" value={edit.priority} onChange={(e) => setEdit((p) => ({ ...p, priority: e.target.value }))}
+              onFocus={(e) => {
+                const v = String(e.target.value || "");
+                if (v === "0") setEdit((p) => ({ ...p, priority: "" }));
+                else { try { e.target.select(); } catch {} }
+              }} />
 						</div>
 
 						<textarea className="input" rows={5} placeholder="Description" value={edit.description} onChange={(e) => setEdit((p) => ({ ...p, description: e.target.value }))} style={{ marginTop: 10 }} />
@@ -315,7 +320,12 @@ export default function Needs() {
 					<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
 						<input className="input" placeholder="Title" value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />
 						<input className="input" placeholder="Urgency" value={form.urgency} onChange={(e) => setForm((p) => ({ ...p, urgency: e.target.value }))} />
-						<input className="input" type="number" placeholder="Priority" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))} />
+						<input className="input" type="number" placeholder="Priority" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
+              onFocus={(e) => {
+                const v = String(e.target.value || "");
+                if (v === "0") setForm((p) => ({ ...p, priority: "" }));
+                else { try { e.target.select(); } catch {} }
+              }} />
 					</div>
 					<textarea className="input" rows={3} placeholder="Description" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
 					<label style={{ display: "flex", alignItems: "center", gap: 8 }}>

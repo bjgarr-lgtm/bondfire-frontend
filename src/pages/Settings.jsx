@@ -728,7 +728,8 @@ React.useEffect(() => {
     e.preventDefault();
     if (!orgId) return;
 
-    const f = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const f = new FormData(form);
 
     const payload = {
       pledger_name: String(f.get("pledger_name") || "").trim(),
@@ -749,7 +750,7 @@ React.useEffect(() => {
         method: "POST",
         body: payload,
       });
-      e.currentTarget.reset();
+      form?.reset?.();
       await loadPledges();
       setPledgesMsg("Added.");
       setTimeout(() => setPledgesMsg(""), 900);
