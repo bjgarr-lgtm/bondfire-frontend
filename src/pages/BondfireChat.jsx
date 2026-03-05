@@ -216,31 +216,6 @@ export default function BondfireChat() {
   );
 
   const clientRef = useRef(null);
-  const ensureCryptoReady = useCallback(async () => {
-    const c = clientRef.current;
-    if (!c) return;
-    let cry = c.getCrypto?.();
-    if (!cry && typeof c.initRustCrypto === "function") {
-      try {
-        await c.initRustCrypto();
-      } catch {
-        // ignore
-      }
-      cry = c.getCrypto?.();
-    }
-    setCryptoReady(!!cry);
-  }, [setCryptoReady]);
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
-        ensureCryptoReady().catch(() => {});
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [ensureCryptoReady]);
-
   const verifierRef = useRef(null);
   const activeRoomIdRef = useRef(null);
   const stoppedRef = useRef(false);
