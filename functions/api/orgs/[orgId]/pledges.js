@@ -242,8 +242,10 @@ export async function onRequest(ctx) {
       const unit = body.unit !== undefined ? (toStr(body.unit, 64) || null) : undefined;
       const note = body.note !== undefined ? (toStr(body.note, 4000) || null) : undefined;
       const status = body.status !== undefined ? (toStr(body.status, 32) || "offered") : undefined;
-      const need_id = body.need_id !== undefined ? (body.need_id || null) : undefined;
-      const is_public = body.is_public !== undefined ? boolToInt(body.is_public) : undefined;
+      const need_id =
+        (body.need_id !== undefined || body.needId !== undefined)
+          ? (toStr(body.need_id ?? body.needId, 128) || null)
+          : undefined;      const is_public = body.is_public !== undefined ? boolToInt(body.is_public) : undefined;
 
       // Legacy mirrors
       const title = type !== undefined ? type : undefined;
@@ -290,12 +292,17 @@ export async function onRequest(ctx) {
         .bind(...vals, id, orgId)
         .run();
 
-      const pledges = await listPledges(db, orgId);
-      if (String(fields.status || body.status || "").toLowerCase() === "accepted") {
-        const needId = fields.need_id || body.need_id || null;
+      // If pledge got accepted and it’s linked to a need, auto-bump the need to in_progress.
+      // IMPORTANT: do not reference any undefined "fields" object. Use the parsed vars/body.
+      const nextStatus =
+        status !== undefined ? String(status || "") : String(body.status || "");
+      const isAccepted = nextStatus.toLowerCase() === "accepted";
 
-        // If need_id might not be included in the PUT payload, fetch it from DB.
-        let resolvedNeedId = needId;
+      if (isAccepted) {
+        // Prefer the PUT payload, but if it omitted need_id, fetch it.
+        let resolvedNeedId =
+          need_id !== undefined ? need_id : (body.need_id || null);
+
         if (!resolvedNeedId) {
           const r = await db
             .prepare("SELECT need_id FROM pledges WHERE id=? AND org_id=?")
@@ -306,9 +313,9 @@ export async function onRequest(ctx) {
 
         await bumpNeedToInProgress(db, orgId, resolvedNeedId);
       }
-      return ok({ pledges });
-      // If pledge got accepted and it’s linked to a need, auto-bump the need to in_progress.
-    }
+
+      const pledges = await listPledges(db, orgId);
+      return ok({ pledges });    }
 
     if (request.method === "DELETE") {
       // Support both JSON body and query param.
