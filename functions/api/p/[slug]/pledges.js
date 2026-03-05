@@ -1,6 +1,54 @@
 import { ok, err } from "../../_lib/http.js";
 import { getDB } from "../../_bf.js";
 
+
+async function ensurePledgesTable(db) {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS pledges (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        need_id TEXT NULL,
+        title TEXT NOT NULL,
+        description TEXT NULL,
+        qty REAL NULL,
+        unit TEXT NULL,
+        contact TEXT NULL,
+        is_public INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`
+    )
+    .run();
+
+  await db
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS idx_pledges_org_created
+       ON pledges(org_id, created_at DESC)`
+    )
+    .run();
+
+  const adds = [
+    "ALTER TABLE pledges ADD COLUMN pledger_name TEXT",
+    "ALTER TABLE pledges ADD COLUMN pledger_email TEXT",
+    "ALTER TABLE pledges ADD COLUMN type TEXT",
+    "ALTER TABLE pledges ADD COLUMN amount REAL",
+    "ALTER TABLE pledges ADD COLUMN note TEXT",
+    "ALTER TABLE pledges ADD COLUMN status TEXT DEFAULT 'offered'",
+  ];
+
+  for (const sql of adds) {
+    try {
+      await db.prepare(sql).run();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!msg.toLowerCase().includes("duplicate") && !msg.toLowerCase().includes("exists")) {
+        throw e;
+      }
+    }
+  }
+}
+
 function now() {
   return Date.now();
 }
@@ -42,6 +90,8 @@ export async function onRequest(ctx) {
 
   const db = getDB(env);
   if (!db) return err(500, "DB_NOT_CONFIGURED");
+
+  await ensurePledgesTable(db);
 
   const orgId = await getOrgIdBySlug(env, slug);
   if (!orgId) return err(404, "NOT_FOUND");

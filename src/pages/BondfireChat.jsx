@@ -494,7 +494,25 @@ export default function BondfireChat() {
       } else {
         // Reused client: crypto might already be ready, but don't lie if it's not.
         try {
-          setCryptoReady(!!client.getCrypto?.());
+          
+// Crypto can take a moment to become available even on a reused client.
+// Keep UI honest by polling briefly.
+const hasCryptoNow = !!client.getCrypto?.();
+setCryptoReady(hasCryptoNow);
+if (!hasCryptoNow) {
+  let tries = 0;
+  const tick = () => {
+    tries += 1;
+    const ok = !!client.getCrypto?.();
+    if (ok) {
+      setCryptoReady(true);
+      return;
+    }
+    if (tries < 30) setTimeout(tick, 350);
+  };
+  setTimeout(tick, 350);
+}
+
         } catch {
           setCryptoReady(false);
         }
