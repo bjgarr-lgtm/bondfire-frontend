@@ -29,19 +29,19 @@ export async function onRequestGet(ctx) {
 
   // Ensure table exists (older deployments may not have run migrations).
   await db
-    .prepare(\`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    .prepare(`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       email TEXT NOT NULL,
       name TEXT NULL,
       source TEXT NULL,
       created_at INTEGER NOT NULL
-    )\`)
+    )`)
     .run();
 
   await db
-    .prepare(\`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
-      ON newsletter_subscribers(org_id, email)\`)
+    .prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
+      ON newsletter_subscribers(org_id, email)`)
     .run();
 
   // Subscriber list and exports are an admin function.
@@ -119,19 +119,19 @@ export async function onRequestPost(ctx) {
 
   // Ensure table exists (older deployments may not have run migrations).
   await db
-    .prepare(\`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    .prepare(`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       email TEXT NOT NULL,
       name TEXT NULL,
       source TEXT NULL,
       created_at INTEGER NOT NULL
-    )\`)
+    )`)
     .run();
 
   await db
-    .prepare(\`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
-      ON newsletter_subscribers(org_id, email)\`)
+    .prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
+      ON newsletter_subscribers(org_id, email)`)
     .run();
 
   const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "admin" });
@@ -174,19 +174,19 @@ export async function onRequestDelete(ctx) {
 
   // Ensure table exists (older deployments may not have run migrations).
   await db
-    .prepare(\`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    .prepare(`CREATE TABLE IF NOT EXISTS newsletter_subscribers (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       email TEXT NOT NULL,
       name TEXT NULL,
       source TEXT NULL,
       created_at INTEGER NOT NULL
-    )\`)
+    )`)
     .run();
 
   await db
-    .prepare(\`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
-      ON newsletter_subscribers(org_id, email)\`)
+    .prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_subscribers_org_email
+      ON newsletter_subscribers(org_id, email)`)
     .run();
 
   const auth = await requireOrgRole({ env, request, orgId: orgId, minRole: "admin" });
