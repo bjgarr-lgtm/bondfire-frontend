@@ -56,6 +56,73 @@ function writeJSON(key, value) {
   } catch {}
 }
 
+function removeKey(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+}
+
+function parseOrgIdFromHash() {
+  const m = (window.location.hash || "").match(/#\/org\/([^/]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function safeIdForEvent(ev) {
+  return (
+    ev?.getId?.() ||
+    `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`
+  );
+}
+
+function eventToMsg(ev) {
+  const content = ev?.getContent?.() || {};
+  const body = content?.body;
+  const msgtype = content?.msgtype;
+
+  const undecryptable =
+    !!ev?.isDecryptionFailure?.() ||
+    msgtype === "m.bad.encrypted" ||
+    (typeof body === "string" &&
+      /unable to decrypt|decryptionerror/i.test(body));
+
+  return {
+    id: safeIdForEvent(ev),
+    body: typeof body === "string" ? body : "",
+    sender: ev?.getSender?.() || "",
+    ts: ev?.getTs?.() || Date.now(),
+    encrypted: !!ev?.isEncrypted?.(),
+    undecryptable,
+    msgtype: msgtype || "",
+  };
+}
+
+function normalizeMxid(u) {
+  // Guard against older bad saves like "@user:server:deviceId".
+  // A valid MXID is "@localpart:server".
+  const s = String(u || "").trim();
+  if (!s) return "";
+  const parts = s.split(":");
+  if (parts.length <= 2) return s;
+  return `${parts[0]}:${parts[1]}`;
+}
+
+function sanitizeForIdb(s) {
+  return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+}
+
+// Local flag so the UI can remember that THIS browser device was verified.
+// This is not the source of truth for encryption, it is a convenience signal.
+function verifiedKeyFor(userId, deviceId) {
+  const u = sanitizeForIdb(userId);
+  const d = sanitizeForIdb(deviceId);
+  return `bf_mx_verified_${u}_${d}`;
+}
+
+function legibleNow() {
+  return new Date().toLocaleTimeString();
+}
+const ts = legibleNow;
+
 async function deleteIDB(name) {
   try {
     if (!name || !window.indexedDB) return;
@@ -71,8 +138,7 @@ async function deleteIDB(name) {
 }
 
 async function nukeMatrixIdbForUser(userId) {
-  // Must match the dbName strings you use in createClient().
-  const uid = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
+  const uid = sanitizeForIdb(userId);
   if (!uid) return;
 
   const names = [
@@ -106,90 +172,27 @@ async function detectCryptoReady(client) {
 
     // matrix-js-sdk variants expose different signals; try a few.
     if (typeof crypto.isCryptoEnabled === "function") return !!crypto.isCryptoEnabled();
+
+    // If it can fetch our device keys, we're likely actually initialized.
     if (typeof crypto.getOwnDeviceKeys === "function") {
       const keys = await crypto.getOwnDeviceKeys();
       return !!keys;
     }
+
+    // Fallback: crypto object exists, assume ready.
     return true;
   } catch {
     return false;
   }
 }
 
-function removeKey(key) {
-  try {
-    localStorage.removeItem(key);
-  } catch {}
-}
-
-function parseOrgIdFromHash() {
-  const m = (window.location.hash || "").match(/#\/org\/([^/]+)/i);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-// Local flag so the UI can remember that THIS browser device was verified.
-// This is not the source of truth for encryption, it is a convenience signal.
-function verifiedKeyFor(userId, deviceId) {
-  const u = String(userId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
-  const d = String(deviceId || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
-  return `bf_mx_verified_${u}_${d}`;
-}
-
-const ts = legibleNow;
-function legibleNow() {
-  return new Date().toLocaleTimeString();
-}
-
-function safeIdForEvent(ev) {
-  return (
-    ev?.getId?.() ||
-    `${ev?.getSender?.() || "?"}:${ev?.getTs?.() || Date.now()}`
-  );
-}
-
-function eventToMsg(ev) {
-  const content = ev?.getContent?.() || {};
-  const body = content?.body;
-  const msgtype = content?.msgtype;
-
-  // matrix-js-sdk represents undecryptable messages as m.room.message with msgtype "m.bad.encrypted"
-  // and/or provides isDecryptionFailure(). Some homeservers also stuff a human-readable string into body.
-  const undecryptable =
-    !!ev?.isDecryptionFailure?.() ||
-    msgtype === "m.bad.encrypted" ||
-    (typeof body === "string" &&
-      /unable to decrypt|decryptionerror/i.test(body));
-
-  return {
-    id: safeIdForEvent(ev),
-    body: typeof body === "string" ? body : "",
-    sender: ev?.getSender?.() || "",
-    ts: ev?.getTs?.() || Date.now(),
-    encrypted: !!ev?.isEncrypted?.(),
-    undecryptable,
-    msgtype: msgtype || "",
-  };
-}
-
-function normalizeMxid(u) {
-  // Guard against older bad saves like "@user:server:deviceId".
-  // A valid MXID is "@localpart:server".
-  const s = String(u || "").trim();
-  if (!s) return "";
-  const parts = s.split(":");
-  if (parts.length <= 2) return s;
-  return `${parts[0]}:${parts[1]}`;
-}
-
 async function getDeviceVerifiedTruth(client) {
-  // Best-effort across sdk versions.
   try {
     const crypto = client?.getCrypto?.();
     const uid = client?.getUserId?.();
     const did = client?.getDeviceId?.();
     if (!crypto || !uid || !did) return null;
 
-    // Newer: crypto.getDeviceVerificationStatus(userId, deviceId)
     if (typeof crypto.getDeviceVerificationStatus === "function") {
       const res = await crypto.getDeviceVerificationStatus(uid, did);
       if (res === true) return true;
@@ -203,7 +206,6 @@ async function getDeviceVerifiedTruth(client) {
       }
     }
 
-    // Older (sometimes): crypto.getDeviceVerification(userId, deviceId)
     if (typeof crypto.getDeviceVerification === "function") {
       const res = await crypto.getDeviceVerification(uid, did);
       if (res === true) return true;
@@ -377,10 +379,7 @@ export default function BondfireChat() {
       const r = prev[roomId] || {};
       const existing = r[mxid] || {};
       const next = { ...existing, ...info };
-      if (
-        existing.name === next.name &&
-        existing.avatarUrl === next.avatarUrl
-      ) {
+      if (existing.name === next.name && existing.avatarUrl === next.avatarUrl) {
         return prev;
       }
       return { ...prev, [roomId]: { ...r, [mxid]: next } };
@@ -402,7 +401,6 @@ export default function BondfireChat() {
       let avatarUrl = "";
       const mxc = m?.getMxcAvatarUrl?.() || m?.events?.member?.getContent?.()?.avatar_url;
       if (mxc && typeof client.mxcUrlToHttp === "function") {
-        // Keep it tiny. It's an avatar, not a movie.
         avatarUrl = client.mxcUrlToHttp(mxc, 48, 48, "crop") || "";
       }
 
@@ -416,10 +414,7 @@ export default function BondfireChat() {
 
   /* ---------- boot / resume (MOUNT-ONLY) ---------- */
   useEffect(() => {
-    // do not start without session
     if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
-
-    // if a client already exists, do nothing
     if (clientRef.current) return;
 
     stoppedRef.current = false;
@@ -427,7 +422,6 @@ export default function BondfireChat() {
     const baseUrl = saved.hsUrl;
     const uid = saved.userId;
     const token = saved.accessToken;
-    // Older sessions may not have persisted deviceId.
     const did = saved.deviceId || "";
 
     // Keep state aligned with storage
@@ -438,6 +432,16 @@ export default function BondfireChat() {
     const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
 
+    // FIX: canReuse must actually exist.
+    const canReuse =
+      !!(
+        g &&
+        g.client &&
+        g.baseUrl === baseUrl &&
+        g.userId === uid &&
+        g.accessToken === token &&
+        sameDevice
+      );
 
     let client = null;
     let store = null;
@@ -448,15 +452,18 @@ export default function BondfireChat() {
       if (!did && g?.deviceId) setDeviceId(g.deviceId);
       log("Connected (resumed)");
     } else {
+      // IMPORTANT: use sanitized IDB names so reset actually deletes the right DBs.
+      const uidSafe = sanitizeForIdb(uid);
+
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${uid}`,
+        dbName: `bf_mx_store_${uidSafe}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${uid}`
+        `bf_mx_crypto_${uidSafe}`
       );
 
       client = createClient({
@@ -491,7 +498,6 @@ export default function BondfireChat() {
 
       const m = eventToMsg(ev);
 
-      // De-dupe and update
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         return [...prev, m];
@@ -519,7 +525,6 @@ export default function BondfireChat() {
     }
 
     function onRoomUpdate() {
-      // room list updates (invites, joins, etc)
       refreshRooms();
     }
 
@@ -547,24 +552,21 @@ export default function BondfireChat() {
           log("Crypto init failed:", e?.message || e);
         }
       } else {
-        // Reused client: crypto might already be ready, but don't lie if it's not.
-        try {
-          setCryptoReady(!!client.getCrypto?.());
-        } catch {
-          setCryptoReady(false);
+        // Reused client: do an actual readiness check, do not lie.
+        const okCrypto = await detectCryptoReady(client);
+        setCryptoReady(okCrypto);
+        if (!okCrypto) {
+          log("Crypto not ready on resumed client. Use Reset Matrix storage.");
         }
       }
 
-      // Always do these on boot and on reuse so the UI reflects truth.
       refreshRooms();
       refreshVerificationTruth();
 
       try {
         const crypto = client.getCrypto?.();
         const myUid = client.getUserId?.() || uid;
-        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(
-          myUid
-        );
+        const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid);
         if (pending && pending.length) onVerificationReq(pending[0]);
       } catch {
         // ignore
@@ -574,7 +576,6 @@ export default function BondfireChat() {
       client.on(CryptoEvent.VerificationRequestReceived, onVerificationReq);
       client.on("Room.timeline", onTimeline);
 
-      // room list updates
       client.on?.("Room", onRoomUpdate);
       client.on?.("Room.myMembership", onRoomUpdate);
 
@@ -585,20 +586,23 @@ export default function BondfireChat() {
       stoppedRef.current = true;
       try {
         client.removeListener?.("sync", onSync);
-        client.removeListener?.(
-          CryptoEvent.VerificationRequestReceived,
-          onVerificationReq
-        );
+        client.removeListener?.(CryptoEvent.VerificationRequestReceived, onVerificationReq);
         client.removeListener?.("Room.timeline", onTimeline);
         client.removeListener?.("Room", onRoomUpdate);
         client.removeListener?.("Room.myMembership", onRoomUpdate);
       } catch {}
       clientRef.current = null;
     };
-  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, refreshRooms, refreshVerificationTruth]);
+  }, [
+    saved?.hsUrl,
+    saved?.userId,
+    saved?.accessToken,
+    saved?.deviceId,
+    refreshRooms,
+    refreshVerificationTruth,
+  ]);
 
-  // When you tab away and back, do a light refresh so we don't "look unverified"
-  // while still working.
+  // When you tab away and back, do a light refresh.
   useEffect(() => {
     function onVis() {
       if (document.visibilityState === "visible") {
@@ -644,8 +648,7 @@ export default function BondfireChat() {
     try {
       const crypto = client.getCrypto?.();
       const myUid = client.getUserId?.() || saved?.userId || userId;
-      const pending =
-        crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
+      const pending = crypto?.getVerificationRequestsToDeviceInProgress?.(myUid) || [];
       if (pending.length) {
         setVerificationReq(pending[0]);
         setVerifyMsg("Found an in-progress verification. Continue below.");
@@ -694,8 +697,7 @@ export default function BondfireChat() {
           ? payload.emoji
               .map((e) => {
                 if (Array.isArray(e)) return [e[0], e[1]];
-                if (e && typeof e === "object")
-                  return [e.emoji, e.description || e.name];
+                if (e && typeof e === "object") return [e.emoji, e.description || e.name];
                 return null;
               })
               .filter((pair) => Array.isArray(pair) && pair[0])
@@ -795,10 +797,8 @@ export default function BondfireChat() {
   };
 
   const logout = async () => {
-    // clear saved session
     removeKey(`bf_matrix_${orgId}`);
 
-    // also clear local verified flag for this device
     try {
       const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
@@ -806,7 +806,6 @@ export default function BondfireChat() {
 
     setDeviceVerified(false);
 
-    // stop client HARD
     const client = clientRef.current;
     clientRef.current = null;
 
@@ -819,7 +818,6 @@ export default function BondfireChat() {
 
     clearGlobalMatrix();
 
-    // wipe UI state
     setUserId("");
     setAccessToken("");
     setDeviceId("");
@@ -835,11 +833,9 @@ export default function BondfireChat() {
   };
 
   const resetMatrixStorage = async () => {
-    // This is the nuclear option. It should actually be nuclear.
     const uid = saved?.userId || userId || "";
     const client = clientRef.current;
 
-    // stop client first so it releases IDB locks
     try {
       client?.stopClient?.();
       client?.removeAllListeners?.();
@@ -848,17 +844,14 @@ export default function BondfireChat() {
     clientRef.current = null;
     clearGlobalMatrix();
 
-    // remove session + verified marker
     removeKey(`bf_matrix_${orgId}`);
     try {
       const k = verifiedKeyFor(uid, saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
     } catch {}
 
-    // delete the actual IDB databases used by matrix-js-sdk in your build
     await nukeMatrixIdbForUser(uid);
 
-    // wipe UI state
     setReady(false);
     setCryptoReady(false);
     setRooms([]);
@@ -868,7 +861,6 @@ export default function BondfireChat() {
     cleanupVerification("");
     setDeviceVerified(false);
 
-    // Reload once to ensure wasm + crypto worker state is fresh
     window.location.replace(window.location.href);
   };
 
@@ -883,7 +875,6 @@ export default function BondfireChat() {
     const room = client.getRoom(roomId);
     if (!room) return;
 
-    // Warm member cache for this room so avatars show instantly.
     try {
       const members = room.getJoinedMembers?.() || [];
       members.forEach((m) => {
@@ -919,7 +910,6 @@ export default function BondfireChat() {
     const body = msg.trim();
     setMsg("");
 
-    // optimistic insert so you see it instantly
     const optimistic = {
       id: `local:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       body,
@@ -1006,14 +996,7 @@ export default function BondfireChat() {
                 This device is verified for this account. You should be able to
                 read and send E2EE messages in encrypted rooms. 🔒
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 12,
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 <button className="btn" onClick={requestOwnVerification}>
                   Re-verify (optional)
                 </button>
@@ -1076,14 +1059,7 @@ export default function BondfireChat() {
                   </div>
                 </>
               ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button className="btn" onClick={acceptVerification}>
                     Accept
                   </button>
@@ -1099,14 +1075,7 @@ export default function BondfireChat() {
                 No active verification request. If you have another device (or
                 Element) signed in, start verification from either side.
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 12,
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 <button className="btn" onClick={requestOwnVerification}>
                   Request verification
                 </button>
@@ -1133,11 +1102,7 @@ export default function BondfireChat() {
           <div className="helper" style={{ marginBottom: 10 }}>
             Homeserver is fixed to {HS_DEFAULT}
           </div>
-          <form
-            onSubmit={login}
-            className="grid"
-            style={{ gap: 8, maxWidth: 520 }}
-          >
+          <form onSubmit={login} className="grid" style={{ gap: 8, maxWidth: 520 }}>
             <input
               className="input"
               placeholder="Username (localpart, without @ and domain)"
@@ -1169,13 +1134,7 @@ export default function BondfireChat() {
             marginTop: 12,
           }}
         >
-          <aside
-            className="card"
-            style={{
-              padding: 12,
-              minHeight: 0,
-            }}
-          >
+          <aside className="card" style={{ padding: 12, minHeight: 0 }}>
             <h3 className="section-title" style={{ marginTop: 0 }}>
               Rooms
             </h3>
@@ -1233,10 +1192,7 @@ export default function BondfireChat() {
               flexDirection: "column",
             }}
           >
-            <h3
-              className="section-title"
-              style={{ marginTop: 0, marginBottom: 8 }}
-            >
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 8 }}>
               {currentRoom ? currentRoom.name : "Select a room"}
               {currentRoom?.encrypted ? " 🔒" : ""}
             </h3>
@@ -1301,9 +1257,7 @@ export default function BondfireChat() {
                           {m.encrypted && !m.undecryptable ? "🔒" : ""}
                         </div>
                         <div>
-                          {m.body || (
-                            <span className="helper">(undecryptable)</span>
-                          )}
+                          {m.body || <span className="helper">(undecryptable)</span>}
                         </div>
                       </div>
                     </div>
@@ -1312,16 +1266,10 @@ export default function BondfireChat() {
               )}
             </div>
 
-            <form
-              onSubmit={send}
-              className="row"
-              style={{ gap: 8, marginTop: 8 }}
-            >
+            <form onSubmit={send} className="row" style={{ gap: 8, marginTop: 8 }}>
               <input
                 className="input"
-                placeholder={
-                  currentRoom ? "Type a message…" : "Pick a room first"
-                }
+                placeholder={currentRoom ? "Type a message…" : "Pick a room first"}
                 value={msg}
                 onChange={(e) => setMsg(e.target.value)}
                 disabled={!currentRoom}
