@@ -2,7 +2,6 @@
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
-import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
 /* ---------- API helper ---------- */
@@ -407,79 +406,6 @@ export default function Settings() {
   const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
   const [publicInboxFilter, setPublicInboxFilter] = React.useState("all");
 
-  const actionTypeOptions = React.useMemo(() => ([
-    { value: "none", label: "Hide this button" },
-    { value: "modal:get_help", label: "Open Get Help form" },
-    { value: "modal:volunteer", label: "Open Volunteer form" },
-    { value: "modal:offer_resources", label: "Open Offer Resources form" },
-    { value: "#newsletter", label: "Jump to newsletter signup" },
-    { value: "external", label: "Open a custom link" },
-  ]), []);
-
-  const primaryActionDefaults = React.useMemo(() => ([
-    { label: "Get Help", kind: "modal:get_help", url: "" },
-    { label: "Offer Help", kind: "modal:offer_resources", url: "" },
-    { label: "Stay Connected", kind: "#newsletter", url: "" },
-  ]), []);
-
-  const getInvolvedDefaults = React.useMemo(() => ([
-    { label: "Volunteer", kind: "modal:volunteer", url: "" },
-    { label: "Donate Funds", kind: "external", url: "" },
-    { label: "Offer Resources", kind: "modal:offer_resources", url: "" },
-    { label: "Request Assistance", kind: "modal:get_help", url: "" },
-  ]), []);
-
-  const toActionEditorItems = React.useCallback((items, defaults = []) => {
-    const src = Array.isArray(items) ? items : [];
-    const base = (Array.isArray(defaults) ? defaults : []).map((item) => ({ ...item }));
-    return base.map((fallback, index) => {
-      const raw = src[index] || {};
-      const rawLabel = String(raw?.label || raw?.text || fallback?.label || "").trim();
-      const rawUrl = String(raw?.url || "").trim();
-      const lowered = rawUrl.toLowerCase();
-      let kind = fallback?.kind || "none";
-      let url = rawUrl;
-      if (!rawUrl) {
-        kind = fallback?.kind || "none";
-        url = fallback?.kind === "external" ? String(fallback?.url || "") : "";
-      } else if (lowered === "newsletter" || lowered === "#newsletter") {
-        kind = "#newsletter";
-        url = "";
-      } else if (lowered in {"modal:get_help":1, "modal:volunteer":1, "modal:offer_resources":1}) {
-        kind = lowered;
-        url = "";
-      } else {
-        kind = "external";
-      }
-      return {
-        label: rawLabel,
-        kind,
-        url,
-      };
-    });
-  }, []);
-
-  const fromActionEditorItems = React.useCallback((items, limit = 4) => {
-    return (Array.isArray(items) ? items : [])
-      .slice(0, limit)
-      .map((item) => {
-        const label = String(item?.label || "").trim();
-        const kind = String(item?.kind || "none").trim();
-        const customUrl = String(item?.url || "").trim();
-        if (!label || kind === "none") return null;
-        if (kind === "external") {
-          if (!customUrl) return null;
-          return { label, url: customUrl };
-        }
-        return { label, url: kind === "#newsletter" ? "#newsletter" : kind };
-      })
-      .filter(Boolean);
-  }, []);
-
-  const updateActionItem = React.useCallback((setter, index, patch) => {
-    setter((prev) => (Array.isArray(prev) ? prev : []).map((item, i) => (i === index ? { ...item, ...patch } : item)));
-  }, []);
-
   const parseLinkLines = React.useCallback((value) => {
     return String(value || "")
       .split("\n")
@@ -669,6 +595,7 @@ React.useEffect(() => {
   const filteredPublicInboxItems = React.useMemo(() => {
     if (publicInboxFilter === "all") return publicInboxItems;
     if (publicInboxFilter === "intake") return publicInboxItems.filter((item) => item.type === "intake");
+    if (publicInboxFilter === "rsvp") return publicInboxItems.filter((item) => item.type === "rsvp");
     return publicInboxItems.filter((item) => String(item.review_status || "new") === publicInboxFilter);
   }, [publicInboxItems, publicInboxFilter]);
 
@@ -1201,10 +1128,20 @@ React.useEffect(() => {
       {/* Public Page */}
       {tab === "public" && (
         <div className="card" style={{ padding: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Public Page</h2>
-          <p className="helper">Build a clean public-facing page. Internal app actions stay internal. Public CTA buttons can link out wherever the org wants.</p>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: 6 }}>Public Page</h2>
+              <p className="helper" style={{ margin: 0 }}>Set up the public-facing page visitors will see. Turn sections on or off, choose the theme, and decide what each button does.</p>
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {enabled && slug ? (
+                <a className="btn" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
+              ) : null}
+              <button className="btn-red" type="submit" form="public-page-settings-form">Save</button>
+            </div>
+          </div>
 
-          <form onSubmit={savePublic} className="grid" style={{ gap: 12, marginTop: 8 }}>
+          <form id="public-page-settings-form" onSubmit={savePublic} className="grid" style={{ gap: 12, marginTop: 12 }}>
             <label className="row" style={{ gap: 8, alignItems: "center" }}>
               <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
               <span>Enable public page</span>
@@ -1246,27 +1183,39 @@ React.useEffect(() => {
               <input className="input" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Mutual aid, community meals, outreach" />
             </label>
 
-            <div className="bf-two">
-              <label className="grid" style={{ gap: 6 }}>
-                <span className="helper">Accent color</span>
-                <input className="input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
-              </label>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Basics</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Start with the name, link, and color. This is the minimum needed to get the page live.</p>
 
-            </div>
+              <div className="bf-two">
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Accent color</span>
+                  <input className="input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
+                </label>
+                <div className="card" style={{ padding: 12, background: "rgba(255,255,255,0.02)" }}>
+                  <strong style={{ display: "block", marginBottom: 6 }}>How this works</strong>
+                  <div className="helper">1. Turn the public page on.</div>
+                  <div className="helper">2. Choose which sections visitors should see.</div>
+                  <div className="helper">3. Save, then open the live preview.</div>
+                </div>
+              </div>
 
-            <div className="bf-two">
-              <label className="grid" style={{ gap: 6 }}>
-                <span className="helper">Website button label</span>
-                <input className="input" value={websiteLabel} onChange={(e) => setWebsiteLabel(e.target.value)} placeholder="Website" />
-              </label>
-              <label className="grid" style={{ gap: 6 }}>
-                <span className="helper">Website button URL</span>
-                <input className="input" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://example.org" />
-              </label>
+              <div className="bf-two" style={{ marginTop: 12 }}>
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Website button label</span>
+                  <input className="input" value={websiteLabel} onChange={(e) => setWebsiteLabel(e.target.value)} placeholder="Website" />
+                </label>
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Website button URL</span>
+                  <input className="input" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://example.org" />
+                </label>
+              </div>
             </div>
 
             <div className="card" style={{ padding: 12 }}>
-              <h3 style={{ marginTop: 0 }}>What should appear on the public page?</h3>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Sections</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Choose which blocks appear on the public page. You can hide anything that does not apply to this org.</p>
+              <h4 style={{ marginTop: 0 }}>What should appear on the public page?</h4>
               <div className="bf-two">
                 <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWebsiteButton} onChange={(e) => setShowWebsiteButton(e.target.checked)} /><span>Show the Website button in the header</span></label>
                 <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showActionStrip} onChange={(e) => setShowActionStrip(e.target.checked)} /><span>Show the main action buttons row</span></label>
@@ -1298,15 +1247,19 @@ React.useEffect(() => {
               </div>
             </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">What we do (one item per line)</span>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>What We Do</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Add a short list of what the org does. Use one line per item.</p>
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">What we do (one item per line)</span>
               <textarea className="textarea" rows={4} value={whatWeDo} onChange={(e) => setWhatWeDo(e.target.value)} placeholder={`Free Store
 Community Meals
 Outreach`} />
-            </label>
+              </label>
+            </div>
 
             <div className="card" style={{ padding: 12 }}>
-              <h3 style={{ marginTop: 0 }}>Main action buttons</h3>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Main action buttons</h3>
               <p className="helper" style={{ marginTop: 0 }}>These are the big buttons near the top of the public page.</p>
               <div className="grid" style={{ gap: 10 }}>
                 {primaryActionItems.map((item, index) => (
@@ -1336,7 +1289,7 @@ Outreach`} />
             </div>
 
             <div className="card" style={{ padding: 12 }}>
-              <h3 style={{ marginTop: 0 }}>Get Involved buttons</h3>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Get Involved buttons</h3>
               <p className="helper" style={{ marginTop: 0 }}>These are the optional buttons lower on the page. You can hide any of them.</p>
               <div className="grid" style={{ gap: 10 }}>
                 {getInvolvedActionItems.map((item, index) => (
@@ -1364,42 +1317,18 @@ Outreach`} />
                 ))}
               </div>
             </div>
-
-            <div className="row" style={{ gap: 8, alignItems: "center" }}>
-              <button className="btn-red" type="submit">Save</button>
-              {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
+            <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div>
+                {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {enabled && slug ? (
+                  <a className="btn" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
+                ) : null}
+                <button className="btn-red" type="submit">Save</button>
+              </div>
             </div>
           </form>
-
-          {enabled ? (
-            <div style={{ marginTop: 16 }}>
-              <h3 style={{ margin: "8px 0" }}>Preview</h3>
-              <PublicPage
-                data={{
-                  public: {
-                    title: (title || orgName || "Public page").trim(),
-                    location: (locationLine || "").trim(),
-                    about: (about || "").trim(),
-                    theme_mode: themeMode,
-                    accent_color: accentColor,
-                    newsletter_enabled: !!publicNewsletterEnabled,
-                    pledges_enabled: !!publicPledgesEnabled,
-                    show_action_strip: !!showActionStrip,
-                    show_needs: !!showNeeds,
-                    show_meetings: !!showMeetings,
-                    show_what_we_do: !!showWhatWeDo,
-                    show_get_involved: !!showGetInvolved,
-                    show_newsletter_card: !!showNewsletterCard,
-                    show_website_button: !!showWebsiteButton,
-                    website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
-                    what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
-                    primary_actions: fromActionEditorItems(primaryActionItems, 3),
-                    get_involved_links: fromActionEditorItems(getInvolvedActionItems, 4),
-                  },
-                }}
-              />
-            </div>
-          ) : null}
         </div>
       )}
 
@@ -1414,7 +1343,8 @@ Outreach`} />
             <select className="input" value={publicInboxFilter} onChange={(e) => setPublicInboxFilter(e.target.value)} style={{ maxWidth: 180 }}>
               <option value="all">All</option>
               <option value="intake">Intakes only</option>
-                            <option value="new">Status: new</option>
+              <option value="rsvp">RSVPs only</option>
+              <option value="new">Status: new</option>
               <option value="reviewed">Status: reviewed</option>
               <option value="contacted">Status: contacted</option>
               <option value="closed">Status: closed</option>
@@ -1422,7 +1352,7 @@ Outreach`} />
             {publicInboxMsg ? <span className={publicInboxMsg.includes("Saved") ? "success" : "helper"}>{publicInboxMsg}</span> : null}
           </div>
 
-          <p className="helper" style={{ marginTop: 8 }}>Review public get help requests, volunteer sign ups, and resource offers from the public page. Meeting RSVPs stay attached to each meeting instead of landing here.</p>
+          <p className="helper" style={{ marginTop: 8 }}>Review public help requests, volunteer offers, resource offers, and per-meeting RSVPs from the refreshed public page.</p>
 
           <div style={{ marginTop: 12 }}>
             {filteredPublicInboxItems.length === 0 ? (
@@ -1432,8 +1362,8 @@ Outreach`} />
                 {filteredPublicInboxItems.map((item) => (
                   <div key={`${item.type}:${item.id}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                     <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <strong>{item.title || "Public intake"}</strong>
-                      <span className="helper">{(item.source_kind || "intake").replaceAll("_", " ")}</span>
+                      <strong>{item.title || (item.type === "rsvp" ? "Meeting RSVP" : "Public intake")}</strong>
+                      <span className="helper">{item.type === "rsvp" ? "RSVP" : (item.source_kind || "intake").replaceAll("_", " ")}</span>
                       <span className="helper">{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
                     </div>
 
@@ -1441,6 +1371,13 @@ Outreach`} />
                       <div className="grid" style={{ gap: 8 }}>
                         <div><div className="helper">Name</div><div>{item.name || ""}</div></div>
                         <div><div className="helper">Contact</div><div style={{ overflowWrap: "anywhere" }}>{item.contact || ""}</div></div>
+                        {item.type === "rsvp" ? (
+                          <>
+                            <div><div className="helper">Attendance</div><div>{item.attendee_status || "yes"}</div></div>
+                            <div><div className="helper">Meeting</div><div>{item.meeting_title || "Public meeting"}{item.starts_at ? ` · ${new Date(item.starts_at).toLocaleString()}` : ""}</div></div>
+                            {item.location ? <div><div className="helper">Location</div><div>{item.location}</div></div> : null}
+                          </>
+                        ) : null}
                       </div>
 
                       <div className="grid" style={{ gap: 8 }}>
