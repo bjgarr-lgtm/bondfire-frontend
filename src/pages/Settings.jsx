@@ -596,7 +596,6 @@ React.useEffect(() => {
   const filteredPublicInboxItems = React.useMemo(() => {
     if (publicInboxFilter === "all") return publicInboxItems;
     if (publicInboxFilter === "intake") return publicInboxItems.filter((item) => item.type === "intake");
-    if (publicInboxFilter === "rsvp") return publicInboxItems.filter((item) => item.type === "rsvp");
     return publicInboxItems.filter((item) => String(item.review_status || "new") === publicInboxFilter);
   }, [publicInboxItems, publicInboxFilter]);
 
@@ -1342,8 +1341,7 @@ Outreach`} />
             <select className="input" value={publicInboxFilter} onChange={(e) => setPublicInboxFilter(e.target.value)} style={{ maxWidth: 180 }}>
               <option value="all">All</option>
               <option value="intake">Intakes only</option>
-              <option value="rsvp">RSVPs only</option>
-              <option value="new">Status: new</option>
+                            <option value="new">Status: new</option>
               <option value="reviewed">Status: reviewed</option>
               <option value="contacted">Status: contacted</option>
               <option value="closed">Status: closed</option>
@@ -1351,7 +1349,7 @@ Outreach`} />
             {publicInboxMsg ? <span className={publicInboxMsg.includes("Saved") ? "success" : "helper"}>{publicInboxMsg}</span> : null}
           </div>
 
-          <p className="helper" style={{ marginTop: 8 }}>Review public help requests, volunteer offers, resource offers, and per-meeting RSVPs from the refreshed public page.</p>
+          <p className="helper" style={{ marginTop: 8 }}>Review public get help requests, volunteer sign ups, and resource offers from the public page. Meeting RSVPs stay attached to each meeting instead of landing here.</p>
 
           <div style={{ marginTop: 12 }}>
             {filteredPublicInboxItems.length === 0 ? (
@@ -1361,8 +1359,8 @@ Outreach`} />
                 {filteredPublicInboxItems.map((item) => (
                   <div key={`${item.type}:${item.id}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                     <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <strong>{item.title || (item.type === "rsvp" ? "Meeting RSVP" : "Public intake")}</strong>
-                      <span className="helper">{item.type === "rsvp" ? "RSVP" : (item.source_kind || "intake").replaceAll("_", " ")}</span>
+                      <strong>{item.title || "Public intake"}</strong>
+                      <span className="helper">{(item.source_kind || "intake").replaceAll("_", " ")}</span>
                       <span className="helper">{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
                     </div>
 
@@ -1370,13 +1368,6 @@ Outreach`} />
                       <div className="grid" style={{ gap: 8 }}>
                         <div><div className="helper">Name</div><div>{item.name || ""}</div></div>
                         <div><div className="helper">Contact</div><div style={{ overflowWrap: "anywhere" }}>{item.contact || ""}</div></div>
-                        {item.type === "rsvp" ? (
-                          <>
-                            <div><div className="helper">Attendance</div><div>{item.attendee_status || "yes"}</div></div>
-                            <div><div className="helper">Meeting</div><div>{item.meeting_title || "Public meeting"}{item.starts_at ? ` · ${new Date(item.starts_at).toLocaleString()}` : ""}</div></div>
-                            {item.location ? <div><div className="helper">Location</div><div>{item.location}</div></div> : null}
-                          </>
-                        ) : null}
                       </div>
 
                       <div className="grid" style={{ gap: 8 }}>

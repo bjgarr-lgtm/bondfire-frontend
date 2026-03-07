@@ -268,6 +268,7 @@ export default function Overview() {
   const [meetings, setMeetings] = useState([]);
   const [subs, setSubs] = useState([]);
   const [pledges, setPledges] = useState([]);
+  const [publicInbox, setPublicInbox] = useState([]);
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
@@ -306,6 +307,7 @@ export default function Overview() {
       meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
       pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
       subsTotal: Number(cc.subscribers || cc.subs || 0),
+      publicInbox: Number(cc.publicInbox || 0),
     };
   }
 
@@ -386,6 +388,7 @@ export default function Overview() {
       setMeetings(Array.isArray(meetsDec) ? meetsDec : []);
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
+      setPublicInbox(Array.isArray(d?.publicInbox) ? d.publicInbox : []);
 
       // Tickers: compute deltas vs the last refresh baseline (in this tab), then update baseline.
       try {
@@ -399,6 +402,7 @@ export default function Overview() {
           meetingsUpcoming: hasBase ? cn.meetingsUpcoming - Number(base.meetingsUpcoming || 0) : 0,
           pledgesActive: hasBase ? cn.pledgesActive - Number(base.pledgesActive || 0) : 0,
           subsTotal: hasBase ? cn.subsTotal - Number(base.subsTotal || 0) : 0,
+          publicInbox: hasBase ? cn.publicInbox - Number(base.publicInbox || 0) : 0,
         };
         setTickerDeltas(nextDeltas);
         writeRefreshBaseline(orgId, cn);
@@ -434,6 +438,7 @@ export default function Overview() {
       meetingsUpcoming: Number(c.meetingsUpcoming || 0),
       pledgesActive: Number(c.pledgesActive || c.pledges || 0),
       subsTotal: Number(c.subscribers || c.subs || 0),
+      publicInbox: Number(c.publicInbox || 0),
     };
   }, [counts]);
 
@@ -446,6 +451,7 @@ export default function Overview() {
       meetingsUpcoming: Number(d.meetingsUpcoming || 0),
       pledgesActive: Number(d.pledgesActive || 0),
       subsTotal: Number(d.subsTotal || 0),
+      publicInbox: Number(d.publicInbox || 0),
     };
   }, [tickerDeltas]);
 
@@ -470,6 +476,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas]);
@@ -505,6 +512,14 @@ export default function Overview() {
       .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
       .slice(0, 6);
   }, [pledges]);
+
+  const publicInboxSorted = useMemo(() => {
+    const arr = Array.isArray(publicInbox) ? publicInbox : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
+      .slice(0, 6);
+  }, [publicInbox]);
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
@@ -683,14 +698,14 @@ const newsletterSpark = useMemo(() => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(160px, 1fr))",
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(7, minmax(150px, 1fr))",
           gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
       >
         {!hasLoadedOnce && loading ? (
           <>
-            {["👥", "📦", "🧾", "📅", "🤝", "📰"].map((ic, i) => (
+            {["👥", "📦", "🧾", "📅", "🤝", "📨", "📰"].map((ic, i) => (
               <div key={i}>
                 <MetricCardSkeleton icon={ic} />
               </div>
@@ -736,6 +751,42 @@ const newsletterSpark = useMemo(() => {
           </>
         ) : (
           <>
+        {/* Public inbox */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
+            <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
+              Review
+            </button>
+          </div>
+
+          {publicInboxSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {publicInboxSorted.map((item) => {
+                const kind = String(item?.kind || "").toLowerCase();
+                const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+                const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+                const who = safeStr(item?.name || "anonymous");
+                const contact = safeStr(item?.contact || "");
+                const details = safeStr(item?.details || "").trim();
+                return (
+                  <div key={item.id} className="card" style={{ padding: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {pill(title, tone)}
+                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                      <div className="helper">{fmtDT(item?.created_at)}</div>
+                    </div>
+                    {contact ? <div className="helper" style={{ marginTop: 6 }}>{contact}</div> : null}
+                    {details ? <div style={{ marginTop: 8 }}>{details}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+          )}
+        </div>
+
         {/* Next meetings */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

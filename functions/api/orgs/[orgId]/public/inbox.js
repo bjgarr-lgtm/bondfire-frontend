@@ -14,8 +14,7 @@ function normReviewStatus(v) {
 
 function normType(v) {
   const s = String(v || "").trim().toLowerCase();
-  if (s === "rsvp") return "rsvp";
-  return "intake";
+  return s === "rsvp" ? "rsvp" : "intake";
 }
 
 async function ensureTables(db) {
@@ -61,18 +60,10 @@ async function ensureTables(db) {
 }
 
 async function listInbox(db, orgId) {
-  const [intakesRes, rsvpsRes] = await Promise.all([
-    db.prepare(`SELECT id, kind, name, contact, details, extra, status, admin_note, created_at, updated_at
+  const intakesRes = await db.prepare(`SELECT id, kind, name, contact, details, extra, status, admin_note, created_at, updated_at
                 FROM public_intakes
-                WHERE org_id=?
-                ORDER BY created_at DESC`).bind(orgId).all(),
-    db.prepare(`SELECT r.id, r.meeting_id, r.name, r.contact, r.status, r.note, r.admin_status, r.admin_note, r.created_at, r.updated_at,
-                       m.title AS meeting_title, m.starts_at, m.location
-                FROM public_meeting_rsvps r
-                LEFT JOIN meetings m ON m.id = r.meeting_id AND m.org_id = r.org_id
-                WHERE r.org_id=?
-                ORDER BY r.created_at DESC`).bind(orgId).all(),
-  ]);
+                WHERE org_id=? AND kind IN ('get_help', 'offer_resources', 'volunteer')
+                ORDER BY created_at DESC`).bind(orgId).all();
 
   const intakes = (intakesRes.results || []).map((row) => ({
     id: row.id,
@@ -101,27 +92,8 @@ async function listInbox(db, orgId) {
     location: "",
   }));
 
-  const rsvps = (rsvpsRes.results || []).map((row) => ({
-    id: row.id,
-    type: "rsvp",
-    source_kind: "meeting_rsvp",
-    title: row.meeting_title || "Meeting RSVP",
-    name: row.name || "",
-    contact: row.contact || "",
-    details: row.note || "",
-    extra: "",
-    attendee_status: row.status || "yes",
-    review_status: row.admin_status || "new",
-    admin_note: row.admin_note || "",
-    created_at: row.created_at || 0,
-    updated_at: row.updated_at || 0,
-    meeting_id: row.meeting_id || "",
-    meeting_title: row.meeting_title || "",
-    starts_at: row.starts_at || null,
-    location: row.location || "",
-  }));
+  return [...intakes].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
 
-  return [...intakes, ...rsvps].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
 }
 
 export async function onRequest(context) {
@@ -151,23 +123,14 @@ export async function onRequest(context) {
       const adminNote = clean(body?.admin_note, 4000);
       const t = Date.now();
 
-      if (type === "intake") {
-        await db.prepare(`UPDATE public_intakes SET status=?, admin_note=?, updated_at=? WHERE org_id=? AND id=?`).bind(
-          reviewStatus,
-          adminNote,
-          t,
-          orgId,
-          id,
-        ).run();
-      } else {
-        await db.prepare(`UPDATE public_meeting_rsvps SET admin_status=?, admin_note=?, updated_at=? WHERE org_id=? AND id=?`).bind(
-          reviewStatus,
-          adminNote,
-          t,
-          orgId,
-          id,
-        ).run();
-      }
+      if (type !== "intake") return err(400, "RSVP_NOT_MANAGED_IN_PUBLIC_INBOX");
+      await db.prepare(`UPDATE public_intakes SET status=?, admin_note=?, updated_at=? WHERE org_id=? AND id=?`).bind(
+        reviewStatus,
+        adminNote,
+        t,
+        orgId,
+        id,
+      ).run();
 
       const items = await listInbox(db, orgId);
       return ok({ items });

@@ -124,7 +124,24 @@ export async function onRequestGet({ env, request, params }) {
     []
   );
 
-const activity = await safeAll(
+  const publicInboxCount = await safeFirst(
+    env,
+    `SELECT COUNT(*) as c FROM public_intakes WHERE org_id = ? AND kind IN ('get_help', 'offer_resources', 'volunteer') AND COALESCE(status, 'new') != 'closed'`,
+    [orgId],
+    { c: 0 }
+  );
+
+  const publicInbox = await safeAll(
+    env,
+    `SELECT id, kind, name, contact, details, extra, status, created_at, updated_at
+     FROM public_intakes
+     WHERE org_id = ? AND kind IN ('get_help', 'offer_resources', 'volunteer')
+     ORDER BY created_at DESC LIMIT 5`,
+    [orgId],
+    []
+  );
+
+  const activity = await safeAll(
     env,
     "SELECT id, kind, message, actor_user_id, created_at FROM activity WHERE org_id = ? ORDER BY created_at DESC LIMIT 25",
     [orgId],
@@ -141,6 +158,7 @@ const activity = await safeAll(
       meetingsUpcoming: meetingsUpcomingCount?.c || 0,
       newsletter: newsletterCount?.c || 0,
       pledges: pledgesCount?.c || 0,
+      publicInbox: publicInboxCount?.c || 0,
     },
     nextMeeting: nextMeeting || null,
     people,
@@ -148,6 +166,7 @@ const activity = await safeAll(
     inventory,
     newsletter,
     pledges,
+    publicInbox,
     activity,
   });
 }
