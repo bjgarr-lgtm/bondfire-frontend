@@ -70,7 +70,7 @@ function Modal({ open, title, children, onClose }) {
 			}}
 			className="bf-modal-backdrop"
 		>
-			<div className="card bf-modal-shell" style={{ "--bf-modal-width": "720px" }}>
+			<div className="card bf-modal-shell" style={{ "--bf-modal-width": "660px" }}>
 				<div className="bf-modal-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
 					<h3 style={{ margin: 0, flex: 1 }}>{title}</h3>
 					<button className="btn" type="button" onClick={onClose}>

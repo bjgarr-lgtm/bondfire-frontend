@@ -267,7 +267,7 @@ export default function Needs() {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "860px" }}>
+					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "780px" }}>
 						<div className="bf-modal-header row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Need Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>

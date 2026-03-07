@@ -377,7 +377,7 @@ async function saveEdit() {
 
 				{zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
 
-				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search meetings" style={{ marginTop: 12 }} />
+				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search meetings" style={{ marginTop: 10 }} />
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
 				<div style={{ marginTop: 12, overflowX: "auto" }}>
@@ -416,14 +416,14 @@ async function saveEdit() {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "920px" }}>
+					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "800px" }}>
 						<div className="bf-modal-header row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Meeting Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>
 						</div>
 
 						<div className="bf-modal-body">
-						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+						<div className="bf-modal-compact-grid">
 							<input className="input" placeholder="Title" value={edit.title} onChange={(e) => setEdit((p) => ({ ...p, title: e.target.value }))} />
 							<input className="input" type="datetime-local" value={edit.starts_at} onChange={(e) => setEdit((p) => ({ ...p, starts_at: e.target.value }))} />
 							<input className="input" type="datetime-local" value={edit.ends_at} onChange={(e) => setEdit((p) => ({ ...p, ends_at: e.target.value }))} />
@@ -432,8 +432,8 @@ async function saveEdit() {
 
 						<div style={{ marginTop: 12 }}>
 							<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>Your RSVP</div>
-							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-								<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+								<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
 									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("yes")}>Yes</button>
 									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("maybe")}>Maybe</button>
 									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("no")}>No</button>
@@ -467,7 +467,7 @@ async function saveEdit() {
 							</div>
 						</div>
 
-						<textarea className="input" rows={6} placeholder="Agenda / Notes" value={edit.agenda} onChange={(e) => setEdit((p) => ({ ...p, agenda: e.target.value }))} style={{ marginTop: 10 }} />
+						<textarea className="input" rows={4} placeholder="Agenda / Notes" value={edit.agenda} onChange={(e) => setEdit((p) => ({ ...p, agenda: e.target.value }))} style={{ marginTop: 10 }} />
 
 						<label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
 							<input type="checkbox" checked={!!edit.is_public} onChange={(e) => setEdit((p) => ({ ...p, is_public: e.target.checked }))} />
@@ -480,7 +480,7 @@ async function saveEdit() {
 							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
 						</div>
 
-						<div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
+						<div className="helper bf-modal-note">
 							If ZK is enabled and this meeting is not public, Title, Location, and Agenda are encrypted automatically on save.
 							Start and end times stay unencrypted so you can sort and display schedules.
 						</div>

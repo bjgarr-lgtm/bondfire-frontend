@@ -1358,24 +1358,33 @@ html, body {
 }
 
 
+
+:root{
+  --bf-app-header-h: 78px;
+}
+
 .bf-modal-backdrop{
   position:fixed;
   inset:0;
-  background:rgba(0,0,0,0.55);
+  top:var(--bf-app-header-h);
+  background:rgba(0,0,0,0.58);
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:center;
-  padding:16px;
-  z-index:50;
+  padding:10px 12px 12px;
+  z-index:950;
+  overflow:hidden;
 }
 
 .bf-modal-shell{
-  width:min(var(--bf-modal-width, 920px), 100%);
-  max-height:calc(100vh - 32px);
+  width:min(var(--bf-modal-width, 820px), calc(100vw - 24px));
+  max-height:calc(100vh - var(--bf-app-header-h) - 22px);
   display:flex;
   flex-direction:column;
   overflow:hidden;
-  padding:16px;
+  margin:0 auto;
+  padding:12px;
+  border-radius:16px;
 }
 
 .bf-modal-header,
@@ -1383,11 +1392,27 @@ html, body {
   flex:0 0 auto;
 }
 
+.bf-modal-header{
+  position:sticky;
+  top:0;
+  z-index:1;
+  background:inherit;
+  padding-bottom:8px;
+}
+
+.bf-modal-footer{
+  position:sticky;
+  bottom:0;
+  z-index:1;
+  background:inherit;
+  padding-top:8px;
+}
+
 .bf-modal-body{
   flex:1 1 auto;
   min-height:0;
   overflow:auto;
-  padding-right:4px;
+  padding-right:2px;
 }
 
 .bf-modal-body::-webkit-scrollbar{
@@ -1432,4 +1457,49 @@ html, body {
 
 @media (max-width: 900px){
   .main{padding:12px 8px 88px;}
+}
+
+
+.bf-modal-compact-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:8px;
+}
+
+.bf-modal-note{
+  margin-top:6px;
+  font-size:11px;
+  line-height:1.3;
+}
+
+@media (max-width: 1200px){
+  .bf-modal-backdrop{
+    padding:8px 10px 10px;
+  }
+  .bf-modal-shell{
+    width:min(var(--bf-modal-width, 820px), calc(100vw - 20px));
+    max-height:calc(100vh - var(--bf-app-header-h) - 18px);
+    padding:10px;
+  }
+}
+
+@media (max-width: 900px){
+  :root{ --bf-app-header-h: 72px; }
+  .bf-stat-grid,
+  .bf-modal-compact-grid{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px){
+  :root{ --bf-app-header-h: 68px; }
+  .bf-modal-shell{
+    width:calc(100vw - 14px);
+    max-height:calc(100vh - var(--bf-app-header-h) - 12px);
+    padding:9px;
+  }
+  .bf-stat-grid,
+  .bf-modal-compact-grid{
+    grid-template-columns:1fr;
+  }
 }

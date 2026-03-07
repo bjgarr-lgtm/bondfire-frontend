@@ -699,7 +699,7 @@ const newsletterSpark = useMemo(() => {
         style={{
           display: "grid",
           gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : `repeat(${Math.max(topCards.length, 1)}, minmax(0, 1fr))`,
-          gap: isNarrow ? 10 : 12,
+          gap: isNarrow ? 8 : 10,
           marginBottom: 12,
         }}
       >
@@ -714,18 +714,18 @@ const newsletterSpark = useMemo(() => {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 12, position: "relative", minHeight: 88, width: "100%" }}>
+              <div className="card" style={{ padding: 10, position: "relative", minHeight: 74, width: "100%" }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
                   </div>
                 ) : null}
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ fontSize: 16 }}>{c.icon}</div>
-                  <div style={{ fontWeight: 900, fontSize: 13, lineHeight: 1.2 }}>{c.title}</div>
+                  <div style={{ fontSize: 14 }}>{c.icon}</div>
+                  <div style={{ fontWeight: 900, fontSize: 12, lineHeight: 1.15 }}>{c.title}</div>
                 </div>
-                <div style={{ marginTop: 8, fontSize: 30, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
-                <div className="helper" style={{ marginTop: 4, fontSize: 12 }}>{c.sub}</div>
+                <div style={{ marginTop: 6, fontSize: 24, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+                <div className="helper" style={{ marginTop: 3, fontSize: 11 }}>{c.sub}</div>
               </div>
             </button>
           ))

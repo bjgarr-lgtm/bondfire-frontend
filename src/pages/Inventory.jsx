@@ -517,7 +517,7 @@ export default function Inventory() {
             if (e.target === e.currentTarget) closeModal();
           }}
         >
-          <div className="card bf-modal-shell" style={{ "--bf-modal-width": "820px" }}>
+          <div className="card bf-modal-shell" style={{ "--bf-modal-width": "760px" }}>
             <div className="bf-modal-header row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <h3 style={{ margin: 0 }}>Inventory Details</h3>
               <button className="btn" type="button" onClick={closeModal}>
