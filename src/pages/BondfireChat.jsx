@@ -13,30 +13,33 @@ import {
   canAcceptVerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api";
 
-function globalMatrixKey(orgId) {
-  return `__bf_matrix_client__${String(orgId || "")}`;
+const GLOBAL_MATRIX_KEY = "__bf_matrix_client__";
+const MATRIX_SESSION_KEY = "bf_matrix_session";
+
+function globalMatrixKey() {
+  return GLOBAL_MATRIX_KEY;
 }
 
-function getGlobalMatrix(orgId) {
+function getGlobalMatrix() {
   try {
-    return window[globalMatrixKey(orgId)] || null;
+    return window[globalMatrixKey()] || null;
   } catch {
     return null;
   }
 }
 
-function setGlobalMatrix(orgId, v) {
+function setGlobalMatrix(v) {
   try {
-    window[globalMatrixKey(orgId)] = v;
+    window[globalMatrixKey()] = v;
   } catch {}
 }
 
-function clearGlobalMatrix(orgId) {
+function clearGlobalMatrix() {
   try {
-    delete window[globalMatrixKey(orgId)];
+    delete window[globalMatrixKey()];
   } catch {
     try {
-      window[globalMatrixKey(orgId)] = null;
+      window[globalMatrixKey()] = null;
     } catch {}
   }
 }
@@ -71,11 +74,79 @@ function sanitizeForIdb(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._=-]/g, "_");
 }
 
-function verifiedKeyFor(orgId, userId, deviceId) {
-  const o = sanitizeForIdb(orgId);
+function verifiedKeyFor(userId, deviceId) {
   const u = sanitizeForIdb(userId);
   const d = sanitizeForIdb(deviceId);
-  return `bf_mx_verified_${o}_${u}_${d}`;
+  return `bf_mx_verified_${u}_${d}`;
+}
+
+
+function getStoredOrgMeta(orgId) {
+  try {
+    const orgs = JSON.parse(localStorage.getItem("bf_orgs") || "[]");
+    const settings = JSON.parse(localStorage.getItem(`bf_org_settings_${orgId}`) || "{}");
+    const org = Array.isArray(orgs) ? orgs.find((x) => x?.id === orgId) || {} : {};
+    return {
+      id: String(orgId || "").trim(),
+      name: String(settings?.name || org?.name || "").trim(),
+      slug: String(settings?.slug || org?.slug || "").trim(),
+    };
+  } catch {
+    return { id: String(orgId || "").trim(), name: "", slug: "" };
+  }
+}
+
+function roomMatchesOrg(room, orgMeta) {
+  if (!room) return false;
+
+  const haystack = [
+    room?.name,
+    room?.id,
+    room?.canonicalAlias,
+    ...(Array.isArray(room?.altAliases) ? room.altAliases : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const rawTokens = [orgMeta?.id, orgMeta?.slug, orgMeta?.name]
+    .filter(Boolean)
+    .flatMap((value) =>
+      String(value)
+        .toLowerCase()
+        .split(/[^a-z0-9]+/i)
+        .filter(Boolean)
+    );
+
+  const tokens = [...new Set(rawTokens.filter((t) => t.length >= 3))];
+  if (!tokens.length) return true;
+
+  return tokens.some((token) => haystack.includes(token));
+}
+
+function readSavedSession(orgId) {
+  const globalSaved = readJSON(MATRIX_SESSION_KEY, null);
+  if (globalSaved) return globalSaved;
+
+  const orgSaved = readJSON(`bf_matrix_${orgId}`, null);
+  if (orgSaved) {
+    writeJSON(MATRIX_SESSION_KEY, orgSaved);
+    return orgSaved;
+  }
+
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("bf_matrix_")) continue;
+      const legacy = readJSON(key, null);
+      if (legacy?.userId && legacy?.accessToken) {
+        writeJSON(MATRIX_SESSION_KEY, legacy);
+        return legacy;
+      }
+    }
+  } catch {}
+
+  return null;
 }
 
 function legibleNow() {
@@ -128,15 +199,28 @@ async function deleteIDB(name) {
   } catch {}
 }
 
-async function nukeMatrixIdbForUser(orgId, userId) {
-  const orgSafe = sanitizeForIdb(orgId);
+async function nukeMatrixIdbForUser(userId) {
   const uidSafe = sanitizeForIdb(userId);
   if (!uidSafe) return;
 
-  const names = [
-    `bf_mx_store_${orgSafe}_${uidSafe}`,
-    `bf_mx_crypto_${orgSafe}_${uidSafe}`,
-  ];
+  const names = new Set([
+    `bf_mx_store_${uidSafe}`,
+    `bf_mx_crypto_${uidSafe}`,
+  ]);
+
+  try {
+    if (window.indexedDB?.databases) {
+      const dbs = await window.indexedDB.databases();
+      for (const db of dbs || []) {
+        const name = db?.name || "";
+        if (!name) continue;
+        const legacyMatch =
+          (name.startsWith("bf_mx_store_") || name.startsWith("bf_mx_crypto_")) &&
+          name.includes(uidSafe);
+        if (legacyMatch) names.add(name);
+      }
+    }
+  } catch {}
 
   for (const n of names) {
     await deleteIDB(n);
@@ -205,13 +289,13 @@ export default function BondfireChat() {
   const params = useParams();
   const orgId = params.orgId || parseOrgIdFromHash();
 
-  const savedRaw = readJSON(`bf_matrix_${orgId}`, null);
+  const savedRaw = readSavedSession(orgId);
   const saved = savedRaw
     ? { ...savedRaw, userId: normalizeMxid(savedRaw.userId) }
     : null;
 
   if (savedRaw?.userId && saved?.userId && savedRaw.userId !== saved.userId) {
-    writeJSON(`bf_matrix_${orgId}`, saved);
+    writeJSON(MATRIX_SESSION_KEY, saved);
   }
 
   const HS_DEFAULT = "https://matrix-client.matrix.org";
@@ -225,7 +309,7 @@ export default function BondfireChat() {
   const [ready, setReady] = useState(false);
   const [cryptoReady, setCryptoReady] = useState(false);
   const [deviceVerified, setDeviceVerified] = useState(() => {
-    const k = verifiedKeyFor(orgId, saved?.userId || "", saved?.deviceId || "");
+    const k = verifiedKeyFor(saved?.userId || "", saved?.deviceId || "");
     return k ? !!readJSON(k, false) : false;
   });
 
@@ -265,6 +349,21 @@ export default function BondfireChat() {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
+  useEffect(() => {
+    if (!rooms.length) {
+      if (activeRoomId) {
+        setActiveRoomId(null);
+        setMessages([]);
+      }
+      return;
+    }
+
+    const stillVisible = rooms.some((r) => r.id === activeRoomId);
+    if (!stillVisible) {
+      selectRoom(rooms[0].id);
+    }
+  }, [rooms]);
+
   const cleanupVerification = (finalMsg = "") => {
     setSasData(null);
     setVerificationReq(null);
@@ -281,13 +380,13 @@ export default function BondfireChat() {
     try {
       const uidKey = clientRef.current?.getUserId?.() || saved?.userId || userId || "";
       const didKey = clientRef.current?.getDeviceId?.() || saved?.deviceId || deviceId || "";
-      const k = verifiedKeyFor(orgId, uidKey, didKey);
+      const k = verifiedKeyFor(uidKey, didKey);
       setDeviceVerified(true);
       if (k) writeJSON(k, true);
     } catch {
       setDeviceVerified(true);
     }
-  }, [orgId, saved?.userId, saved?.deviceId, userId, deviceId]);
+  }, [saved?.userId, saved?.deviceId, userId, deviceId]);
 
   const refreshRooms = React.useCallback(() => {
     const client = clientRef.current;
@@ -310,15 +409,20 @@ export default function BondfireChat() {
           );
       }
 
-      setRooms(
-        rs.map((r) => ({
-          id: r.roomId,
-          name: r.name || r.getCanonicalAlias?.() || r.roomId,
-          encrypted: !!r.isEncrypted?.(),
-        }))
-      );
+      const orgMeta = getStoredOrgMeta(orgId);
+      const mapped = rs.map((r) => ({
+        id: r.roomId,
+        name: r.name || r.getCanonicalAlias?.() || r.roomId,
+        canonicalAlias: r.getCanonicalAlias?.() || "",
+        altAliases: typeof r.getAltAliases === "function" ? r.getAltAliases() || [] : [],
+        encrypted: !!r.isEncrypted?.(),
+      }));
+
+      const filtered = mapped.filter((r) => roomMatchesOrg(r, orgMeta));
+
+      setRooms(filtered.length ? filtered : mapped);
     } catch {}
-  }, []);
+  }, [orgId]);
 
   const refreshVerificationTruth = React.useCallback(async () => {
     const client = clientRef.current;
@@ -342,13 +446,13 @@ export default function BondfireChat() {
     if (truth === true) {
       setDeviceVerified(true);
       try {
-        const k = verifiedKeyFor(orgId, client.getUserId?.(), client.getDeviceId?.());
+        const k = verifiedKeyFor(client.getUserId?.(), client.getDeviceId?.());
         if (k) writeJSON(k, true);
       } catch {}
     } else if (truth === false) {
       setDeviceVerified(false);
     }
-  }, [orgId]);
+  }, []);
 
   function cacheMember(roomId, mxid, info) {
     setMemberCache((prev) => {
@@ -388,6 +492,29 @@ export default function BondfireChat() {
     }
   }
 
+  const persistSessionFromClient = React.useCallback((client) => {
+    try {
+      if (!client) return;
+      const next = {
+        hsUrl: saved?.hsUrl || HS_DEFAULT,
+        userId: normalizeMxid(client.getUserId?.() || saved?.userId || userId || ""),
+        accessToken: saved?.accessToken || accessToken || "",
+        deviceId: client.getDeviceId?.() || saved?.deviceId || deviceId || "",
+      };
+      if (!next.userId || !next.accessToken) return;
+      writeJSON(MATRIX_SESSION_KEY, next);
+      setGlobalMatrix({
+        ...(getGlobalMatrix() || {}),
+        client,
+        baseUrl: next.hsUrl,
+        userId: next.userId,
+        accessToken: next.accessToken,
+        deviceId: next.deviceId,
+      });
+      if (next.deviceId) setDeviceId(next.deviceId);
+    } catch {}
+  }, [saved?.hsUrl, saved?.userId, saved?.accessToken, saved?.deviceId, userId, accessToken, deviceId]);
+
   useEffect(() => {
     if (!saved?.hsUrl || !saved?.userId || !saved?.accessToken) return;
     if (clientRef.current) return;
@@ -398,7 +525,6 @@ export default function BondfireChat() {
     const uid = saved.userId;
     const token = saved.accessToken;
     const did = saved.deviceId || "";
-    const orgSafe = sanitizeForIdb(orgId);
     const uidSafe = sanitizeForIdb(uid);
 
     setUserId(uid);
@@ -409,7 +535,7 @@ export default function BondfireChat() {
     let store = null;
     let cryptoStore = null;
 
-    const g = getGlobalMatrix(orgId);
+    const g = getGlobalMatrix();
     const sameDevice = !did || (g?.deviceId || "") === did;
     const canReuse = !!(
       g &&
@@ -423,17 +549,18 @@ export default function BondfireChat() {
     if (canReuse) {
       client = g.client;
       if (!did && g?.deviceId) setDeviceId(g.deviceId);
+      persistSessionFromClient(client);
       log("Connected (resumed)");
     } else {
       store = new IndexedDBStore({
         indexedDB: window.indexedDB,
         localStorage: window.localStorage,
-        dbName: `bf_mx_store_${orgSafe}_${uidSafe}`,
+        dbName: `bf_mx_store_${uidSafe}`,
       });
 
       cryptoStore = new IndexedDBCryptoStore(
         window.indexedDB,
-        `bf_mx_crypto_${orgSafe}_${uidSafe}`
+        `bf_mx_crypto_${uidSafe}`
       );
 
       client = createClient({
@@ -445,7 +572,7 @@ export default function BondfireChat() {
         cryptoStore,
       });
 
-      setGlobalMatrix(orgId, {
+      setGlobalMatrix({
         client,
         baseUrl,
         userId: uid,
@@ -485,6 +612,7 @@ export default function BondfireChat() {
 
     function onSync(state) {
       if (state === "PREPARED") {
+        persistSessionFromClient(client);
         setReady(true);
         setStatus("Connected");
         refreshRooms();
@@ -507,9 +635,11 @@ export default function BondfireChat() {
         try {
           if (typeof client.initRustCrypto === "function") {
             await client.initRustCrypto();
+            persistSessionFromClient(client);
             setCryptoReady(true);
           } else if (typeof client.initCrypto === "function") {
             await client.initCrypto();
+            persistSessionFromClient(client);
             setCryptoReady(true);
           } else {
             setCryptoReady(false);
@@ -527,6 +657,7 @@ export default function BondfireChat() {
         }
       }
 
+      persistSessionFromClient(client);
       refreshRooms();
       refreshVerificationTruth();
 
@@ -567,6 +698,7 @@ export default function BondfireChat() {
     saved?.deviceId,
     refreshRooms,
     refreshVerificationTruth,
+    persistSessionFromClient,
   ]);
 
   useEffect(() => {
@@ -742,7 +874,8 @@ export default function BondfireChat() {
         deviceId: res.device_id || "",
       };
 
-      writeJSON(`bf_matrix_${orgId}`, next);
+        writeJSON(MATRIX_SESSION_KEY, next);
+      try { removeKey(`bf_matrix_${orgId}`); } catch {}
 
       setUserId(next.userId);
       setAccessToken(next.accessToken);
@@ -756,10 +889,11 @@ export default function BondfireChat() {
   };
 
   const logout = async () => {
-    removeKey(`bf_matrix_${orgId}`);
+    removeKey(MATRIX_SESSION_KEY);
+    try { removeKey(`bf_matrix_${orgId}`); } catch {}
 
     try {
-      const k = verifiedKeyFor(orgId, saved?.userId || userId || "", saved?.deviceId || deviceId || "");
+      const k = verifiedKeyFor(saved?.userId || userId || "", saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
     } catch {}
 
@@ -775,7 +909,7 @@ export default function BondfireChat() {
       }
     } catch {}
 
-    clearGlobalMatrix(orgId);
+    clearGlobalMatrix();
 
     setUserId("");
     setAccessToken("");
@@ -801,15 +935,16 @@ export default function BondfireChat() {
     } catch {}
 
     clientRef.current = null;
-    clearGlobalMatrix(orgId);
+    clearGlobalMatrix();
 
-    removeKey(`bf_matrix_${orgId}`);
+    removeKey(MATRIX_SESSION_KEY);
+    try { removeKey(`bf_matrix_${orgId}`); } catch {}
     try {
-      const k = verifiedKeyFor(orgId, uid, saved?.deviceId || deviceId || "");
+      const k = verifiedKeyFor(uid, saved?.deviceId || deviceId || "");
       if (k) removeKey(k);
     } catch {}
 
-    await nukeMatrixIdbForUser(orgId, uid);
+    await nukeMatrixIdbForUser(uid);
 
     setReady(false);
     setCryptoReady(false);
