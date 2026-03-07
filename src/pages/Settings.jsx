@@ -381,12 +381,42 @@ export default function Settings() {
   const [enabled, setEnabled] = React.useState(false);
   const [publicNewsletterEnabled, setPublicNewsletterEnabled] = React.useState(false);
   const [publicPledgesEnabled, setPublicPledgesEnabled] = React.useState(false);
+  const [showActionStrip, setShowActionStrip] = React.useState(true);
+  const [showNeeds, setShowNeeds] = React.useState(true);
+  const [showMeetings, setShowMeetings] = React.useState(true);
+  const [showWhatWeDo, setShowWhatWeDo] = React.useState(true);
+  const [showGetInvolved, setShowGetInvolved] = React.useState(false);
+  const [showNewsletterCard, setShowNewsletterCard] = React.useState(false);
+  const [showWebsiteButton, setShowWebsiteButton] = React.useState(false);
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [locationLine, setLocationLine] = React.useState("");
   const [about, setAbout] = React.useState("");
-  const [features, setFeatures] = React.useState("");
-  const [links, setLinks] = React.useState("");
+  const [accentColor, setAccentColor] = React.useState("#6d5efc");
+  const [themeMode, setThemeMode] = React.useState("light");
+  const [websiteLabel, setWebsiteLabel] = React.useState("Website");
+  const [websiteUrl, setWebsiteUrl] = React.useState("");
+  const [meetingRsvpUrl, setMeetingRsvpUrl] = React.useState("");
+  const [whatWeDo, setWhatWeDo] = React.useState("");
+  const [primaryActions, setPrimaryActions] = React.useState("");
+  const [getInvolvedLinks, setGetInvolvedLinks] = React.useState("");
   const [msg, setMsg] = React.useState("");
+
+  const parseLinkLines = React.useCallback((value) => {
+    return String(value || "")
+      .split("\n")
+      .map((line) => {
+        const [label, url] = line.split("|").map((s) => (s || "").trim());
+        return url ? { label: label || url, url } : null;
+      })
+      .filter(Boolean);
+  }, []);
+
+  const formatLinkLines = React.useCallback((items) => {
+    return Array.isArray(items)
+      ? items.map((item) => `${item?.label || item?.text || item?.url || ""} | ${item?.url || ""}`.trim()).filter(Boolean).join("\n")
+      : "";
+  }, []);
 
   const genSlug = async () => {
     setMsg("");
@@ -414,20 +444,30 @@ const loadPublic = React.useCallback(async () => {
     const pub = r.public || {};
     setEnabled(!!pub.enabled);
     setPublicNewsletterEnabled(!!pub.newsletter_enabled);
-    setPublicPledgesEnabled(!!pub.pledges_enabled);
+    setPublicPledgesEnabled(pub.pledges_enabled !== false);
+    setShowActionStrip(pub.show_action_strip !== false);
+    setShowNeeds(pub.show_needs !== false);
+    setShowMeetings(pub.show_meetings !== false);
+    setShowWhatWeDo(pub.show_what_we_do !== false);
+    setShowGetInvolved(!!pub.show_get_involved);
+    setShowNewsletterCard(!!pub.show_newsletter_card);
+    setShowWebsiteButton(!!pub.show_website_button);
     setSlug(String(pub.slug || ""));
     setTitle(String(pub.title || ""));
+    setLocationLine(String(pub.location || ""));
     setAbout(String(pub.about || ""));
-    setFeatures(Array.isArray(pub.features) ? pub.features.join("\n") : "");
-    setLinks(
-      Array.isArray(pub.links)
-        ? pub.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
-        : ""
-    );
+    setAccentColor(String(pub.accent_color || "#6d5efc"));
+    setThemeMode(String(pub.theme_mode || "light"));
+    setWebsiteLabel(String(pub.website_link?.label || pub.website_link?.text || "Website"));
+    setWebsiteUrl(String(pub.website_link?.url || ""));
+    setMeetingRsvpUrl(String(pub.meeting_rsvp_url || ""));
+    setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : Array.isArray(pub.features) ? pub.features.join("\n") : "");
+    setPrimaryActions(formatLinkLines(pub.primary_actions));
+    setGetInvolvedLinks(formatLinkLines(pub.get_involved_links));
   } catch (e) {
     setMsg(e.message || "Failed to load public settings");
   }
-}, [orgId]);
+}, [orgId, formatLinkLines]);
 
 React.useEffect(() => {
   if (tab === "public") {
@@ -444,20 +484,24 @@ React.useEffect(() => {
         enabled,
         newsletter_enabled: !!publicNewsletterEnabled,
         pledges_enabled: !!publicPledgesEnabled,
+        show_action_strip: !!showActionStrip,
+        show_needs: !!showNeeds,
+        show_meetings: !!showMeetings,
+        show_what_we_do: !!showWhatWeDo,
+        show_get_involved: !!showGetInvolved,
+        show_newsletter_card: !!showNewsletterCard,
+        show_website_button: !!showWebsiteButton,
         slug: (slug || "").trim(),
         title: (title || "").trim(),
+        location: (locationLine || "").trim(),
         about: (about || "").trim(),
-        features: (features || "")
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        links: (links || "")
-          .split("\n")
-          .map((line) => {
-            const [text, url] = line.split("|").map((s) => (s || "").trim());
-            return url ? { text: text || url, url } : null;
-          })
-          .filter(Boolean),
+        accent_color: (accentColor || "#6d5efc").trim(),
+        theme_mode: (themeMode || "light").trim(),
+        website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
+        meeting_rsvp_url: (meetingRsvpUrl || "").trim(),
+        what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
+        primary_actions: parseLinkLines(primaryActions).slice(0, 3),
+        get_involved_links: parseLinkLines(getInvolvedLinks).slice(0, 4),
       };
 
       const r = await authFetch(
@@ -465,20 +509,29 @@ React.useEffect(() => {
         { method: "POST", body: payload }
       );
 
-      setSlug(r.public?.slug || payload.slug);
-      setTitle(r.public?.title ?? payload.title);
-      setAbout(r.public?.about ?? payload.about);
-      setFeatures(
-        Array.isArray(r.public?.features) ? r.public.features.join("\n") : features
-      );
-      setLinks(
-        Array.isArray(r.public?.links)
-          ? r.public.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
-          : links
-      );
-      setEnabled(!!r.public?.enabled);
-      setPublicNewsletterEnabled(!!r.public?.newsletter_enabled);
-      setPublicPledgesEnabled(!!r.public?.pledges_enabled);
+      const pub = r.public || payload;
+      setSlug(pub.slug || payload.slug);
+      setTitle(pub.title ?? payload.title);
+      setLocationLine(pub.location ?? payload.location);
+      setAbout(pub.about ?? payload.about);
+      setAccentColor(pub.accent_color ?? payload.accent_color);
+      setThemeMode(pub.theme_mode ?? payload.theme_mode);
+      setWebsiteLabel(pub.website_link?.label || payload.website_link?.label || "Website");
+      setWebsiteUrl(pub.website_link?.url || payload.website_link?.url || "");
+      setMeetingRsvpUrl(pub.meeting_rsvp_url ?? payload.meeting_rsvp_url);
+      setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : whatWeDo);
+      setPrimaryActions(formatLinkLines(pub.primary_actions || payload.primary_actions));
+      setGetInvolvedLinks(formatLinkLines(pub.get_involved_links || payload.get_involved_links));
+      setEnabled(!!pub.enabled);
+      setPublicNewsletterEnabled(!!pub.newsletter_enabled);
+      setPublicPledgesEnabled(pub.pledges_enabled !== false);
+      setShowActionStrip(pub.show_action_strip !== false);
+      setShowNeeds(pub.show_needs !== false);
+      setShowMeetings(pub.show_meetings !== false);
+      setShowWhatWeDo(pub.show_what_we_do !== false);
+      setShowGetInvolved(!!pub.show_get_involved);
+      setShowNewsletterCard(!!pub.show_newsletter_card);
+      setShowWebsiteButton(!!pub.show_website_button);
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -1018,106 +1071,145 @@ React.useEffect(() => {
       {tab === "public" && (
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Public Page</h2>
-          <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
+          <p className="helper">Build a clean public-facing page. Internal app actions stay internal. Public CTA buttons can link out wherever the org wants.</p>
 
-          <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
+          <form onSubmit={savePublic} className="grid" style={{ gap: 12, marginTop: 8 }}>
             <label className="row" style={{ gap: 8, alignItems: "center" }}>
               <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
               <span>Enable public page</span>
             </label>
 
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={publicNewsletterEnabled}
-                onChange={(e) => setPublicNewsletterEnabled(e.target.checked)}
-              />
-              <span>Enable newsletter signup on public page</span>
-            </label>
-
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={publicPledgesEnabled}
-                onChange={(e) => setPublicPledgesEnabled(e.target.checked)}
-              />
-              <span>Enable pledges on public page</span>
-            </label>
-
-
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Share URL (slug)</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input className="input" style={{ flex: 1 }} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="e.g. bondfire-team" />
-                <button type="button" className="btn" onClick={genSlug} title="Generate a nice slug">
-                  Generate
-                </button>
-              </div>
-
-              {slug && (
-                <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
-                  <span className="helper">Public link:</span>
-                  <a className="helper" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">
-                    {publicUrl}
-                  </a>
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Share URL (slug)</span>
+                <div className="row" style={{ gap: 8 }}>
+                  <input className="input" style={{ flex: 1 }} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="e.g. chehalis-river-mutual-aid" />
+                  <button type="button" className="btn" onClick={genSlug}>Generate</button>
                 </div>
-              )}
+                {slug ? <a className="helper" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">{publicUrl}</a> : null}
+              </label>
+
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Theme mode</span>
+                <select className="input" value={themeMode} onChange={(e) => setThemeMode(e.target.value)}>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Title</span>
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chehalis River Mutual Aid Network" />
+              </label>
+
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Location line</span>
+                <input className="input" value={locationLine} onChange={(e) => setLocationLine(e.target.value)} placeholder="Aberdeen, WA" />
+              </label>
+            </div>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">Tagline / subtitle</span>
+              <input className="input" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Mutual aid, community meals, outreach" />
+            </label>
+
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Accent color</span>
+                <input className="input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
+              </label>
+
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Global RSVP link for public meetings</span>
+                <input className="input" value={meetingRsvpUrl} onChange={(e) => setMeetingRsvpUrl(e.target.value)} placeholder="https://signal.group/... or external RSVP form" />
+              </label>
+            </div>
+
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Website button label</span>
+                <input className="input" value={websiteLabel} onChange={(e) => setWebsiteLabel(e.target.value)} placeholder="Website" />
+              </label>
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Website button URL</span>
+                <input className="input" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://example.org" />
+              </label>
+            </div>
+
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Visible modules</h3>
+              <div className="bf-two">
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWebsiteButton} onChange={(e) => setShowWebsiteButton(e.target.checked)} /><span>Website button</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showActionStrip} onChange={(e) => setShowActionStrip(e.target.checked)} /><span>Top action strip</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNeeds} onChange={(e) => setShowNeeds(e.target.checked)} /><span>Needs card</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showMeetings} onChange={(e) => setShowMeetings(e.target.checked)} /><span>Meetings card</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWhatWeDo} onChange={(e) => setShowWhatWeDo(e.target.checked)} /><span>What we do card</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showGetInvolved} onChange={(e) => setShowGetInvolved(e.target.checked)} /><span>Get involved links</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={publicNewsletterEnabled} onChange={(e) => setPublicNewsletterEnabled(e.target.checked)} /><span>Newsletter signup enabled</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNewsletterCard} onChange={(e) => setShowNewsletterCard(e.target.checked)} /><span>Show newsletter card</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={publicPledgesEnabled} onChange={(e) => setPublicPledgesEnabled(e.target.checked)} /><span>Allow public pledges on needs</span></label>
+              </div>
+            </div>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="helper">What we do (one line per item)</span>
+              <textarea className="textarea" rows={4} value={whatWeDo} onChange={(e) => setWhatWeDo(e.target.value)} placeholder={`Free Store
+Community Meals
+Outreach`} />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Title</span>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Public page title" />
+              <span className="helper">Top action strip buttons (Label | URL per line, up to 3)</span>
+              <textarea className="textarea" rows={4} value={primaryActions} onChange={(e) => setPrimaryActions(e.target.value)} placeholder={`Get Help | https://example.org/help
+Offer Help | https://example.org/volunteer
+Stay Connected | https://signal.group/...`} />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">About</span>
-              <textarea className="textarea" rows={3} value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Short description" />
-            </label>
-
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Features (one per line)</span>
-              <textarea className="textarea" rows={3} value={features} onChange={(e) => setFeatures(e.target.value)} placeholder={"Donations tracker\nVolunteers\nEvents"} />
-            </label>
-
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Links (Text | URL per line)</span>
-              <textarea className="textarea" rows={3} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"} />
+              <span className="helper">Get involved links (Label | URL per line, up to 4)</span>
+              <textarea className="textarea" rows={4} value={getInvolvedLinks} onChange={(e) => setGetInvolvedLinks(e.target.value)} placeholder={`Volunteer Sign Up | https://signal.group/...
+Donate Funds | https://opencollective.com/...
+Offer Resources | https://example.org/resource-form`} />
             </label>
 
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
-              <button className="btn-red" type="submit">
-                Save
-              </button>
+              <button className="btn-red" type="submit">Save</button>
               {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
             </div>
           </form>
 
-          {enabled && (
+          {enabled ? (
             <div style={{ marginTop: 16 }}>
               <h3 style={{ margin: "8px 0" }}>Preview</h3>
               <PublicPage
                 data={{
                   public: {
                     title: (title || orgName || "Public page").trim(),
+                    location: (locationLine || "").trim(),
                     about: (about || "").trim(),
+                    theme_mode: themeMode,
+                    accent_color: accentColor,
                     newsletter_enabled: !!publicNewsletterEnabled,
                     pledges_enabled: !!publicPledgesEnabled,
-                    features: (features || "")
-                      .split("\n")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                    links: (links || "")
-                      .split("\n")
-                      .map((line) => {
-                        const [text, url] = line.split("|").map((s) => (s || "").trim());
-                        return url ? { text: text || url, url } : null;
-                      })
-                      .filter(Boolean),
+                    show_action_strip: !!showActionStrip,
+                    show_needs: !!showNeeds,
+                    show_meetings: !!showMeetings,
+                    show_what_we_do: !!showWhatWeDo,
+                    show_get_involved: !!showGetInvolved,
+                    show_newsletter_card: !!showNewsletterCard,
+                    show_website_button: !!showWebsiteButton,
+                    website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
+                    meeting_rsvp_url: (meetingRsvpUrl || "").trim(),
+                    what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
+                    primary_actions: parseLinkLines(primaryActions).slice(0, 3),
+                    get_involved_links: parseLinkLines(getInvolvedLinks).slice(0, 4),
                   },
                 }}
               />
             </div>
-          )}
+          ) : null}
         </div>
       )}
 

@@ -1067,3 +1067,292 @@ html, body {
   background-repeat: no-repeat;
   animation: bfShimmer 1.1s ease-in-out infinite;
 }
+
+/* ===== Public page refresh v2 ===== */
+.bf-public-v2 {
+  background: var(--bfp-bg);
+  color: var(--bfp-text);
+  min-height: 100vh;
+}
+
+.bf-public-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+
+.bf-public-topbar,
+.bf-public-actionStrip,
+.bf-public-panel,
+.bf-public-modal {
+  background: var(--bfp-surface);
+  border: 1px solid var(--bfp-border);
+  box-shadow: var(--bfp-shadow);
+}
+
+.bf-public-topbar {
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.bf-public-branding {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.bf-public-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 1px solid var(--bfp-border);
+}
+
+.bf-public-titleLine {
+  font-size: 2rem;
+  line-height: 1.05;
+  font-weight: 800;
+}
+
+.bf-public-metaLine,
+.bf-public-helperText,
+.bf-public-sectionHead p,
+.bf-public-itemMain p,
+.bf-public-meetingMeta {
+  color: var(--bfp-text-soft);
+}
+
+.bf-public-websiteBtn,
+.bf-public-actionBtn,
+.bf-public-inlineBtn,
+.bf-public-secondaryBtn,
+.bf-public-ghostBtn,
+.bf-public-linkTile {
+  text-decoration: none;
+  border-radius: 14px;
+  font-weight: 700;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.bf-public-websiteBtn,
+.bf-public-inlineBtn,
+.bf-public-actionBtn {
+  background: var(--bfp-accent);
+  color: white;
+  border: none;
+}
+
+.bf-public-websiteBtn,
+.bf-public-inlineBtn,
+.bf-public-secondaryBtn,
+.bf-public-ghostBtn {
+  padding: 12px 16px;
+}
+
+.bf-public-actionStrip {
+  border-radius: 20px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.bf-public-actionBtn {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 14px;
+}
+
+.bf-public-mainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.95fr);
+  gap: 18px;
+}
+
+.bf-public-primaryColumn,
+.bf-public-secondaryColumn,
+.bf-public-stack,
+.bf-public-formStack,
+.bf-public-infoList {
+  display: grid;
+  gap: 16px;
+}
+
+.bf-public-panel {
+  border-radius: 20px;
+  padding: 22px;
+}
+
+.bf-public-sectionHead {
+  margin-bottom: 16px;
+}
+
+.bf-public-sectionHead h2 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.bf-public-sectionHead.compact {
+  margin-bottom: 12px;
+}
+
+.bf-public-itemCard,
+.bf-public-meetingCard,
+.bf-public-infoItem {
+  background: var(--bfp-surface-2);
+  border: 1px solid var(--bfp-border);
+  border-radius: 18px;
+}
+
+.bf-public-itemCard,
+.bf-public-meetingCard {
+  padding: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.bf-public-itemMain h3 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+
+.bf-public-itemMain p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.bf-public-buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.bf-public-secondaryBtn,
+.bf-public-ghostBtn {
+  background: transparent;
+  color: var(--bfp-text);
+  border: 1px solid var(--bfp-border);
+}
+
+.bf-public-empty {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--bfp-border);
+  color: var(--bfp-text-soft);
+}
+
+.bf-public-infoItem {
+  padding: 14px 16px;
+  font-weight: 600;
+}
+
+.bf-public-linkGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.bf-public-linkTile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  padding: 0 14px;
+  background: var(--bfp-accent-soft);
+  color: var(--bfp-text);
+  border: 1px solid var(--bfp-border);
+}
+
+.bf-public-input,
+.bf-public-textarea {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--bfp-border);
+  background: var(--bfp-surface-2);
+  color: var(--bfp-text);
+  padding: 13px 14px;
+}
+
+.bf-public-dualInputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.bf-public-inlineBtn.full {
+  width: 100%;
+}
+
+.bf-public-modalWrap {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 18, 0.58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.bf-public-modal {
+  width: min(560px, 100%);
+  border-radius: 24px;
+  padding: 22px;
+}
+
+.bf-public-websiteBtn:hover,
+.bf-public-actionBtn:hover,
+.bf-public-inlineBtn:hover,
+.bf-public-secondaryBtn:hover,
+.bf-public-ghostBtn:hover,
+.bf-public-linkTile:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+@media (max-width: 900px) {
+  .bf-public-mainGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .bf-public-shell {
+    padding: 18px 14px 40px;
+  }
+
+  .bf-public-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .bf-public-titleLine {
+    font-size: 1.65rem;
+  }
+
+  .bf-public-actionStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .bf-public-itemCard,
+  .bf-public-meetingCard {
+    flex-direction: column;
+  }
+
+  .bf-public-dualInputs {
+    grid-template-columns: 1fr;
+  }
+}

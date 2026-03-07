@@ -8,6 +8,26 @@ function authOk(env, request) {
   return true;
 }
 
+function cleanLink(value) {
+  if (!value || typeof value !== "object") return null;
+  const label = String(value.label || value.text || "").trim();
+  const url = String(value.url || "").trim();
+  if (!label || !url) return null;
+  return { label, url };
+}
+
+function cleanLinks(arr, limit) {
+  return Array.isArray(arr)
+    ? arr.map(cleanLink).filter(Boolean).slice(0, limit)
+    : [];
+}
+
+function cleanStrings(arr, limit) {
+  return Array.isArray(arr)
+    ? arr.map((s) => String(s || "").trim()).filter(Boolean).slice(0, limit)
+    : [];
+}
+
 export async function onRequestPost({ env, request, params }) {
   if (!authOk(env, request)) {
     return Response.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
@@ -15,15 +35,27 @@ export async function onRequestPost({ env, request, params }) {
 
   const orgId = params.orgId;
   const body = await request.json().catch(() => ({}));
-
   const {
     enabled,
     newsletter_enabled,
     pledges_enabled,
+    show_action_strip,
+    show_needs,
+    show_meetings,
+    show_what_we_do,
+    show_get_involved,
+    show_newsletter_card,
+    show_website_button,
     title,
+    location,
     about,
-    features,
-    links,
+    accent_color,
+    theme_mode,
+    website_link,
+    meeting_rsvp_url,
+    what_we_do,
+    primary_actions,
+    get_involved_links,
     slug,
   } = body || {};
 
@@ -52,15 +84,27 @@ export async function onRequestPost({ env, request, params }) {
   const cleaned = {
     enabled: !!enabled,
     newsletter_enabled: !!newsletter_enabled,
-    pledges_enabled: !!pledges_enabled,
+    pledges_enabled: pledges_enabled !== false,
+    show_action_strip: show_action_strip !== false,
+    show_needs: show_needs !== false,
+    show_meetings: show_meetings !== false,
+    show_what_we_do: show_what_we_do !== false,
+    show_get_involved: !!show_get_involved,
+    show_newsletter_card: !!show_newsletter_card,
+    show_website_button: !!show_website_button,
     slug: newSlug,
-    title: (title || "").trim(),
-    about: (about || "").trim(),
-    features: Array.isArray(features) ? features.filter(Boolean).slice(0, 50) : [],
-    links: Array.isArray(links) ? links.filter((l) => l && l.text && l.url).slice(0, 20) : [],
+    title: String(title || "").trim(),
+    location: String(location || "").trim(),
+    about: String(about || "").trim(),
+    accent_color: String(accent_color || "#6d5efc").trim(),
+    theme_mode: String(theme_mode || "light").trim() === "dark" ? "dark" : "light",
+    website_link: cleanLink(website_link),
+    meeting_rsvp_url: String(meeting_rsvp_url || "").trim(),
+    what_we_do: cleanStrings(what_we_do, 12),
+    primary_actions: cleanLinks(primary_actions, 3),
+    get_involved_links: cleanLinks(get_involved_links, 4),
   };
 
   await setPublicCfg(env, orgId, cleaned);
-
   return Response.json({ ok: true, public: cleaned });
 }
