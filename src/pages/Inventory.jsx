@@ -322,7 +322,7 @@ export default function Inventory() {
           <button className="btn" onClick={() => refresh().catch(console.error)} disabled={loading}>{loading ? "Loading" : "Refresh"}</button>
         </div>
 
-        {zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
+        {zkMsg ? <div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>{zkMsg}</div> : null}
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search inventory" style={{ marginTop: 12 }} />
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
           <div className="helper">Sort</div>
@@ -552,7 +552,7 @@ export default function Inventory() {
               </button>
             </div>
 
-            <div className="helper" style={{ marginTop: 10 }}>
+            <div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
               If ZK is enabled and this item is not public, Name, Category, Location, and Notes are encrypted automatically on save.
             </div>
           </div>

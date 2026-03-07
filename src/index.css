@@ -85,7 +85,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 .orgpill{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:4px 8px}
 .orgpill img{height:20px;width:20px;border-radius:4px;object-fit:cover}
 .nav{display:flex;gap:8px}
-.main{max-width:1280px;margin:0 auto;width:100%;padding:20px 12px 90px}
+.main{max-width:1520px;margin:0 auto;width:100%;padding:16px 10px 90px}
 .bottomnav{position:fixed;left:0;right:0;bottom:0;background:rgba(10,10,10,.95);border-top:1px solid var(--border);display:flex;gap:8px;justify-content:space-around;padding:10px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:14px}
 .grid{display:grid;gap:12px}
@@ -1422,4 +1422,14 @@ html, body {
   font-size:18px;
   font-weight:900;
   line-height:1;
+}
+
+
+/* Viewport-safe modal behavior so detail panes stop falling off the screen. */
+@media (max-width: 1100px){
+  .main{max-width:100%; padding:14px 8px 90px;}
+}
+
+@media (max-width: 900px){
+  .main{padding:12px 8px 88px;}
 }

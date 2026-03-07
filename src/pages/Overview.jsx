@@ -694,11 +694,11 @@ const newsletterSpark = useMemo(() => {
 
       <OrgKeyBackupNudge orgId={orgId} />
 
-      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
+      {/* Top metrics row: keep everything on one row on desktop so nobody has to zoom out like a maniac. */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(160px, 1fr))",
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : `repeat(${Math.max(topCards.length, 1)}, minmax(0, 1fr))`,
           gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
@@ -714,18 +714,18 @@ const newsletterSpark = useMemo(() => {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98, width: "100%" }}>
+              <div className="card" style={{ padding: 12, position: "relative", minHeight: 88, width: "100%" }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
                   </div>
                 ) : null}
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ fontSize: 18 }}>{c.icon}</div>
-                  <div style={{ fontWeight: 900 }}>{c.title}</div>
+                  <div style={{ fontSize: 16 }}>{c.icon}</div>
+                  <div style={{ fontWeight: 900, fontSize: 13, lineHeight: 1.2 }}>{c.title}</div>
                 </div>
-                <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
-                <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
+                <div style={{ marginTop: 8, fontSize: 30, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
+                <div className="helper" style={{ marginTop: 4, fontSize: 12 }}>{c.sub}</div>
               </div>
             </button>
           ))
@@ -736,7 +736,7 @@ const newsletterSpark = useMemo(() => {
       <div
         className="grid"
         style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
           gap: 12,
           alignItems: "start",
         }}
@@ -772,13 +772,15 @@ const newsletterSpark = useMemo(() => {
                 return (
                   <div key={item.id} className="card" style={{ padding: 12 }}>
                     <div style={{ display: "grid", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        {pill(title, tone)}
-                        <div style={{ fontWeight: 900, minWidth: 0, flex: 1 }}>{who}</div>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "nowrap" }}>
+                        <div style={{ flexShrink: 0 }}>{pill(title, tone)}</div>
+                        <div style={{ minWidth: 0, flex: 1, display: "grid", gap: 4 }}>
+                          <div style={{ fontWeight: 900, lineHeight: 1.2, wordBreak: "break-word" }}>{who}</div>
+                          <div className="helper" style={{ fontSize: 12 }}>{fmtDT(item?.created_at)}</div>
+                        </div>
                       </div>
-                      <div className="helper">{fmtDT(item?.created_at)}</div>
-                      {contact ? <div className="helper">{contact}</div> : null}
-                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
+                      {contact ? <div className="helper" style={{ fontSize: 13, wordBreak: "break-word" }}>{contact}</div> : null}
+                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.35 }}>{details}</div> : null}
                     </div>
                   </div>
                 );

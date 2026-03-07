@@ -227,7 +227,7 @@ export default function Needs() {
 					<button className="btn" onClick={() => encryptExisting().catch(console.error)} disabled={busyZk || loading}>{busyZk ? "Encrypting" : "Encrypt Existing"}</button>
 				</div>
 
-				{zkMsg ? <div className="helper" style={{ marginTop: 10 }}>{zkMsg}</div> : null}
+				{zkMsg ? <div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>{zkMsg}</div> : null}
 				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search needs" style={{ marginTop: 12 }} />
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
@@ -299,7 +299,7 @@ export default function Needs() {
 							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
 						</div>
 
-						<div className="helper" style={{ marginTop: 10 }}>
+						<div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
 							If ZK is enabled and this need is not public, Title, Description, and Urgency are encrypted automatically on save.
 						</div>
 					</div>

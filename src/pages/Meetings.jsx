@@ -480,7 +480,7 @@ async function saveEdit() {
 							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
 						</div>
 
-						<div className="helper" style={{ marginTop: 10 }}>
+						<div className="helper" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
 							If ZK is enabled and this meeting is not public, Title, Location, and Agenda are encrypted automatically on save.
 							Start and end times stay unencrypted so you can sort and display schedules.
 						</div>

@@ -325,7 +325,7 @@ export default function People() {
 					<div style={{ marginTop: 12, display: "grid", gap: 12 }}>
 						{list.map((p) => (
 							<div key={p.id} className="card" style={{ padding: 12 }}>
-								<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+								<div style={{ display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, background: "var(--panel)", zIndex: 1, paddingBottom: 6 }}>
 									<div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{String(p.name || "Unnamed")}</div>
 									<button className="btn" style={{ whiteSpace: "nowrap" }} type="button" onClick={() => openDetails(p)}>
 										Details
