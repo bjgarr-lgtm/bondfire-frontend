@@ -44,11 +44,13 @@ function readCookie(name) {
 async function authFetch(path, opts = {}) {
   const token = getToken();
   const relative = path.startsWith("/") ? path : `/${path}`;
-  const remote = path.startsWith("http")
-    ? path
-    : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
-
-  const isInviteEndpoint = /^\/api\/(orgs\/[^/]+\/invites|invites\/redeem)\b/.test(relative);
+  const isAbs = path.startsWith("http");
+  const candidates = (() => {
+    if (isAbs) return [path];
+    if (!API_BASE) return [relative];
+    if (relative.startsWith("/api/")) return [relative, `${API_BASE}${relative}`];
+    return [`${API_BASE}${relative}`];
+  })();
 
   const headers = {
     "Content-Type": "application/json",
@@ -56,8 +58,6 @@ async function authFetch(path, opts = {}) {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  // Cookie-session builds: CSRF double-submit cookie.
-  // For unsafe methods, send X-CSRF from bf_csrf cookie if present.
   const method = String(opts.method || "GET").toUpperCase();
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
     const csrf = readCookie("bf_csrf");
@@ -67,7 +67,6 @@ async function authFetch(path, opts = {}) {
   const doReq = async (u) => {
     const res = await fetch(u, {
       ...opts,
-      // IMPORTANT: cookie-session auth requires credentials.
       credentials: "include",
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -77,23 +76,24 @@ async function authFetch(path, opts = {}) {
     return j;
   };
 
-  if (isInviteEndpoint && API_BASE && remote !== relative) {
+  let lastErr = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const u = candidates[i];
     try {
-      return await doReq(relative);
-    } catch {
-      return await doReq(remote);
+      return await doReq(u);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || "");
+      const shouldTryNext = i < candidates.length - 1 && (
+        msg.includes("HTTP 404") ||
+        msg.includes("HTTP 500") ||
+        msg.includes("Failed to fetch")
+      );
+      if (!shouldTryNext) throw e;
     }
   }
 
-  try {
-    return await doReq(remote);
-  } catch (e) {
-    const msg = String(e?.message || "");
-    if (API_BASE && !path.startsWith("http") && (msg.includes("HTTP 404") || msg.includes("HTTP 500"))) {
-      return await doReq(relative);
-    }
-    throw e;
-  }
+  throw lastErr || new Error("Request failed");
 }
 
 export default function OrgDash() {
