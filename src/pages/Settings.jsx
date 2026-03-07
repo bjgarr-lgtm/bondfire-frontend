@@ -399,8 +399,8 @@ export default function Settings() {
   const [websiteUrl, setWebsiteUrl] = React.useState("");
   const [meetingRsvpUrl, setMeetingRsvpUrl] = React.useState("");
   const [whatWeDo, setWhatWeDo] = React.useState("");
-  const [primaryActions, setPrimaryActions] = React.useState("");
-  const [getInvolvedLinks, setGetInvolvedLinks] = React.useState("");
+  const [primaryActionItems, setPrimaryActionItems] = React.useState([]);
+  const [getInvolvedActionItems, setGetInvolvedActionItems] = React.useState([]);
   const [msg, setMsg] = React.useState("");
   const [publicInboxItems, setPublicInboxItems] = React.useState([]);
   const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
@@ -467,12 +467,12 @@ const loadPublic = React.useCallback(async () => {
     setWebsiteUrl(String(pub.website_link?.url || ""));
     setMeetingRsvpUrl(String(pub.meeting_rsvp_url || ""));
     setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : Array.isArray(pub.features) ? pub.features.join("\n") : "");
-    setPrimaryActions(formatLinkLines(pub.primary_actions));
-    setGetInvolvedLinks(formatLinkLines(pub.get_involved_links));
+    setPrimaryActionItems(toActionEditorItems(pub.primary_actions, primaryActionDefaults));
+    setGetInvolvedActionItems(toActionEditorItems(pub.get_involved_links, getInvolvedDefaults));
   } catch (e) {
     setMsg(e.message || "Failed to load public settings");
   }
-}, [orgId, formatLinkLines]);
+}, [orgId, primaryActionDefaults, getInvolvedDefaults, toActionEditorItems]);
 
   const loadPublicInbox = React.useCallback(async () => {
     if (!orgId) return;
@@ -522,6 +522,12 @@ React.useEffect(() => {
 }, [tab, loadPublic, loadPublicInbox]);
 
 
+React.useEffect(() => {
+  if (!primaryActionItems.length) setPrimaryActionItems(primaryActionDefaults);
+  if (!getInvolvedActionItems.length) setGetInvolvedActionItems(getInvolvedDefaults);
+}, [primaryActionDefaults, getInvolvedDefaults, primaryActionItems.length, getInvolvedActionItems.length]);
+
+
   const savePublic = async (e) => {
     e?.preventDefault();
     setMsg("");
@@ -546,8 +552,8 @@ React.useEffect(() => {
         website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
         meeting_rsvp_url: (meetingRsvpUrl || "").trim(),
         what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
-        primary_actions: parseLinkLines(primaryActions).slice(0, 3),
-        get_involved_links: parseLinkLines(getInvolvedLinks).slice(0, 4),
+        primary_actions: fromActionEditorItems(primaryActionItems, 3),
+        get_involved_links: fromActionEditorItems(getInvolvedActionItems, 4),
       };
 
       const r = await authFetch(
@@ -566,8 +572,8 @@ React.useEffect(() => {
       setWebsiteUrl(pub.website_link?.url || payload.website_link?.url || "");
       setMeetingRsvpUrl(pub.meeting_rsvp_url ?? payload.meeting_rsvp_url);
       setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : whatWeDo);
-      setPrimaryActions(formatLinkLines(pub.primary_actions || payload.primary_actions));
-      setGetInvolvedLinks(formatLinkLines(pub.get_involved_links || payload.get_involved_links));
+      setPrimaryActionItems(toActionEditorItems(pub.primary_actions || payload.primary_actions, primaryActionDefaults));
+      setGetInvolvedActionItems(toActionEditorItems(pub.get_involved_links || payload.get_involved_links, getInvolvedDefaults));
       setEnabled(!!pub.enabled);
       setPublicNewsletterEnabled(!!pub.newsletter_enabled);
       setPublicPledgesEnabled(pub.pledges_enabled !== false);
@@ -1188,41 +1194,104 @@ React.useEffect(() => {
             </div>
 
             <div className="card" style={{ padding: 12 }}>
-              <h3 style={{ marginTop: 0 }}>Visible modules</h3>
+              <h3 style={{ marginTop: 0 }}>What should appear on the public page?</h3>
               <div className="bf-two">
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWebsiteButton} onChange={(e) => setShowWebsiteButton(e.target.checked)} /><span>Website button</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showActionStrip} onChange={(e) => setShowActionStrip(e.target.checked)} /><span>Top action strip</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNeeds} onChange={(e) => setShowNeeds(e.target.checked)} /><span>Needs card</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showMeetings} onChange={(e) => setShowMeetings(e.target.checked)} /><span>Meetings card</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWhatWeDo} onChange={(e) => setShowWhatWeDo(e.target.checked)} /><span>What we do card</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showGetInvolved} onChange={(e) => setShowGetInvolved(e.target.checked)} /><span>Get involved links</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={publicNewsletterEnabled} onChange={(e) => setPublicNewsletterEnabled(e.target.checked)} /><span>Newsletter signup enabled</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNewsletterCard} onChange={(e) => setShowNewsletterCard(e.target.checked)} /><span>Show newsletter card</span></label>
-                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={publicPledgesEnabled} onChange={(e) => setPublicPledgesEnabled(e.target.checked)} /><span>Allow public pledges on needs</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWebsiteButton} onChange={(e) => setShowWebsiteButton(e.target.checked)} /><span>Show the Website button in the header</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showActionStrip} onChange={(e) => setShowActionStrip(e.target.checked)} /><span>Show the main action buttons row</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNeeds} onChange={(e) => setShowNeeds(e.target.checked)} /><span>Show the Current Needs section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showMeetings} onChange={(e) => setShowMeetings(e.target.checked)} /><span>Show the Public Meetings section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWhatWeDo} onChange={(e) => setShowWhatWeDo(e.target.checked)} /><span>Show the What We Do section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showGetInvolved} onChange={(e) => setShowGetInvolved(e.target.checked)} /><span>Show the Get Involved buttons</span></label>
+              </div>
+
+              <div className="card" style={{ padding: 12, marginTop: 12, background: "rgba(255,255,255,0.02)" }}>
+                <strong>Stay Connected / Newsletter</strong>
+                <div className="grid" style={{ gap: 8, marginTop: 10 }}>
+                  <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <input type="checkbox" checked={showNewsletterCard} onChange={(e) => setShowNewsletterCard(e.target.checked)} />
+                    <span>Show the Stay Connected card on the public page</span>
+                  </label>
+                  <label className="row" style={{ gap: 8, alignItems: "center", opacity: showNewsletterCard ? 1 : 0.65 }}>
+                    <input type="checkbox" checked={publicNewsletterEnabled} onChange={(e) => setPublicNewsletterEnabled(e.target.checked)} disabled={!showNewsletterCard} />
+                    <span>Let visitors submit the email signup form</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={publicPledgesEnabled} onChange={(e) => setPublicPledgesEnabled(e.target.checked)} />
+                  <span>Let visitors pledge support on public needs</span>
+                </label>
               </div>
             </div>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">What we do (one line per item)</span>
+              <span className="helper">What we do (one item per line)</span>
               <textarea className="textarea" rows={4} value={whatWeDo} onChange={(e) => setWhatWeDo(e.target.value)} placeholder={`Free Store
 Community Meals
 Outreach`} />
             </label>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Top action strip buttons (Label | Action per line, up to 3). Use modal:get_help, modal:volunteer, modal:offer_resources, #newsletter, or any normal URL.</span>
-              <textarea className="textarea" rows={4} value={primaryActions} onChange={(e) => setPrimaryActions(e.target.value)} placeholder={`Get Help | modal:get_help
-Offer Help | modal:offer_resources
-Stay Connected | #newsletter`} />
-            </label>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Main action buttons</h3>
+              <p className="helper" style={{ marginTop: 0 }}>These are the big buttons near the top of the public page.</p>
+              <div className="grid" style={{ gap: 10 }}>
+                {primaryActionItems.map((item, index) => (
+                  <div key={`primary-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="grid" style={{ gap: 8 }}>
+                      <strong>Button {index + 1}</strong>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">Button label</span>
+                        <input className="input" value={item.label} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
+                      </label>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">When someone clicks it</span>
+                        <select className="input" value={item.kind} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { kind: e.target.value, url: e.target.value === "external" ? item.url : "" })}>
+                          {actionTypeOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
+                      {item.kind === "external" ? (
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Link to open</span>
+                          <input className="input" value={item.url} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { url: e.target.value })} placeholder="https://example.org/form" />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Get involved links (Label | Action per line, up to 4). Modal actions save into the org backend so admins can review them later.</span>
-              <textarea className="textarea" rows={5} value={getInvolvedLinks} onChange={(e) => setGetInvolvedLinks(e.target.value)} placeholder={`Volunteer | modal:volunteer
-Donate Funds | https://opencollective.com/...
-Offer Resources | modal:offer_resources
-Request Assistance | modal:get_help`} />
-            </label>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Get Involved buttons</h3>
+              <p className="helper" style={{ marginTop: 0 }}>These are the optional buttons lower on the page. You can hide any of them.</p>
+              <div className="grid" style={{ gap: 10 }}>
+                {getInvolvedActionItems.map((item, index) => (
+                  <div key={`involved-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="grid" style={{ gap: 8 }}>
+                      <strong>Button {index + 1}</strong>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">Button label</span>
+                        <input className="input" value={item.label} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
+                      </label>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">When someone clicks it</span>
+                        <select className="input" value={item.kind} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { kind: e.target.value, url: e.target.value === "external" ? item.url : "" })}>
+                          {actionTypeOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
+                      {item.kind === "external" ? (
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Link to open</span>
+                          <input className="input" value={item.url} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { url: e.target.value })} placeholder="https://example.org/form" />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
               <button className="btn-red" type="submit">Save</button>
@@ -1252,8 +1321,8 @@ Request Assistance | modal:get_help`} />
                     show_website_button: !!showWebsiteButton,
                     website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
                     what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
-                    primary_actions: parseLinkLines(primaryActions).slice(0, 3),
-                    get_involved_links: parseLinkLines(getInvolvedLinks).slice(0, 4),
+                    primary_actions: fromActionEditorItems(primaryActionItems, 3),
+                    get_involved_links: fromActionEditorItems(getInvolvedActionItems, 4),
                   },
                 }}
               />
@@ -1776,4 +1845,3 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   }
   return out;
 }
-
