@@ -32,7 +32,7 @@ async function authFetch(path, opts = {}) {
 
   // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
-    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges)|invites\/redeem)\b/.test(
+    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges|public(?:\/|$))|invites\/redeem)\b/.test(
       relative
     );
 
@@ -128,6 +128,7 @@ export default function Settings() {
       ["invites", "Invites"],
       ["members", "Members"],
       ["public", "Public page"],
+      ["public-inbox", "Public inbox"],
       ["newsletter", "Newsletter"],
       ["pledges", "Pledges"],
       ["security", "Security"],
@@ -401,6 +402,10 @@ export default function Settings() {
   const [primaryActions, setPrimaryActions] = React.useState("");
   const [getInvolvedLinks, setGetInvolvedLinks] = React.useState("");
   const [msg, setMsg] = React.useState("");
+  const [publicInboxItems, setPublicInboxItems] = React.useState([]);
+  const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
+  const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
+  const [publicInboxFilter, setPublicInboxFilter] = React.useState("all");
 
   const parseLinkLines = React.useCallback((value) => {
     return String(value || "")
@@ -469,11 +474,52 @@ const loadPublic = React.useCallback(async () => {
   }
 }, [orgId, formatLinkLines]);
 
+  const loadPublicInbox = React.useCallback(async () => {
+    if (!orgId) return;
+    setPublicInboxBusy(true);
+    setPublicInboxMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, { method: "GET" });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+    } catch (e) {
+      setPublicInboxMsg(e.message || "Failed to load public inbox");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  }, [orgId]);
+
+  const savePublicInboxItem = async (item, review_status, admin_note) => {
+    if (!orgId || !item?.id) return;
+    setPublicInboxBusy(true);
+    setPublicInboxMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
+        method: "PUT",
+        body: {
+          id: item.id,
+          type: item.type,
+          review_status,
+          admin_note,
+        },
+      });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+      setPublicInboxMsg("Saved.");
+      setTimeout(() => setPublicInboxMsg(""), 1200);
+    } catch (e) {
+      setPublicInboxMsg(e.message || "Failed to save public inbox item");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  };
+
 React.useEffect(() => {
   if (tab === "public") {
     loadPublic();
   }
-}, [tab, loadPublic]);
+  if (tab === "public-inbox") {
+    loadPublicInbox();
+  }
+}, [tab, loadPublic, loadPublicInbox]);
 
 
   const savePublic = async (e) => {
@@ -540,6 +586,13 @@ React.useEffect(() => {
   };
 
   const publicUrl = slug ? `${location.origin}/#/p/${slug}` : "";
+
+  const filteredPublicInboxItems = React.useMemo(() => {
+    if (publicInboxFilter === "all") return publicInboxItems;
+    if (publicInboxFilter === "intake") return publicInboxItems.filter((item) => item.type === "intake");
+    if (publicInboxFilter === "rsvp") return publicInboxItems.filter((item) => item.type === "rsvp");
+    return publicInboxItems.filter((item) => String(item.review_status || "new") === publicInboxFilter);
+  }, [publicInboxItems, publicInboxFilter]);
 
   /* ========== NEWSLETTER (backend, Riseup sends) ========== */
   const [nlEnabled, setNlEnabled] = React.useState(false);
@@ -1206,6 +1259,121 @@ Request Assistance | modal:get_help`} />
               />
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* Public Inbox */}
+      {tab === "public-inbox" && (
+        <div className="card" style={{ padding: 16 }}>
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0 }}>Public Inbox</h2>
+            <button className="btn" type="button" onClick={loadPublicInbox} disabled={publicInboxBusy}>
+              {publicInboxBusy ? "Refreshing…" : "Refresh"}
+            </button>
+            <select className="input" value={publicInboxFilter} onChange={(e) => setPublicInboxFilter(e.target.value)} style={{ maxWidth: 180 }}>
+              <option value="all">All</option>
+              <option value="intake">Intakes only</option>
+              <option value="rsvp">RSVPs only</option>
+              <option value="new">Status: new</option>
+              <option value="reviewed">Status: reviewed</option>
+              <option value="contacted">Status: contacted</option>
+              <option value="closed">Status: closed</option>
+            </select>
+            {publicInboxMsg ? <span className={publicInboxMsg.includes("Saved") ? "success" : "helper"}>{publicInboxMsg}</span> : null}
+          </div>
+
+          <p className="helper" style={{ marginTop: 8 }}>Review public help requests, volunteer offers, resource offers, and per-meeting RSVPs from the refreshed public page.</p>
+
+          <div style={{ marginTop: 12 }}>
+            {filteredPublicInboxItems.length === 0 ? (
+              <div className="helper">No public submissions yet.</div>
+            ) : (
+              <div className="grid" style={{ gap: 12 }}>
+                {filteredPublicInboxItems.map((item) => (
+                  <div key={`${item.type}:${item.id}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong>{item.title || (item.type === "rsvp" ? "Meeting RSVP" : "Public intake")}</strong>
+                      <span className="helper">{item.type === "rsvp" ? "RSVP" : (item.source_kind || "intake").replaceAll("_", " ")}</span>
+                      <span className="helper">{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
+                    </div>
+
+                    <div className="bf-two" style={{ marginTop: 10 }}>
+                      <div className="grid" style={{ gap: 8 }}>
+                        <div><div className="helper">Name</div><div>{item.name || ""}</div></div>
+                        <div><div className="helper">Contact</div><div style={{ overflowWrap: "anywhere" }}>{item.contact || ""}</div></div>
+                        {item.type === "rsvp" ? (
+                          <>
+                            <div><div className="helper">Attendance</div><div>{item.attendee_status || "yes"}</div></div>
+                            <div><div className="helper">Meeting</div><div>{item.meeting_title || "Public meeting"}{item.starts_at ? ` · ${new Date(item.starts_at).toLocaleString()}` : ""}</div></div>
+                            {item.location ? <div><div className="helper">Location</div><div>{item.location}</div></div> : null}
+                          </>
+                        ) : null}
+                      </div>
+
+                      <div className="grid" style={{ gap: 8 }}>
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Admin status</span>
+                          <select
+                            className="input"
+                            data-public-inbox-status={`${item.type}:${item.id}`}
+                            defaultValue={item.review_status || "new"}
+                            onChange={(e) => {
+                              const note = document.getElementById(`public-inbox-note-${item.type}-${item.id}`)?.value || "";
+                              savePublicInboxItem(item, e.target.value, note);
+                            }}
+                            disabled={publicInboxBusy}
+                          >
+                            <option value="new">new</option>
+                            <option value="reviewed">reviewed</option>
+                            <option value="contacted">contacted</option>
+                            <option value="closed">closed</option>
+                          </select>
+                        </label>
+
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Admin note</span>
+                          <textarea
+                            id={`public-inbox-note-${item.type}-${item.id}`}
+                            className="textarea"
+                            rows={4}
+                            defaultValue={item.admin_note || ""}
+                            placeholder="Internal note for org admins"
+                          />
+                        </label>
+
+                        <button
+                          className="btn-red"
+                          type="button"
+                          disabled={publicInboxBusy}
+                          onClick={() => {
+                            const status = document.querySelector(`select[data-public-inbox-status="${item.type}:${item.id}"]`)?.value || item.review_status || "new";
+                            const note = document.getElementById(`public-inbox-note-${item.type}-${item.id}`)?.value || "";
+                            savePublicInboxItem(item, status, note);
+                          }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+
+                    {item.details ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="helper">Details</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>{item.details}</div>
+                      </div>
+                    ) : null}
+
+                    {item.extra ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="helper">Extra</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>{item.extra}</div>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
