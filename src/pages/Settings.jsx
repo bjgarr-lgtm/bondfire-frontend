@@ -407,6 +407,79 @@ export default function Settings() {
   const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
   const [publicInboxFilter, setPublicInboxFilter] = React.useState("all");
 
+  const actionTypeOptions = React.useMemo(() => ([
+    { value: "none", label: "Hide this button" },
+    { value: "modal:get_help", label: "Open Get Help form" },
+    { value: "modal:volunteer", label: "Open Volunteer form" },
+    { value: "modal:offer_resources", label: "Open Offer Resources form" },
+    { value: "#newsletter", label: "Jump to newsletter signup" },
+    { value: "external", label: "Open a custom link" },
+  ]), []);
+
+  const primaryActionDefaults = React.useMemo(() => ([
+    { label: "Get Help", kind: "modal:get_help", url: "" },
+    { label: "Offer Help", kind: "modal:offer_resources", url: "" },
+    { label: "Stay Connected", kind: "#newsletter", url: "" },
+  ]), []);
+
+  const getInvolvedDefaults = React.useMemo(() => ([
+    { label: "Volunteer", kind: "modal:volunteer", url: "" },
+    { label: "Donate Funds", kind: "external", url: "" },
+    { label: "Offer Resources", kind: "modal:offer_resources", url: "" },
+    { label: "Request Assistance", kind: "modal:get_help", url: "" },
+  ]), []);
+
+  const toActionEditorItems = React.useCallback((items, defaults = []) => {
+    const src = Array.isArray(items) ? items : [];
+    const base = (Array.isArray(defaults) ? defaults : []).map((item) => ({ ...item }));
+    return base.map((fallback, index) => {
+      const raw = src[index] || {};
+      const rawLabel = String(raw?.label || raw?.text || fallback?.label || "").trim();
+      const rawUrl = String(raw?.url || "").trim();
+      const lowered = rawUrl.toLowerCase();
+      let kind = fallback?.kind || "none";
+      let url = rawUrl;
+      if (!rawUrl) {
+        kind = fallback?.kind || "none";
+        url = fallback?.kind === "external" ? String(fallback?.url || "") : "";
+      } else if (lowered === "newsletter" || lowered === "#newsletter") {
+        kind = "#newsletter";
+        url = "";
+      } else if (lowered in {"modal:get_help":1, "modal:volunteer":1, "modal:offer_resources":1}) {
+        kind = lowered;
+        url = "";
+      } else {
+        kind = "external";
+      }
+      return {
+        label: rawLabel,
+        kind,
+        url,
+      };
+    });
+  }, []);
+
+  const fromActionEditorItems = React.useCallback((items, limit = 4) => {
+    return (Array.isArray(items) ? items : [])
+      .slice(0, limit)
+      .map((item) => {
+        const label = String(item?.label || "").trim();
+        const kind = String(item?.kind || "none").trim();
+        const customUrl = String(item?.url || "").trim();
+        if (!label || kind === "none") return null;
+        if (kind === "external") {
+          if (!customUrl) return null;
+          return { label, url: customUrl };
+        }
+        return { label, url: kind === "#newsletter" ? "#newsletter" : kind };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const updateActionItem = React.useCallback((setter, index, patch) => {
+    setter((prev) => (Array.isArray(prev) ? prev : []).map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }, []);
+
   const parseLinkLines = React.useCallback((value) => {
     return String(value || "")
       .split("\n")
