@@ -479,6 +479,27 @@ export default function Settings() {
     setter((prev) => (Array.isArray(prev) ? prev : []).map((item, i) => (i === index ? { ...item, ...patch } : item)));
   }, []);
 
+  const toggleActionItemEnabled = React.useCallback((setter, items, defaults, index, enabled) => {
+    const current = (Array.isArray(items) ? items : [])[index] || {};
+    const fallback = (Array.isArray(defaults) ? defaults : [])[index] || {};
+    if (!enabled) {
+      updateActionItem(setter, index, {
+        _savedKind: current.kind && current.kind !== "none" ? current.kind : (current._savedKind || fallback.kind || "external"),
+        _savedUrl: typeof current.url === "string" ? current.url : (current._savedUrl || fallback.url || ""),
+        kind: "none",
+      });
+      return;
+    }
+    const restoredKind = current._savedKind || fallback.kind || "external";
+    const restoredUrl = restoredKind === "external"
+      ? (current.url || current._savedUrl || fallback.url || "")
+      : "";
+    updateActionItem(setter, index, {
+      kind: restoredKind,
+      url: restoredUrl,
+    });
+  }, [updateActionItem]);
+
   const parseLinkLines = React.useCallback((value) => {
     return String(value || "")
       .split("\n")
@@ -1335,10 +1356,22 @@ Outreach`} />
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>Main action buttons</h3>
               <p className="helper" style={{ marginTop: 0 }}>These are the big buttons near the top of the public page.</p>
               <div className="grid" style={{ gap: 10 }}>
-                {primaryActionItems.map((item, index) => (
+                {primaryActionItems.map((item, index) => {
+                  const isEnabled = item.kind !== "none";
+                  return (
                   <div key={`primary-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                     <div className="grid" style={{ gap: 8 }}>
-                      <strong>Button {index + 1}</strong>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <strong>Button {index + 1}</strong>
+                        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => toggleActionItemEnabled(setPrimaryActionItems, primaryActionItems, primaryActionDefaults, index, e.target.checked)}
+                          />
+                          <span>Show this button</span>
+                        </label>
+                      </div>
                       <label className="grid" style={{ gap: 6 }}>
                         <span className="helper">Button label</span>
                         <input className="input" value={item.label} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
@@ -1357,7 +1390,7 @@ Outreach`} />
                       ) : null}
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             </div>
 
@@ -1365,10 +1398,22 @@ Outreach`} />
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>Get Involved buttons</h3>
               <p className="helper" style={{ marginTop: 0 }}>These are the optional buttons lower on the page. You can hide any of them.</p>
               <div className="grid" style={{ gap: 10 }}>
-                {getInvolvedActionItems.map((item, index) => (
+                {getInvolvedActionItems.map((item, index) => {
+                  const isEnabled = item.kind !== "none";
+                  return (
                   <div key={`involved-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
                     <div className="grid" style={{ gap: 8 }}>
-                      <strong>Button {index + 1}</strong>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <strong>Button {index + 1}</strong>
+                        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => toggleActionItemEnabled(setGetInvolvedActionItems, getInvolvedActionItems, getInvolvedDefaults, index, e.target.checked)}
+                          />
+                          <span>Show this button</span>
+                        </label>
+                      </div>
                       <label className="grid" style={{ gap: 6 }}>
                         <span className="helper">Button label</span>
                         <input className="input" value={item.label} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
@@ -1387,7 +1432,7 @@ Outreach`} />
                       ) : null}
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             </div>
             <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
