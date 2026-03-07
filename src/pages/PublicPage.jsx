@@ -31,10 +31,17 @@ function parseOrgIdFromHash() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+function isSpecialAction(value) {
+  const s = String(value || "").trim().toLowerCase();
+  return s.startsWith("modal:") || s === "newsletter" || s.startsWith("#");
+}
+
 function normalizeUrl(u) {
   const s = String(u || "").trim();
   if (!s) return "";
+  if (isSpecialAction(s)) return s;
   if (/^(https?:\/\/|mailto:|tel:|sms:|signal:)/i.test(s)) return s;
+  if (s.startsWith("/")) return s;
   return `https://${s}`;
 }
 
@@ -95,7 +102,6 @@ function getPreviewConfig(orgId) {
     primary_actions: cleanLinkArray(publicCfg?.primary_actions, 3),
     get_involved_links: cleanLinkArray(publicCfg?.get_involved_links, 4),
     what_we_do: cleanStringArray(publicCfg?.what_we_do || publicCfg?.features, 8),
-    meeting_rsvp_url: normalizeUrl(publicCfg?.meeting_rsvp_url || ""),
   };
 }
 
@@ -198,6 +204,22 @@ function themeVars(mode, accent) {
   };
 }
 
+function actionSpec(raw) {
+  const url = String(raw || "").trim();
+  if (!url) return { kind: "none", url: "" };
+  if (url.startsWith("#")) return { kind: "anchor", url };
+  if (url.toLowerCase() === "newsletter") return { kind: "anchor", url: "#newsletter" };
+  if (url.toLowerCase().startsWith("modal:")) {
+    return { kind: "modal", modal: url.slice(6).trim().toLowerCase(), url };
+  }
+  return { kind: "external", url: normalizeUrl(url) };
+}
+
+function isNeedOpen(need) {
+  const status = String(need?.status || "open").trim().toLowerCase();
+  return !status || status === "open";
+}
+
 export default function PublicPage(props) {
   const injected = props?.data || null;
   const { slug } = useParams();
@@ -218,6 +240,13 @@ export default function PublicPage(props) {
   const [pledgeUnit, setPledgeUnit] = useState("");
   const [pledgeNote, setPledgeNote] = useState("");
   const [pledgeMsg, setPledgeMsg] = useState("");
+  const [activeModal, setActiveModal] = useState(null);
+  const [intakeName, setIntakeName] = useState("");
+  const [intakeContact, setIntakeContact] = useState("");
+  const [intakeDetails, setIntakeDetails] = useState("");
+  const [intakeExtra, setIntakeExtra] = useState("");
+  const [intakeStatus, setIntakeStatus] = useState("yes");
+  const [intakeMsg, setIntakeMsg] = useState("");
 
   useEffect(() => {
     if (!slug || injected) return;
@@ -267,7 +296,6 @@ export default function PublicPage(props) {
           primary_actions: cleanLinkArray(pub.primary_actions, 3),
           get_involved_links: cleanLinkArray(pub.get_involved_links, 4),
           what_we_do: cleanStringArray(pub.what_we_do || pub.features, 8),
-          meeting_rsvp_url: normalizeUrl(pub.meeting_rsvp_url || ""),
         },
         orgId: state.data.orgId || null,
       };
@@ -277,19 +305,27 @@ export default function PublicPage(props) {
   }, [slug, state.data]);
 
   const orgInfo = useMemo(() => (orgId ? readOrgInfo(orgId) : { name: "Org", logo: null }), [orgId]);
-  const openNeeds = useMemo(() => publicNeeds.filter((n) => (n?.status ?? "open") === "open"), [publicNeeds]);
+  const openNeeds = useMemo(() => publicNeeds.filter(isNeedOpen), [publicNeeds]);
   const pageStyle = useMemo(() => themeVars(pubCfg?.theme_mode || "light", pubCfg?.accent_color || "#6d5efc"), [pubCfg]);
   const title = pubCfg?.title || orgInfo.name || slug || "Public Page";
-  const heroActions = pubCfg?.primary_actions?.length
-    ? pubCfg.primary_actions
-    : [
-        { label: "Get Help", url: pubCfg?.meeting_rsvp_url || pubCfg?.website_link?.url || "#" },
-        { label: "Offer Help", url: pubCfg?.website_link?.url || "#" },
-        { label: "Stay Connected", url: "#newsletter" },
-      ].filter((x) => x.url && x.url !== "#");
+
+  const heroActions = useMemo(() => {
+    const configured = cleanLinkArray(pubCfg?.primary_actions, 3);
+    if (configured.length > 0) return configured;
+    return [
+      { label: "Get Help", url: "modal:get_help" },
+      { label: "Offer Help", url: "modal:offer_resources" },
+      { label: "Stay Connected", url: "#newsletter" },
+    ];
+  }, [pubCfg]);
+
+  const involvedActions = useMemo(() => cleanLinkArray(pubCfg?.get_involved_links, 6), [pubCfg]);
 
   async function subscribe() {
-    if (!slug) return;
+    if (!slug) {
+      setNlMsg("Newsletter signup works on the live public page.");
+      return;
+    }
     setNlMsg("");
     try {
       await apiFetch(`/api/p/${encodeURIComponent(slug)}/newsletter/subscribe`, {
@@ -301,19 +337,22 @@ export default function PublicPage(props) {
       setNlName("");
       setNlEmail("");
     } catch (e) {
-      setNlMsg(e?.message || "Failed.");
+      setNlMsg(e.message || "Subscription failed.");
     }
   }
 
   async function submitPledge(needId) {
-    if (!slug) return;
+    if (!slug) {
+      setPledgeMsg("Pledges work on the live public page.");
+      return;
+    }
     setPledgeMsg("");
     try {
       await apiFetch(`/api/p/${encodeURIComponent(slug)}/pledges`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          need_id: needId || null,
+          need_id: needId,
           pledger_name: pledgeName,
           pledger_email: pledgeEmail,
           type: pledgeType,
@@ -329,14 +368,126 @@ export default function PublicPage(props) {
       setPledgeAmount("");
       setPledgeUnit("");
       setPledgeNote("");
-      setSelectedNeed(null);
+      setTimeout(() => setSelectedNeed(null), 800);
     } catch (e) {
-      setPledgeMsg(e?.message || "Failed.");
+      setPledgeMsg(e.message || "Failed to send pledge.");
+    }
+  }
+
+  function openModal(kind, payload = null) {
+    setIntakeMsg("");
+    setActiveModal({ kind, payload });
+    setIntakeName("");
+    setIntakeContact("");
+    setIntakeDetails("");
+    setIntakeExtra("");
+    setIntakeStatus("yes");
+  }
+
+  function closeModal() {
+    setActiveModal(null);
+    setIntakeMsg("");
+  }
+
+  function triggerAction(item) {
+    const spec = actionSpec(item?.url);
+    if (spec.kind === "modal") {
+      openModal(spec.modal);
+      return;
+    }
+    if (spec.kind === "anchor") {
+      const el = document.querySelector(spec.url);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (spec.kind === "external" && spec.url) {
+      window.open(spec.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function submitIntake() {
+    if (!activeModal?.kind) return;
+    if (!slug) {
+      setIntakeMsg("This form works on the live public page.");
+      return;
+    }
+
+    try {
+      if (activeModal.kind === "meeting_rsvp") {
+        const meetingId = activeModal?.payload?.id;
+        if (!meetingId) throw new Error("Missing meeting.");
+        await apiFetch(`/api/p/${encodeURIComponent(slug)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: intakeName,
+            contact: intakeContact,
+            status: intakeStatus,
+            note: intakeExtra,
+          }),
+        });
+        setIntakeMsg("RSVP saved.");
+      } else {
+        await apiFetch(`/api/p/${encodeURIComponent(slug)}/intake`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: activeModal.kind,
+            name: intakeName,
+            contact: intakeContact,
+            details: intakeDetails,
+            extra: intakeExtra,
+          }),
+        });
+        setIntakeMsg("Sent. The org can review it in their backend.");
+      }
+      setTimeout(closeModal, 900);
+    } catch (e) {
+      setIntakeMsg(e.message || "Failed to submit.");
+    }
+  }
+
+  function modalCopy() {
+    switch (activeModal?.kind) {
+      case "get_help":
+        return {
+          title: "Request Assistance",
+          subtitle: "Share what you need and how to reach you.",
+          detailsPlaceholder: "What do you need right now?",
+          extraPlaceholder: "Urgency, timing, or anything else the org should know",
+          submitLabel: "Send Request",
+        };
+      case "volunteer":
+        return {
+          title: "Volunteer",
+          subtitle: "Tell the org how you want to help.",
+          detailsPlaceholder: "Skills, interests, or what you want to help with",
+          extraPlaceholder: "Availability or scheduling notes",
+          submitLabel: "Send Volunteer Info",
+        };
+      case "offer_resources":
+        return {
+          title: "Offer Resources",
+          subtitle: "Describe what you can offer and how to reach you.",
+          detailsPlaceholder: "What resources can you offer?",
+          extraPlaceholder: "Quantity, timing, pickup details, or extra notes",
+          submitLabel: "Send Offer",
+        };
+      case "meeting_rsvp":
+        return {
+          title: "RSVP",
+          subtitle: activeModal?.payload?.title || "Public meeting",
+          submitLabel: "Save RSVP",
+        };
+      default:
+        return { title: "Public Form", subtitle: "", submitLabel: "Send" };
     }
   }
 
   if (state.loading) return <div style={{ padding: 16 }}>Loading…</div>;
   if (state.error) return <div style={{ padding: 16, color: "crimson" }}>Error: {state.error}</div>;
+
+  const copy = modalCopy();
 
   return (
     <div className="bf-public-v2" style={pageStyle}>
@@ -361,15 +512,18 @@ export default function PublicPage(props) {
         {pubCfg?.show_action_strip && heroActions.length > 0 ? (
           <section className="bf-public-actionStrip">
             {heroActions.map((action, idx) => {
-              const isHash = String(action.url || "").startsWith("#");
-              return isHash ? (
-                <a key={`${action.label}-${idx}`} className="bf-public-actionBtn" href={action.url}>
+              const spec = actionSpec(action.url);
+              if (spec.kind === "external") {
+                return (
+                  <a key={`${action.label}-${idx}`} className="bf-public-actionBtn" href={spec.url} target="_blank" rel="noreferrer">
+                    {action.label}
+                  </a>
+                );
+              }
+              return (
+                <button key={`${action.label}-${idx}`} className="bf-public-actionBtn" type="button" onClick={() => triggerAction(action)}>
                   {action.label}
-                </a>
-              ) : (
-                <a key={`${action.label}-${idx}`} className="bf-public-actionBtn" href={action.url} target="_blank" rel="noreferrer">
-                  {action.label}
-                </a>
+                </button>
               );
             })}
           </section>
@@ -426,11 +580,9 @@ export default function PublicPage(props) {
                             {m.location ? <div className="bf-public-helperText">{m.location}</div> : null}
                           </div>
                           <div className="bf-public-buttonRow">
-                            {pubCfg?.meeting_rsvp_url ? (
-                              <a className="bf-public-secondaryBtn" href={pubCfg.meeting_rsvp_url} target="_blank" rel="noreferrer">
-                                RSVP
-                              </a>
-                            ) : null}
+                            <button className="bf-public-secondaryBtn" type="button" onClick={() => openModal("meeting_rsvp", m)}>
+                              RSVP
+                            </button>
                             <button
                               className="bf-public-inlineBtn"
                               type="button"
@@ -473,17 +625,27 @@ export default function PublicPage(props) {
               </section>
             ) : null}
 
-            {pubCfg?.show_get_involved && pubCfg?.get_involved_links?.length > 0 ? (
+            {pubCfg?.show_get_involved && involvedActions.length > 0 ? (
               <section className="bf-public-panel">
                 <div className="bf-public-sectionHead compact">
                   <h2>Get Involved</h2>
                 </div>
                 <div className="bf-public-linkGrid">
-                  {pubCfg.get_involved_links.map((link, idx) => (
-                    <a key={`${link.label}-${idx}`} className="bf-public-linkTile" href={link.url} target="_blank" rel="noreferrer">
-                      {link.label}
-                    </a>
-                  ))}
+                  {involvedActions.map((link, idx) => {
+                    const spec = actionSpec(link.url);
+                    if (spec.kind === "external") {
+                      return (
+                        <a key={`${link.label}-${idx}`} className="bf-public-linkTile" href={spec.url} target="_blank" rel="noreferrer">
+                          {link.label}
+                        </a>
+                      );
+                    }
+                    return (
+                      <button key={`${link.label}-${idx}`} className="bf-public-linkTile" type="button" onClick={() => triggerAction(link)}>
+                        {link.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}
@@ -527,6 +689,41 @@ export default function PublicPage(props) {
                 <button className="bf-public-ghostBtn" type="button" onClick={() => setSelectedNeed(null)}>Cancel</button>
               </div>
               {pledgeMsg ? <div className="bf-public-helperText">{pledgeMsg}</div> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeModal ? (
+        <div className="bf-public-modalWrap" onClick={closeModal}>
+          <div className="bf-public-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="bf-public-sectionHead compact">
+              <h2>{copy.title}</h2>
+              {copy.subtitle ? <p>{copy.subtitle}</p> : null}
+            </div>
+            <div className="bf-public-formStack">
+              <input className="bf-public-input" value={intakeName} onChange={(e) => setIntakeName(e.target.value)} placeholder="Your name" />
+              <input className="bf-public-input" value={intakeContact} onChange={(e) => setIntakeContact(e.target.value)} placeholder="Email, phone, or other contact" />
+              {activeModal.kind === "meeting_rsvp" ? (
+                <>
+                  <select className="bf-public-input" value={intakeStatus} onChange={(e) => setIntakeStatus(e.target.value)}>
+                    <option value="yes">Yes</option>
+                    <option value="maybe">Maybe</option>
+                    <option value="no">No</option>
+                  </select>
+                  <textarea className="bf-public-textarea" rows={3} value={intakeExtra} onChange={(e) => setIntakeExtra(e.target.value)} placeholder="Optional note" />
+                </>
+              ) : (
+                <>
+                  <textarea className="bf-public-textarea" rows={4} value={intakeDetails} onChange={(e) => setIntakeDetails(e.target.value)} placeholder={copy.detailsPlaceholder} />
+                  <textarea className="bf-public-textarea" rows={3} value={intakeExtra} onChange={(e) => setIntakeExtra(e.target.value)} placeholder={copy.extraPlaceholder} />
+                </>
+              )}
+              <div className="bf-public-buttonRow">
+                <button className="bf-public-inlineBtn" type="button" onClick={submitIntake}>{copy.submitLabel}</button>
+                <button className="bf-public-ghostBtn" type="button" onClick={closeModal}>Cancel</button>
+              </div>
+              {intakeMsg ? <div className="bf-public-helperText">{intakeMsg}</div> : null}
             </div>
           </div>
         </div>

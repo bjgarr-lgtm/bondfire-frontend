@@ -1121,10 +1121,6 @@ React.useEffect(() => {
                 <input className="input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
               </label>
 
-              <label className="grid" style={{ gap: 6 }}>
-                <span className="helper">Global RSVP link for public meetings</span>
-                <input className="input" value={meetingRsvpUrl} onChange={(e) => setMeetingRsvpUrl(e.target.value)} placeholder="https://signal.group/... or external RSVP form" />
-              </label>
             </div>
 
             <div className="bf-two">
@@ -1161,17 +1157,18 @@ Outreach`} />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Top action strip buttons (Label | URL per line, up to 3)</span>
-              <textarea className="textarea" rows={4} value={primaryActions} onChange={(e) => setPrimaryActions(e.target.value)} placeholder={`Get Help | https://example.org/help
-Offer Help | https://example.org/volunteer
-Stay Connected | https://signal.group/...`} />
+              <span className="helper">Top action strip buttons (Label | Action per line, up to 3). Use modal:get_help, modal:volunteer, modal:offer_resources, #newsletter, or any normal URL.</span>
+              <textarea className="textarea" rows={4} value={primaryActions} onChange={(e) => setPrimaryActions(e.target.value)} placeholder={`Get Help | modal:get_help
+Offer Help | modal:offer_resources
+Stay Connected | #newsletter`} />
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Get involved links (Label | URL per line, up to 4)</span>
-              <textarea className="textarea" rows={4} value={getInvolvedLinks} onChange={(e) => setGetInvolvedLinks(e.target.value)} placeholder={`Volunteer Sign Up | https://signal.group/...
+              <span className="helper">Get involved links (Label | Action per line, up to 4). Modal actions save into the org backend so admins can review them later.</span>
+              <textarea className="textarea" rows={5} value={getInvolvedLinks} onChange={(e) => setGetInvolvedLinks(e.target.value)} placeholder={`Volunteer | modal:volunteer
 Donate Funds | https://opencollective.com/...
-Offer Resources | https://example.org/resource-form`} />
+Offer Resources | modal:offer_resources
+Request Assistance | modal:get_help`} />
             </label>
 
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
@@ -1201,7 +1198,6 @@ Offer Resources | https://example.org/resource-form`} />
                     show_newsletter_card: !!showNewsletterCard,
                     show_website_button: !!showWebsiteButton,
                     website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
-                    meeting_rsvp_url: (meetingRsvpUrl || "").trim(),
                     what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
                     primary_actions: parseLinkLines(primaryActions).slice(0, 3),
                     get_involved_links: parseLinkLines(getInvolvedLinks).slice(0, 4),
