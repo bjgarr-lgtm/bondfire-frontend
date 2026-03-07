@@ -411,26 +411,18 @@ async function saveEdit() {
 
 			{edit ? (
 				<div
-					style={{
-						position: "fixed",
-						inset: 0,
-						background: "rgba(0,0,0,0.55)",
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						padding: 16,
-						zIndex: 50,
-					}}
+					className="bf-modal-backdrop"
 					onMouseDown={(e) => {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div className="card" style={{ width: "min(920px, 100%)", padding: 16 }}>
-						<div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "920px" }}>
+						<div className="bf-modal-header row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Meeting Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>
 						</div>
 
+						<div className="bf-modal-body">
 						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
 							<input className="input" placeholder="Title" value={edit.title} onChange={(e) => setEdit((p) => ({ ...p, title: e.target.value }))} />
 							<input className="input" type="datetime-local" value={edit.starts_at} onChange={(e) => setEdit((p) => ({ ...p, starts_at: e.target.value }))} />
@@ -438,37 +430,36 @@ async function saveEdit() {
 							<input className="input" placeholder="Location" value={edit.location} onChange={(e) => setEdit((p) => ({ ...p, location: e.target.value }))} />
 						</div>
 
-
-<div style={{ marginTop: 12 }}>
-	<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>Your RSVP</div>
-	<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-		<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("yes")}>Yes</button>
-			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("maybe")}>Maybe</button>
-			<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("no")}>No</button>
-		</div>
-		<div className="helper" style={{ opacity: 0.9 }}>{myRsvp?.status || "none"}</div>
-	</div>
-</div>
+						<div style={{ marginTop: 12 }}>
+							<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>Your RSVP</div>
+							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+								<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("yes")}>Yes</button>
+									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("maybe")}>Maybe</button>
+									<button className="btn" type="button" disabled={rsvpBusy} onClick={() => saveMyRsvp("no")}>No</button>
+								</div>
+								<div className="helper" style={{ opacity: 0.9 }}>{myRsvp?.status || "none"}</div>
+							</div>
+						</div>
 
 						<div style={{ marginTop: 12 }}>
 							<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>RSVP counts</div>
-							<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
-								<div className="card" style={{ padding: 10 }}>
-									<div className="helper">Total</div>
-									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.total || 0)}</div>
+							<div className="bf-stat-grid">
+								<div className="bf-stat-card">
+									<div className="bf-stat-label">Total</div>
+									<div className="bf-stat-value">{Number(rsvpCounts?.combined?.total || 0)}</div>
 								</div>
-								<div className="card" style={{ padding: 10 }}>
-									<div className="helper">Yes</div>
-									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.yes || 0)}</div>
+								<div className="bf-stat-card">
+									<div className="bf-stat-label">Yes</div>
+									<div className="bf-stat-value">{Number(rsvpCounts?.combined?.yes || 0)}</div>
 								</div>
-								<div className="card" style={{ padding: 10 }}>
-									<div className="helper">Maybe</div>
-									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.maybe || 0)}</div>
+								<div className="bf-stat-card">
+									<div className="bf-stat-label">Maybe</div>
+									<div className="bf-stat-value">{Number(rsvpCounts?.combined?.maybe || 0)}</div>
 								</div>
-								<div className="card" style={{ padding: 10 }}>
-									<div className="helper">No</div>
-									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.no || 0)}</div>
+								<div className="bf-stat-card">
+									<div className="bf-stat-label">No</div>
+									<div className="bf-stat-value">{Number(rsvpCounts?.combined?.no || 0)}</div>
 								</div>
 							</div>
 							<div className="helper" style={{ marginTop: 8 }}>
@@ -482,8 +473,9 @@ async function saveEdit() {
 							<input type="checkbox" checked={!!edit.is_public} onChange={(e) => setEdit((p) => ({ ...p, is_public: e.target.checked }))} />
 							<span className="helper">Public</span>
 						</label>
+						</div>
 
-						<div className="row" style={{ gap: 10, marginTop: 12, justifyContent: "space-between" }}>
+						<div className="bf-modal-footer row" style={{ gap: 10, marginTop: 12, justifyContent: "space-between" }}>
 							<button className="btn" type="button" onClick={deleteItem}>Delete</button>
 							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
 						</div>
@@ -494,7 +486,7 @@ async function saveEdit() {
 						</div>
 					</div>
 				</div>
-			) : null}
+			) : null}}
 
 
 			<div className="card" style={{ margin: 16, padding: 16 }}>

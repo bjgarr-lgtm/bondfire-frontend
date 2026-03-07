@@ -189,7 +189,7 @@ function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
 
 function MetricCardSkeleton({ icon = "⬛" }) {
   return (
-    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98, width: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
         <SkeletonBox w={78} h={14} r={8} />
@@ -698,7 +698,7 @@ const newsletterSpark = useMemo(() => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(7, minmax(150px, 1fr))",
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(160px, 1fr))",
           gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
@@ -714,7 +714,7 @@ const newsletterSpark = useMemo(() => {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98, width: "100%" }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -771,13 +771,15 @@ const newsletterSpark = useMemo(() => {
                 const details = safeStr(item?.details || "").trim();
                 return (
                   <div key={item.id} className="card" style={{ padding: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      {pill(title, tone)}
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {pill(title, tone)}
+                        <div style={{ fontWeight: 900, minWidth: 0, flex: 1 }}>{who}</div>
+                      </div>
                       <div className="helper">{fmtDT(item?.created_at)}</div>
+                      {contact ? <div className="helper">{contact}</div> : null}
+                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
                     </div>
-                    {contact ? <div className="helper" style={{ marginTop: 6 }}>{contact}</div> : null}
-                    {details ? <div style={{ marginTop: 8 }}>{details}</div> : null}
                   </div>
                 );
               })}

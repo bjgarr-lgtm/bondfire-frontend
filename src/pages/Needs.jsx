@@ -262,26 +262,18 @@ export default function Needs() {
 
 			{edit ? (
 				<div
-					style={{
-						position: "fixed",
-						inset: 0,
-						background: "rgba(0,0,0,0.55)",
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						padding: 16,
-						zIndex: 50,
-					}}
+					className="bf-modal-backdrop"
 					onMouseDown={(e) => {
 						if (e.target === e.currentTarget) closeModal();
 					}}
 				>
-					<div className="card" style={{ width: "min(860px, 100%)", padding: 16 }}>
-						<div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+					<div className="card bf-modal-shell" style={{ "--bf-modal-width": "860px" }}>
+						<div className="bf-modal-header row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
 							<h3 style={{ margin: 0 }}>Need Details</h3>
 							<button className="btn" type="button" onClick={closeModal}>Close</button>
 						</div>
 
+						<div className="bf-modal-body">
 						<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
 							<input className="input" placeholder="Title" value={edit.title} onChange={(e) => setEdit((p) => ({ ...p, title: e.target.value }))} />
 							<input className="input" placeholder="Urgency" value={edit.urgency} onChange={(e) => setEdit((p) => ({ ...p, urgency: e.target.value }))} />
@@ -300,8 +292,9 @@ export default function Needs() {
 							<input type="checkbox" checked={!!edit.is_public} onChange={(e) => setEdit((p) => ({ ...p, is_public: e.target.checked }))} />
 							<span className="helper">Public</span>
 						</label>
+						</div>
 
-						<div className="row" style={{ gap: 10, marginTop: 12, justifyContent: "space-between" }}>
+						<div className="bf-modal-footer row" style={{ gap: 10, marginTop: 12, justifyContent: "space-between" }}>
 							<button className="btn" type="button" onClick={deleteItem}>Delete</button>
 							<button className="btn-red" type="button" onClick={saveEdit}>Save Changes</button>
 						</div>
@@ -311,7 +304,7 @@ export default function Needs() {
 						</div>
 					</div>
 				</div>
-			) : null}
+			) : null}}
 
 
 			<div className="card" style={{ margin: 16, padding: 16 }}>

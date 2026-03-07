@@ -85,7 +85,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 .orgpill{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:4px 8px}
 .orgpill img{height:20px;width:20px;border-radius:4px;object-fit:cover}
 .nav{display:flex;gap:8px}
-.main{max-width:1100px;margin:0 auto;width:100%;padding:20px 12px 90px}
+.main{max-width:1280px;margin:0 auto;width:100%;padding:20px 12px 90px}
 .bottomnav{position:fixed;left:0;right:0;bottom:0;background:rgba(10,10,10,.95);border-top:1px solid var(--border);display:flex;gap:8px;justify-content:space-around;padding:10px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:14px}
 .grid{display:grid;gap:12px}
@@ -1355,4 +1355,71 @@ html, body {
   .bf-public-dualInputs {
     grid-template-columns: 1fr;
   }
+}
+
+
+.bf-modal-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+  z-index:50;
+}
+
+.bf-modal-shell{
+  width:min(var(--bf-modal-width, 920px), 100%);
+  max-height:calc(100vh - 32px);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  padding:16px;
+}
+
+.bf-modal-header,
+.bf-modal-footer{
+  flex:0 0 auto;
+}
+
+.bf-modal-body{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  padding-right:4px;
+}
+
+.bf-modal-body::-webkit-scrollbar{
+  width:10px;
+}
+
+.bf-modal-body::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.12);
+  border-radius:999px;
+}
+
+.bf-stat-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));
+  gap:10px;
+}
+
+.bf-stat-card{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(255,255,255,0.02);
+}
+
+.bf-stat-label{
+  color:var(--muted);
+  font-size:12px;
+  margin-bottom:6px;
+}
+
+.bf-stat-value{
+  font-size:18px;
+  font-weight:900;
+  line-height:1;
 }

@@ -68,24 +68,16 @@ function Modal({ open, title, children, onClose }) {
 			onMouseDown={(e) => {
 				if (e.target === e.currentTarget) onClose();
 			}}
-			style={{
-				position: "fixed",
-				inset: 0,
-				background: "rgba(0,0,0,0.55)",
-				display: "grid",
-				placeItems: "center",
-				padding: 16,
-				zIndex: 50,
-			}}
+			className="bf-modal-backdrop"
 		>
-			<div className="card" style={{ width: "min(720px, 100%)", padding: 16 }}>
-				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+			<div className="card bf-modal-shell" style={{ "--bf-modal-width": "720px" }}>
+				<div className="bf-modal-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
 					<h3 style={{ margin: 0, flex: 1 }}>{title}</h3>
 					<button className="btn" type="button" onClick={onClose}>
 						Close
 					</button>
 				</div>
-				<div style={{ marginTop: 12 }}>{children}</div>
+				<div className="bf-modal-body" style={{ marginTop: 12 }}>{children}</div>
 			</div>
 		</div>
 	);
