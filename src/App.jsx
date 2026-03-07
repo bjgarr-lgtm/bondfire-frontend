@@ -1,4 +1,3 @@
-// src/App.jsx
 import React from "react";
 import {
 	HashRouter,
@@ -102,10 +101,9 @@ async function fetchMe() {
 	return me;
 }
 
-
 function RequireAuth({ children }) {
 	const { authed, loading } = React.useContext(AuthCtx);
-	if (loading) {
+	if (loading && !authed) {
 		return <div style={{ padding: 16 }} className="helper">Checking session…</div>;
 	}
 	if (!authed) return <Navigate to="/signin" replace />;
@@ -123,8 +121,13 @@ function Shell() {
 		user: null,
 	});
 
-	const refresh = React.useCallback(async () => {
-		setState((s) => ({ ...s, loading: true }));
+	const refresh = React.useCallback(async (options = {}) => {
+		const { background = false } = options;
+
+		if (!background) {
+			setState((s) => ({ ...s, loading: true }));
+		}
+
 		try {
 			const me = await fetchMe();
 			if (!me.ok) {
@@ -159,16 +162,14 @@ function Shell() {
 		return () => window.removeEventListener("bf-auth-changed", onAuthChanged);
 	}, [refresh]);
 
-	// Keep the session alive while the app is open.
-	// Some deployments use short-lived sessions; without this, users get bounced to Sign In mid-session.
+	// Keep the session alive while the app is open without flashing auth UI.
 	React.useEffect(() => {
 		if (!state.authed) return;
-		let alive = true;
+
 		const ping = async () => {
 			if (document.visibilityState !== "visible") return;
 			try {
-				// This will attempt /me, and if needed do a silent refresh + retry.
-				await refresh();
+				await refresh({ background: true });
 			} catch {
 				// ignore
 			}
@@ -177,7 +178,6 @@ function Shell() {
 		const t0 = setTimeout(ping, 30_000);
 		const iv = setInterval(ping, 5 * 60_000);
 		return () => {
-			alive = false;
 			clearTimeout(t0);
 			clearInterval(iv);
 		};
