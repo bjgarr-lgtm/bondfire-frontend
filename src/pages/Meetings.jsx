@@ -48,6 +48,11 @@ export default function Meetings() {
 
 	const [myRsvp, setMyRsvp] = useState(null);
 	const [rsvpBusy, setRsvpBusy] = useState(false);
+	const [rsvpCounts, setRsvpCounts] = useState({
+		member: { yes: 0, maybe: 0, no: 0, total: 0 },
+		public: { yes: 0, maybe: 0, no: 0, total: 0 },
+		combined: { yes: 0, maybe: 0, no: 0, total: 0 },
+	});
 
 	// Controlled add form so it clears reliably
 	const [form, setForm] = useState({
@@ -199,6 +204,27 @@ export default function Meetings() {
 		}
 	}
 
+	async function loadMeetingDetail(meetingId) {
+		if (!orgId || !meetingId) return null;
+		try {
+			const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}?_=${Date.now()}`);
+			const meeting = data?.meeting || null;
+			setRsvpCounts(meeting?.rsvp_counts || {
+				member: { yes: 0, maybe: 0, no: 0, total: 0 },
+				public: { yes: 0, maybe: 0, no: 0, total: 0 },
+				combined: { yes: 0, maybe: 0, no: 0, total: 0 },
+			});
+			return meeting;
+		} catch {
+			setRsvpCounts({
+				member: { yes: 0, maybe: 0, no: 0, total: 0 },
+				public: { yes: 0, maybe: 0, no: 0, total: 0 },
+				combined: { yes: 0, maybe: 0, no: 0, total: 0 },
+			});
+			return null;
+		}
+	}
+
 	function openItem(m) {
 		setEdit({
 			id: m.id,
@@ -210,26 +236,49 @@ export default function Meetings() {
 			is_public: !!m.is_public,
 		});
 		setMyRsvp(null);
+		setRsvpCounts({
+			member: { yes: 0, maybe: 0, no: 0, total: 0 },
+			public: { yes: 0, maybe: 0, no: 0, total: 0 },
+			combined: { yes: 0, maybe: 0, no: 0, total: 0 },
+		});
 		loadMyRsvp(m.id);
+		loadMeetingDetail(m.id).then((meeting) => {
+			if (!meeting) return;
+			setEdit((prev) => {
+				if (!prev || prev.id !== m.id) return prev;
+				return {
+					...prev,
+					title: meeting.title || prev.title,
+					starts_at: meeting.starts_at ? new Date(Number(meeting.starts_at)).toISOString().slice(0, 16) : prev.starts_at,
+					ends_at: meeting.ends_at ? new Date(Number(meeting.ends_at)).toISOString().slice(0, 16) : prev.ends_at,
+					location: meeting.location || prev.location,
+					agenda: meeting.agenda || prev.agenda,
+					is_public: !!meeting.is_public,
+				};
+			});
+		}).catch(() => {});
 	}
 
 	function closeModal() {
 		setEdit(null);
-	}
-
-	
-
-async function loadMyRsvp(meetingId) {
-	if (!orgId || !meetingId) return;
-	try {
-		const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
-			method: "GET",
+		setRsvpCounts({
+			member: { yes: 0, maybe: 0, no: 0, total: 0 },
+			public: { yes: 0, maybe: 0, no: 0, total: 0 },
+			combined: { yes: 0, maybe: 0, no: 0, total: 0 },
 		});
-		setMyRsvp(r?.my_rsvp ?? r?.rsvp ?? null);
-	} catch {
-		setMyRsvp(null);
 	}
-}
+
+	async function loadMyRsvp(meetingId) {
+		if (!orgId || !meetingId) return;
+		try {
+			const r = await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+				method: "GET",
+			});
+			setMyRsvp(r?.my_rsvp ?? r?.rsvp ?? null);
+		} catch {
+			setMyRsvp(null);
+		}
+	}
 
 async function saveMyRsvp(status) {
 	if (!orgId || !edit?.id) return;
@@ -243,7 +292,7 @@ async function saveMyRsvp(status) {
 		});
 		setMyRsvp(r?.my_rsvp ?? r?.rsvp ?? { status });
 		// Re-read to ensure we reflect what actually persisted
-		await loadMyRsvp(edit.id);
+		await Promise.all([loadMyRsvp(edit.id), loadMeetingDetail(edit.id)]);
 	} catch (e) {
 		setErr(e?.message || "Failed to RSVP");
 	} finally {
@@ -401,6 +450,31 @@ async function saveEdit() {
 		<div className="helper" style={{ opacity: 0.9 }}>{myRsvp?.status || "none"}</div>
 	</div>
 </div>
+
+						<div style={{ marginTop: 12 }}>
+							<div className="helper" style={{ marginBottom: 6, opacity: 0.9 }}>RSVP counts</div>
+							<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+								<div className="card" style={{ padding: 10 }}>
+									<div className="helper">Total</div>
+									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.total || 0)}</div>
+								</div>
+								<div className="card" style={{ padding: 10 }}>
+									<div className="helper">Yes</div>
+									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.yes || 0)}</div>
+								</div>
+								<div className="card" style={{ padding: 10 }}>
+									<div className="helper">Maybe</div>
+									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.maybe || 0)}</div>
+								</div>
+								<div className="card" style={{ padding: 10 }}>
+									<div className="helper">No</div>
+									<div style={{ fontSize: 22, fontWeight: 800 }}>{Number(rsvpCounts?.combined?.no || 0)}</div>
+								</div>
+							</div>
+							<div className="helper" style={{ marginTop: 8 }}>
+								Members: {Number(rsvpCounts?.member?.total || 0)} · Public: {Number(rsvpCounts?.public?.total || 0)}
+							</div>
+						</div>
 
 						<textarea className="input" rows={6} placeholder="Agenda / Notes" value={edit.agenda} onChange={(e) => setEdit((p) => ({ ...p, agenda: e.target.value }))} style={{ marginTop: 10 }} />
 
