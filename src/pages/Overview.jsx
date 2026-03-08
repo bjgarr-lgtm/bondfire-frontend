@@ -171,10 +171,16 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const trendUp = last >= first;
 
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
-      <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
-      <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
+    <div style={{ width: "100%", maxWidth: "100%", height: h, overflow: "hidden", display: "block" }}>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        style={{ display: "block", width: "100%", height: "100%", maxWidth: "100%", overflow: "hidden" }}
+      >
+        <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
+        <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
   );
 }
 
@@ -196,7 +202,7 @@ function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
 
 function MetricCardSkeleton({ icon = "⬛" }) {
   return (
-    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
         <SkeletonBox w={78} h={14} r={8} />
@@ -232,6 +238,14 @@ function SectionCardSkeleton({ rows = 3 }) {
       </div>
     </div>
   );
+}
+
+function readInvPar(orgId) {
+  try {
+    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
 }
 
 export default function Overview() {
@@ -479,10 +493,13 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              width: "100%",
+              boxSizing: "border-box",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={120} height={18} />
+            <Sparkline values={historySeries[key]} width={108} height={18} />
           </div>
         ),
       };
@@ -530,8 +547,11 @@ export default function Overview() {
       .slice(0, 6);
   }, [publicInbox]);
 
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+
   const invCatStats = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
+    const parMap = invPar || {};
     const map = new Map();
 
     for (const it of arr) {
@@ -551,7 +571,8 @@ export default function Overview() {
       }
       cat = (cat || "uncategorized").toLowerCase();
 
-      const parV = Number(it?.par);
+      const id = it?.id != null ? String(it.id) : "";
+      const parV = Number(parMap?.[id]);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
 
       const cur = map.get(cat) || { category: cat, qty: 0, par: 0, items: 0 };
@@ -578,15 +599,18 @@ export default function Overview() {
     });
 
     return out.slice(0, 6);
-  }, [inventory]);
+  }, [inventory, invPar]);
 
   const invLowItems = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
+    const parMap = invPar || {};
     const lows = [];
 
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
-      const parV = Number(it?.par);
+      const raw = parMap?.[id];
+      if (raw === "" || raw == null) continue;
+      const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
       if (!par) continue;
 
@@ -600,7 +624,7 @@ export default function Overview() {
 
     lows.sort((a, b) => a.pct - b.pct);
     return lows.slice(0, 4);
-  }, [inventory]);
+  }, [inventory, invPar]);
 
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
