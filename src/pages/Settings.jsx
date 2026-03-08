@@ -32,7 +32,7 @@ async function authFetch(path, opts = {}) {
 
   // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
-    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges)|invites\/redeem)\b/.test(
+    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges|public\/inbox)|invites\/redeem)\b/.test(
       relative
     );
 
@@ -128,6 +128,7 @@ export default function Settings() {
       ["invites", "Invites"],
       ["members", "Members"],
       ["public", "Public page"],
+      ["public-inbox", "Public inbox"],
       ["newsletter", "Newsletter"],
       ["pledges", "Pledges"],
       ["security", "Security"],
@@ -487,6 +488,59 @@ React.useEffect(() => {
   };
 
   const publicUrl = slug ? `${location.origin}/#/p/${slug}` : "";
+
+  /* ========== PUBLIC INBOX (backend) ========== */
+  const [publicInboxItems, setPublicInboxItems] = React.useState([]);
+  const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
+  const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
+
+  const loadPublicInbox = React.useCallback(async () => {
+    if (!orgId) return;
+    setPublicInboxMsg("");
+    setPublicInboxBusy(true);
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
+        method: "GET",
+      });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+    } catch (e) {
+      setPublicInboxItems([]);
+      setPublicInboxMsg(e.message || "Failed to load public inbox");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  }, [orgId]);
+
+  React.useEffect(() => {
+    if (tab === "public-inbox") {
+      loadPublicInbox();
+    }
+  }, [tab, loadPublicInbox]);
+
+  const savePublicInboxItem = async (item, patch) => {
+    if (!orgId || !item?.id) return;
+    setPublicInboxMsg("");
+    setPublicInboxBusy(true);
+    try {
+      const body = {
+        type: String(item.type || "intake"),
+        id: String(item.id),
+        review_status: patch?.review_status ?? item.review_status ?? "new",
+        admin_note: patch?.admin_note ?? item.admin_note ?? "",
+      };
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
+        method: "PUT",
+        body,
+      });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+      setPublicInboxMsg("Saved.");
+      setTimeout(() => setPublicInboxMsg(""), 900);
+    } catch (e) {
+      setPublicInboxMsg(e.message || "Failed to save public inbox item");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  };
 
   /* ========== NEWSLETTER (backend, Riseup sends) ========== */
   const [nlEnabled, setNlEnabled] = React.useState(false);
@@ -1118,6 +1172,92 @@ React.useEffect(() => {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Public Inbox */}
+      {tab === "public-inbox" && (
+        <div className="card" style={{ padding: 16 }}>
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <h2 style={{ marginTop: 0, marginBottom: 0, flex: 1 }}>Public Inbox</h2>
+            <button className="btn" type="button" onClick={() => loadPublicInbox()} disabled={publicInboxBusy}>
+              {publicInboxBusy ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="helper" style={{ marginTop: 8 }}>
+            Review public Get Help, Offer Resources, and Volunteer submissions here. Meeting RSVPs stay attached to meetings.
+          </div>
+
+          {publicInboxMsg ? (
+            <div className={publicInboxMsg.toLowerCase().includes("fail") ? "error" : "helper"} style={{ marginTop: 8 }}>
+              {publicInboxMsg}
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+            {publicInboxItems.length === 0 ? (
+              <div className="helper">No public inbox items yet.</div>
+            ) : (
+              publicInboxItems.map((item) => {
+                const title = item?.title || (item?.source_kind === "offer_resources" ? "Offer Resources" : item?.source_kind === "volunteer" ? "Volunteer" : "Get Help");
+                const who = item?.name || "anonymous";
+                const contact = item?.contact || "";
+                const created = item?.created_at ? new Date(item.created_at).toLocaleString() : "";
+                const details = item?.details || item?.extra || "";
+                const status = item?.review_status || "new";
+                const adminNote = item?.admin_note || "";
+                return (
+                  <div key={item.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="row" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                      <div style={{ flex: "2 1 320px", minWidth: 260, display: "grid", gap: 8 }}>
+                        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <strong>{title}</strong>
+                          <span className="helper">{created}</span>
+                        </div>
+                        <div><strong>{who}</strong></div>
+                        {contact ? <div style={{ overflowWrap: "anywhere" }}>{contact}</div> : null}
+                        {details ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{details}</div> : <div className="helper">No details.</div>}
+                      </div>
+
+                      <div style={{ flex: "1 1 260px", minWidth: 240, display: "grid", gap: 8 }}>
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Review status</span>
+                          <select
+                            className="input"
+                            value={status}
+                            onChange={(e) => savePublicInboxItem(item, { review_status: e.target.value })}
+                            disabled={publicInboxBusy}
+                          >
+                            <option value="new">new</option>
+                            <option value="reviewed">reviewed</option>
+                            <option value="contacted">contacted</option>
+                            <option value="closed">closed</option>
+                          </select>
+                        </label>
+
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Admin note</span>
+                          <textarea
+                            className="textarea"
+                            rows={4}
+                            defaultValue={adminNote}
+                            placeholder="Notes for your team"
+                            onBlur={(e) => {
+                              const next = String(e.target.value || "");
+                              if (next !== String(adminNote || "")) {
+                                savePublicInboxItem(item, { admin_note: next });
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 
