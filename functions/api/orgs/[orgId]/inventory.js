@@ -14,10 +14,17 @@ async function getOrgCryptoKeyVersion(db, orgId) {
 	}
 }
 
-async function ensureInventoryParColumn(db) {
-  try {
-    await db.prepare("ALTER TABLE inventory ADD COLUMN par_qty REAL").run();
-  } catch {}
+
+async function ensureInventoryParsTable(db) {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS inventory_pars (
+      org_id TEXT NOT NULL,
+      inventory_id TEXT NOT NULL,
+      par REAL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (org_id, inventory_id)
+    )`
+  ).run();
 }
 
 // Inventory items for an org.
@@ -31,15 +38,18 @@ export async function onRequestGet({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
-  await ensureInventoryParColumn(env.BF_DB);
+  await ensureInventoryParsTable(env.BF_DB);
 
   const res = await env.BF_DB.prepare(
-    `SELECT id, name, qty, unit, category, location, notes,
-            encrypted_notes, encrypted_blob, key_version, par_qty,
-            is_public, created_at, updated_at
-     FROM inventory
-     WHERE org_id = ?
-     ORDER BY created_at DESC`
+    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.location, i.notes,
+            i.encrypted_notes, i.encrypted_blob, i.key_version,
+            i.is_public, i.created_at, i.updated_at,
+            ip.par
+     FROM inventory i
+     LEFT JOIN inventory_pars ip
+       ON ip.org_id = i.org_id AND ip.inventory_id = i.id
+     WHERE i.org_id = ?
+     ORDER BY i.created_at DESC`
   )
     .bind(orgId)
     .all();
@@ -52,16 +62,16 @@ export async function onRequestPost({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
 
-  await ensureInventoryParColumn(env.BF_DB);
-
   const body = await request.json().catch(() => ({}));
   const name = String(body.name || "").trim();
   if (!name) return bad(400, "MISSING_NAME");
 
+  await ensureInventoryParsTable(env.BF_DB);
+
   const id = uuid();
   const t = now();
   const qty = Number.isFinite(Number(body.qty)) ? Number(body.qty) : 0;
-  const parQty = Number.isFinite(Number(body.par_qty)) && Number(body.par_qty) > 0 ? Number(body.par_qty) : null;
+  const par = Number.isFinite(Number(body.par)) && Number(body.par) > 0 ? Number(body.par) : null;
 
   // If client provided ciphertext, stamp the org's current key version.
   const keyVersion = body.encrypted_blob ? await getOrgCryptoKeyVersion(env.BF_DB, orgId) : null;
@@ -69,9 +79,9 @@ export async function onRequestPost({ env, request, params }) {
   await env.BF_DB.prepare(
     `INSERT INTO inventory (
         id, org_id, name, qty, unit, category, location, notes,
-        encrypted_notes, encrypted_blob, key_version, par_qty,
+        encrypted_notes, encrypted_blob, key_version,
         is_public, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   )
     .bind(
       id,
@@ -85,12 +95,27 @@ export async function onRequestPost({ env, request, params }) {
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
 		keyVersion,
-      parQty,
       body.is_public ? 1 : 0,
       t,
       t
     )
     .run();
+
+  if (hasPar) {
+    if (par == null) {
+      await env.BF_DB.prepare(
+        `DELETE FROM inventory_pars WHERE org_id = ? AND inventory_id = ?`
+      ).bind(orgId, id).run();
+    } else {
+      await env.BF_DB.prepare(
+        `INSERT INTO inventory_pars (org_id, inventory_id, par, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, inventory_id) DO UPDATE SET
+           par = excluded.par,
+           updated_at = excluded.updated_at`
+      ).bind(orgId, id, par, now()).run();
+    }
+  }
 
   try {
     await logActivity(env, {
@@ -111,7 +136,7 @@ export async function onRequestPut({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
 
-  await ensureInventoryParColumn(env.BF_DB);
+  await ensureInventoryParsTable(env.BF_DB);
 
   const body = await request.json().catch(() => ({}));
   const id = String(body.id || "");
@@ -127,12 +152,8 @@ export async function onRequestPut({ env, request, params }) {
       ? Number(body.qty)
       : 0;
 
-  const parQty =
-    body.par_qty === undefined || body.par_qty === null || body.par_qty === ""
-      ? null
-      : Number.isFinite(Number(body.par_qty)) && Number(body.par_qty) > 0
-      ? Number(body.par_qty)
-      : 0;
+  const hasPar = Object.prototype.hasOwnProperty.call(body, "par");
+  const par = hasPar && Number.isFinite(Number(body.par)) && Number(body.par) > 0 ? Number(body.par) : null;
 
   // If client provided ciphertext, stamp the org's current key version.
   const keyVersion = body.encrypted_blob ? await getOrgCryptoKeyVersion(env.BF_DB, orgId) : null;
@@ -148,7 +169,6 @@ export async function onRequestPut({ env, request, params }) {
          encrypted_notes = COALESCE(?, encrypted_notes),
          encrypted_blob = COALESCE(?, encrypted_blob),
          key_version = COALESCE(?, key_version),
-         par_qty = COALESCE(?, par_qty),
          is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
@@ -163,13 +183,28 @@ export async function onRequestPut({ env, request, params }) {
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
 		keyVersion,
-      parQty,
       isPublic,
       now(),
       id,
       orgId
     )
     .run();
+
+  if (hasPar) {
+    if (par == null) {
+      await env.BF_DB.prepare(
+        `DELETE FROM inventory_pars WHERE org_id = ? AND inventory_id = ?`
+      ).bind(orgId, id).run();
+    } else {
+      await env.BF_DB.prepare(
+        `INSERT INTO inventory_pars (org_id, inventory_id, par, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, inventory_id) DO UPDATE SET
+           par = excluded.par,
+           updated_at = excluded.updated_at`
+      ).bind(orgId, id, par, now()).run();
+    }
+  }
 
   try {
     await logActivity(env, {
@@ -206,6 +241,11 @@ const label = name || shortId(id);
 
 await env.BF_DB.prepare("DELETE FROM inventory WHERE id = ? AND org_id = ?")
   .bind(id, orgId)
+  .run();
+
+await ensureInventoryParsTable(env.BF_DB);
+await env.BF_DB.prepare("DELETE FROM inventory_pars WHERE org_id = ? AND inventory_id = ?")
+  .bind(orgId, id)
   .run();
 
 logActivity(env, {
