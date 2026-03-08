@@ -787,7 +787,18 @@ export default function Overview() {
                           </div>
                         </div>
                         <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${pct * 100}%`,
+                              background:
+                                pct <= 0.25
+                                  ? "#ff4d4d"   // red
+                                  : pct <= 0.5
+                                  ? "#ff9a3c"   // yellow/orange
+                                  : "#39d98a",  // green
+                            }}
+                          />
                         </div>
                       </div>
                     );
