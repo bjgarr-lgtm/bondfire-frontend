@@ -60,7 +60,17 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       try {
         const decStr = await decryptWithOrgKey(orgKey, blob);
         const dec = JSON.parse(decStr);
-        out.push({ ...r, ...dec });
+        out.push({
+          ...r,
+          ...dec,
+          category:
+            dec?.category ??
+            dec?.cat ??
+            r?.category ??
+            r?.cat ??
+            r?.Category ??
+            r?.CATEGORY,
+        });
         continue;
       } catch {
         // fall through
@@ -144,8 +154,6 @@ function pill(text, tone) {
 }
 
 function Sparkline({ values, width = 120, height = 32 }) {
-  const resolvedWidth = Math.max(10, Number(width) || 120);
-  const resolvedHeight = Math.max(10, Number(height) || 32);
   const v = Array.isArray(values) ? values.map((x) => Number(x || 0)) : [];
   if (!v.length) return null;
 
@@ -154,8 +162,8 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const range = max - min || 1;
 
   const pad = 2;
-  const w = resolvedWidth;
-  const h = resolvedHeight;
+  const w = Math.max(10, width);
+  const h = Math.max(10, height);
   const innerW = w - pad * 2;
   const innerH = h - pad * 2;
 
@@ -173,7 +181,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const trendUp = last >= first;
 
   return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: `${h}px`, overflow: "hidden" }}>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
       <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -489,13 +497,10 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              width: "100%",
-              boxSizing: "border-box",
-              overflow: "hidden",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={108} height={18} />
+            <Sparkline values={historySeries[key]} width={120} height={18} />
           </div>
         ),
       };
@@ -553,19 +558,15 @@ export default function Overview() {
     for (const it of arr) {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
-      const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
-      let cat = safeStr(catRaw).trim();
-      if (!cat) {
-        try {
-          for (const k of Object.keys(it || {})) {
-            if (String(k).toLowerCase() === "category") {
-              cat = safeStr(it[k]).trim();
-              break;
-            }
-          }
-        } catch {}
-      }
-      cat = (cat || "uncategorized").toLowerCase();
+      const rawCat =
+        it?.category ??
+        it?.cat ??
+        it?.Category ??
+        it?.CATEGORY ??
+        "";
+
+      let cat = String(rawCat).trim().toLowerCase();
+      if (!cat) cat = "uncategorized";
 
       const id = it?.id != null ? String(it.id) : "";
       const parV = Number(parMap?.[id]);
@@ -594,7 +595,8 @@ export default function Overview() {
       return (b.qty || 0) - (a.qty || 0);
     });
 
-    return out.slice(0, 6);
+    const belowPar = out.filter((x) => x.par > 0 && x.qty < x.par);
+    return belowPar.slice(0, 6);
   }, [inventory, invPar]);
 
   const invLowItems = useMemo(() => {
@@ -676,7 +678,7 @@ export default function Overview() {
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
               <div className="card" style={{ padding: 14, position: "relative", minHeight: 118 }}>
                 {c.badge ? (
-                  <div style={{ position: "absolute", top: 10, right: 10, maxWidth: "calc(100% - 20px)" }}>
+                  <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
                   </div>
                 ) : null}
@@ -686,7 +688,7 @@ export default function Overview() {
                 </div>
                 <div style={{ marginTop: 10, fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{c.value}</div>
                 <div className="helper" style={{ marginTop: 6 }}>{c.sub}</div>
-                <div style={{ marginTop: 8, width: "100%", overflow: "hidden" }}>{c.extra}</div>
+                {c.extra}
               </div>
             </button>
           ))
@@ -780,45 +782,54 @@ export default function Overview() {
                 </button>
               </div>
 
-              {invCatStats.length ? (
+              {inventory.length ? (
                 <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {invCatStats.map((x) => {
-                    const pct = x.par > 0 ? x.pctClamped : 0;
-                    const label = x.category;
-                    return (
-                      <div key={label} style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                          <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                            {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                  {invCatStats.length ? (
+                    invCatStats.map((x) => {
+                      const pct = x.par > 0 ? x.pctClamped : 0;
+                      const label = x.category;
+                      const barColor = pct <= 0.25 ? "#e11d48" : pct <= 0.5 ? "#f97316" : "#facc15";
+                      return (
+                        <div key={label} style={{ display: "grid", gap: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                            <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                              {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                            </div>
+                          </div>
+                          <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct * 100}%`, background: barColor }} />
                           </div>
                         </div>
-                        <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  ) : (
+                    <div className="helper">All tracked categories are at or above par.</div>
+                  )}
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                     <div className="helper">
                       {invLowItems.length ? (
                         <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                          {invLowItems.map((item) => (
-                            <div key={item.id}>
-                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
-                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
-                                <div
-                                  style={{
-                                    width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                    background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
-                                    height: "100%",
-                                  }}
-                                />
+                          {invLowItems.map((item) => {
+                            const pct = item.par > 0 ? item.qty / item.par : 0;
+                            const barColor = pct <= 0.25 ? "#e11d48" : pct <= 0.5 ? "#f97316" : "#facc15";
+                            return (
+                              <div key={item.id}>
+                                <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                                <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                                <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                                  <div
+                                    style={{
+                                      width: `${Math.min(100, pct * 100)}%`,
+                                      background: barColor,
+                                      height: "100%",
+                                    }}
+                                  />
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <span>No low items below par.</span>
