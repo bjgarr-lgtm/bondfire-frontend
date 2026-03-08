@@ -449,6 +449,42 @@ export default function Overview() {
     };
   }, [tickerDeltas]);
 
+// ADD inside Overview() near other useMemos
+
+const newsletterSpark = useMemo(() => {
+  const arr = Array.isArray(subs) ? subs : [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  // last 14 days, oldest -> newest
+  const buckets = [];
+  for (let i = 13; i >= 0; i--) {
+    const start = now - i * dayMs;
+    const end = start + dayMs;
+    const count = arr.filter((s) => {
+      const t = Number(s?.joined || s?.created_at || 0);
+      return Number.isFinite(t) && t >= start && t < end;
+    }).length;
+    buckets.push(count);
+  }
+
+  // cumulative looks nicer than spiky daily counts
+  const cum = [];
+  let run = 0;
+  for (const c of buckets) {
+    run += c;
+    cum.push(run);
+  }
+
+  // If there were no joins in 14d but we have subs, keep a flat line at total
+  const any = buckets.some((x) => x > 0);
+  if (!any) {
+    const total = arr.length;
+    return new Array(14).fill(total);
+  }
+  return cum;
+}, [subs]);
+
   const showSkeleton = loading && !hasLoadedOnce;
 
   const topCards = useMemo(() => {
@@ -523,41 +559,7 @@ export default function Overview() {
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  // ADD inside Overview() near other useMemos
-
-const newsletterSpark = useMemo(() => {
-  const arr = Array.isArray(subs) ? subs : [];
-  const now = Date.now();
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  // last 14 days, oldest -> newest
-  const buckets = [];
-  for (let i = 13; i >= 0; i--) {
-    const start = now - i * dayMs;
-    const end = start + dayMs;
-    const count = arr.filter((s) => {
-      const t = Number(s?.joined || s?.created_at || 0);
-      return Number.isFinite(t) && t >= start && t < end;
-    }).length;
-    buckets.push(count);
-  }
-
-  // cumulative looks nicer than spiky daily counts
-  const cum = [];
-  let run = 0;
-  for (const c of buckets) {
-    run += c;
-    cum.push(run);
-  }
-
-  // If there were no joins in 14d but we have subs, keep a flat line at total
-  const any = buckets.some((x) => x > 0);
-  if (!any) {
-    const total = arr.length;
-    return new Array(14).fill(total);
-  }
-  return cum;
-}, [subs]);
+  
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
