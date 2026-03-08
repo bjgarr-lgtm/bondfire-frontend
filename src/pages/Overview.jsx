@@ -143,14 +143,6 @@ function pill(text, tone) {
   );
 }
 
-function getStockTone(pct) {
-  if (!Number.isFinite(pct)) return "rgba(255,255,255,0.28)";
-  if (pct <= 0.25) return "#ff4d4f";
-  if (pct <= 0.5) return "#f97316";
-  if (pct < 1) return "#facc15";
-  return "#3ddc97";
-}
-
 function Sparkline({ values, width = 120, height = 32 }) {
   const v = Array.isArray(values) ? values.map((x) => Number(x || 0)) : [];
   if (!v.length) return null;
@@ -160,8 +152,8 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const range = max - min || 1;
 
   const pad = 2;
-  const w = Math.max(10, Number(width) || 120);
-  const h = Math.max(10, Number(height) || 32);
+  const w = Math.max(10, width);
+  const h = Math.max(10, height);
   const innerW = w - pad * 2;
   const innerH = h - pad * 2;
 
@@ -184,7 +176,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
       height={h}
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
-      style={{ display: "block", width: "100%", height: `${h}px`, maxWidth: "100%" }}
+      style={{ display: "block", width: "100%", height: `${h}px`, overflow: "hidden" }}
     >
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
       <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -254,6 +246,11 @@ function readInvPar(orgId) {
   } catch {
     return {};
   }
+}
+
+function normalizeParValue(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export default function Overview() {
@@ -501,14 +498,12 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              overflow: "hidden",
-              width: "100%",
-              maxWidth: "100%",
-              boxSizing: "border-box",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={108} height={18} />
+            <div style={{ width: "100%", maxWidth: "100%", overflow: "hidden", borderRadius: 6 }}>
+              <Sparkline values={historySeries[key]} width={112} height={18} />
+            </div>
           </div>
         ),
       };
@@ -519,7 +514,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-page"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas, historySeries]);
@@ -556,7 +551,17 @@ export default function Overview() {
       .slice(0, 6);
   }, [publicInbox]);
 
-  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+  const invPar = useMemo(() => {
+    const local = readInvPar(orgId);
+    const merged = { ...(local || {}) };
+    for (const it of Array.isArray(inventory) ? inventory : []) {
+      const id = it?.id != null ? String(it.id) : "";
+      if (!id) continue;
+      const serverPar = normalizeParValue(it?.par_qty);
+      if (serverPar != null) merged[id] = serverPar;
+    }
+    return merged;
+  }, [orgId, inventory]);
 
   const invCatStats = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
@@ -720,7 +725,7 @@ export default function Overview() {
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
                   Manage
                 </button>
               </div>
@@ -807,38 +812,36 @@ export default function Overview() {
                           </div>
                         </div>
                         <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct * 100}%`, background: getStockTone(x.pct) }} />
+                          <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
                         </div>
                       </div>
                     );
                   })}
 
-                  <div style={{ marginTop: 10 }}>
-                    {invLowItems.length ? (
-                      <div style={{ display: "grid", gap: 10 }}>
-                        <div className="helper" style={{ fontWeight: 700 }}>Lowest items vs par</div>
-                        {invLowItems.map((item) => (
-                          <div key={item.id} style={{ display: "grid", gap: 4 }}>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                              <div style={{ fontWeight: 700 }}>{item.name}</div>
-                              <div className="helper">{item.qty} / {item.par}</div>
-                              {item.category ? <div className="helper">· {item.category}</div> : null}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+                    <div className="helper">
+                      {invLowItems.length ? (
+                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                          {invLowItems.map((item) => (
+                            <div key={item.id}>
+                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                                <div
+                                  style={{
+                                    width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
+                                    background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
+                                    height: "100%",
+                                  }}
+                                />
+                              </div>
                             </div>
-                            <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden" }}>
-                              <div
-                                style={{
-                                  width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                  background: item.qty <= item.par * 0.25 ? "#ff4d4f" : item.qty <= item.par * 0.5 ? "#f97316" : "#facc15",
-                                  height: "100%",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="helper">No low items below par.</div>
-                    )}
+                          ))}
+                        </div>
+                      ) : (
+                        <span>No low items below par.</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : (

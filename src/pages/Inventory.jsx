@@ -38,6 +38,11 @@ function itemKeyFromFields({ name, unit, category, location }) {
   return `${n}|${u}|${c}|${l}`;
 }
 
+function normalizeParValue(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export default function Inventory() {
   const orgId = getOrgId();
   const isNarrow = useMemo(() => {
@@ -74,41 +79,59 @@ export default function Inventory() {
       const raw = Array.isArray(data.inventory) ? data.inventory : [];
 
       const orgKey = getCachedOrgKey(orgId);
-      if (orgKey) {
-        const out = [];
-        for (const it of raw) {
-          if (it?.encrypted_blob) {
-            try {
-              const dec = JSON.parse(await decryptWithOrgKey(orgKey, it.encrypted_blob));
-              out.push({ ...it, ...dec });
-              continue;
-            } catch {
-              out.push({ ...it, name: "(encrypted)", category: it.category || "", location: "", notes: "" });
-              continue;
-            }
-          }
-          out.push(it);
-        }
-        setItems(out);
-        // Migrate any pending par values stored under a tmp key into real item ids.
-        const pm = readParMap(orgId);
-        let changed = false;
-        for (const it of out) {
-          if (it?.id == null) continue;
-          const id = String(it.id);
-          if (pm[id] != null) continue;
-          const tmpKey = `tmp:${itemKeyFromFields(it)}`;
-          if (pm[tmpKey] != null) {
-            pm[id] = pm[tmpKey];
-            delete pm[tmpKey];
-            changed = true;
+      const out = [];
+      for (const it of raw) {
+        if (orgKey && it?.encrypted_blob) {
+          try {
+            const dec = JSON.parse(await decryptWithOrgKey(orgKey, it.encrypted_blob));
+            out.push({ ...it, ...dec });
+            continue;
+          } catch {
+            out.push({ ...it, name: "(encrypted)", category: it.category || "", location: "", notes: "" });
+            continue;
           }
         }
-        if (changed) writeParMap(orgId, pm);
-        setParMap(pm);
-      } else {
-        setItems(raw);
-        setParMap(readParMap(orgId));
+        out.push(it);
+      }
+      setItems(out);
+
+      const localPm = readParMap(orgId);
+      const nextPm = {};
+      const migrate = [];
+      for (const it of out) {
+        if (it?.id == null) continue;
+        const id = String(it.id);
+        const serverPar = normalizeParValue(it?.par_qty);
+        if (serverPar != null) {
+          nextPm[id] = serverPar;
+          continue;
+        }
+        const localPar = normalizeParValue(localPm[id]);
+        if (localPar != null) {
+          nextPm[id] = localPar;
+          migrate.push({ id, par_qty: localPar });
+          continue;
+        }
+        const tmpKey = `tmp:${itemKeyFromFields(it)}`;
+        const tmpPar = normalizeParValue(localPm[tmpKey]);
+        if (tmpPar != null) {
+          nextPm[id] = tmpPar;
+          migrate.push({ id, par_qty: tmpPar });
+        }
+      }
+      writeParMap(orgId, nextPm);
+      setParMap(nextPm);
+
+      if (migrate.length) {
+        Promise.allSettled(
+          migrate.map((row) =>
+            api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: row.id, par_qty: row.par_qty }),
+            })
+          )
+        ).catch(() => {});
       }
     } catch (e) {
       console.error(e);
@@ -183,22 +206,16 @@ export default function Inventory() {
     const qty = Number(form.qty) || 0;
     const unit = safeStr(form.unit).trim();
     const category = safeStr(form.category).trim();
-    const parNum = form.par === "" ? null : Number(form.par);
-    if (parNum != null && Number.isFinite(parNum) && orgId) {
-      const pm = { ...(readParMap(orgId) || {}) };
-      pm[`tmp:${itemKeyFromFields({ ...form, category })}`] = parNum;
-      writeParMap(orgId, pm);
-      setParMap(pm);
-    }
+    const parNum = normalizeParValue(form.par);
     const location = safeStr(form.location).trim();
     const notes = safeStr(form.notes).trim();
     const is_public = !!form.is_public;
 
     const orgKey = getCachedOrgKey(orgId);
-    let payload = { name, qty, unit, category, location, notes, is_public };
+    let payload = { name, qty, unit, category, location, notes, is_public, par_qty: parNum };
     if (orgKey && !is_public) {
       const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, category, location, notes }));
-      payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
+      payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, par_qty: parNum, encrypted_blob: enc };
     }
 
     await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
@@ -217,7 +234,7 @@ export default function Inventory() {
       id: it.id,
       name: it.name || "",
       qty: it.qty ?? 0,
-      par: parMap?.[String(it.id)] ?? "",
+      par: parMap?.[String(it.id)] ?? normalizeParValue(it?.par_qty) ?? "",
       unit: it.unit || "",
       category: it.category || "",
       location: it.location || "",
@@ -235,15 +252,11 @@ export default function Inventory() {
     if (!orgId || !edit?.id) return;
     setErr("");
     try {
-      // Persist par map changes from the modal (table edits already do this, but modal edits didn't).
       const idStr = String(edit.id);
       const nextPm = { ...(readParMap(orgId) || {}) };
-      if (edit.par === "" || edit.par == null) {
-        delete nextPm[idStr];
-      } else {
-        const pv = Number(edit.par);
-        nextPm[idStr] = Number.isFinite(pv) ? pv : "";
-      }
+      const parQty = normalizeParValue(edit.par);
+      if (parQty == null) delete nextPm[idStr];
+      else nextPm[idStr] = parQty;
       writeParMap(orgId, nextPm);
       setParMap(nextPm);
 
@@ -260,6 +273,7 @@ export default function Inventory() {
         location: safeStr(edit.location).trim(),
         notes: safeStr(edit.notes),
         is_public,
+        par_qty: parQty,
       };
 
       if (orgKey && !is_public) {
@@ -281,6 +295,7 @@ export default function Inventory() {
           location: "",
           notes: "",
           is_public,
+          par_qty: parQty,
           encrypted_blob: enc,
         };
       }
@@ -308,6 +323,20 @@ export default function Inventory() {
       });
       closeModal();
       setTimeout(() => refresh().catch(console.error), 250);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || String(e));
+    }
+  }
+
+  async function persistPar(id, value) {
+    if (!orgId || !id) return;
+    try {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, par_qty: normalizeParValue(value) }),
+      });
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -411,6 +440,7 @@ export default function Inventory() {
                               return next;
                             });
                           }}
+                          onBlur={(e) => persistPar(it.id, e.target.value)}
                           style={{ width: "100%" }}
                         />
                       </div>
@@ -476,6 +506,7 @@ export default function Inventory() {
                           return next;
                         });
                       }}
+                      onBlur={(e) => persistPar(it.id, e.target.value)}
                       style={{ width: 90 }}
                     />
                   </td>

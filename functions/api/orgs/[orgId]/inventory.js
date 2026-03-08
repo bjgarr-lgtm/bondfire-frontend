@@ -14,6 +14,12 @@ async function getOrgCryptoKeyVersion(db, orgId) {
 	}
 }
 
+async function ensureInventoryParColumn(db) {
+  try {
+    await db.prepare("ALTER TABLE inventory ADD COLUMN par_qty REAL").run();
+  } catch {}
+}
+
 // Inventory items for an org.
 // Columns expected:
 // id, org_id, name, qty, unit, category, location, notes,
@@ -25,9 +31,11 @@ export async function onRequestGet({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
+  await ensureInventoryParColumn(env.BF_DB);
+
   const res = await env.BF_DB.prepare(
     `SELECT id, name, qty, unit, category, location, notes,
-            encrypted_notes, encrypted_blob, key_version,
+            encrypted_notes, encrypted_blob, key_version, par_qty,
             is_public, created_at, updated_at
      FROM inventory
      WHERE org_id = ?
@@ -44,6 +52,8 @@ export async function onRequestPost({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
 
+  await ensureInventoryParColumn(env.BF_DB);
+
   const body = await request.json().catch(() => ({}));
   const name = String(body.name || "").trim();
   if (!name) return bad(400, "MISSING_NAME");
@@ -51,6 +61,7 @@ export async function onRequestPost({ env, request, params }) {
   const id = uuid();
   const t = now();
   const qty = Number.isFinite(Number(body.qty)) ? Number(body.qty) : 0;
+  const parQty = Number.isFinite(Number(body.par_qty)) && Number(body.par_qty) > 0 ? Number(body.par_qty) : null;
 
   // If client provided ciphertext, stamp the org's current key version.
   const keyVersion = body.encrypted_blob ? await getOrgCryptoKeyVersion(env.BF_DB, orgId) : null;
@@ -58,9 +69,9 @@ export async function onRequestPost({ env, request, params }) {
   await env.BF_DB.prepare(
     `INSERT INTO inventory (
         id, org_id, name, qty, unit, category, location, notes,
-        encrypted_notes, encrypted_blob, key_version,
+        encrypted_notes, encrypted_blob, key_version, par_qty,
         is_public, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   )
     .bind(
       id,
@@ -74,6 +85,7 @@ export async function onRequestPost({ env, request, params }) {
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
 		keyVersion,
+      parQty,
       body.is_public ? 1 : 0,
       t,
       t
@@ -99,6 +111,8 @@ export async function onRequestPut({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!a.ok) return a.resp;
 
+  await ensureInventoryParColumn(env.BF_DB);
+
   const body = await request.json().catch(() => ({}));
   const id = String(body.id || "");
   if (!id) return bad(400, "MISSING_ID");
@@ -111,6 +125,13 @@ export async function onRequestPut({ env, request, params }) {
       ? null
       : Number.isFinite(Number(body.qty))
       ? Number(body.qty)
+      : 0;
+
+  const parQty =
+    body.par_qty === undefined || body.par_qty === null || body.par_qty === ""
+      ? null
+      : Number.isFinite(Number(body.par_qty)) && Number(body.par_qty) > 0
+      ? Number(body.par_qty)
       : 0;
 
   // If client provided ciphertext, stamp the org's current key version.
@@ -127,6 +148,7 @@ export async function onRequestPut({ env, request, params }) {
          encrypted_notes = COALESCE(?, encrypted_notes),
          encrypted_blob = COALESCE(?, encrypted_blob),
          key_version = COALESCE(?, key_version),
+         par_qty = COALESCE(?, par_qty),
          is_public = COALESCE(?, is_public),
          updated_at = ?
      WHERE id = ? AND org_id = ?`
@@ -141,6 +163,7 @@ export async function onRequestPut({ env, request, params }) {
 		body.encrypted_notes ?? null,
 		body.encrypted_blob ?? null,
 		keyVersion,
+      parQty,
       isPublic,
       now(),
       id,
