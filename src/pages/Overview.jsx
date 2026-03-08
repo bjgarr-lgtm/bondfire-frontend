@@ -42,8 +42,6 @@ function isEncryptedNameLike(v) {
   return s === "__encrypted__" || s === "_encrypted_" || s === "(encrypted)" || s === "encrypted";
 }
 
-// NOTE: some endpoints return encrypted_blob (snake) while others return encryptedBlob (camel).
-// This helper accepts either without forcing page-specific hacks.
 async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   const arr = Array.isArray(rows) ? rows : [];
   const orgKey = getCachedOrgKey(orgId);
@@ -73,8 +71,6 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   return out;
 }
 
-// Baseline for ticker deltas is the most recent dashboard refresh in this tab.
-// We store the last-normalized counts and compute deltas vs that baseline.
 function readRefreshBaseline(orgId) {
   try {
     return JSON.parse(sessionStorage.getItem(`bf_dash_baseline_${orgId}`) || "{}") || {};
@@ -88,6 +84,7 @@ function writeRefreshBaseline(orgId, baseline) {
     sessionStorage.setItem(`bf_dash_baseline_${orgId}`, JSON.stringify(baseline || {}));
   } catch {}
 }
+
 function readPrevCounts(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
@@ -99,6 +96,23 @@ function readPrevCounts(orgId) {
 function writePrevCounts(orgId, counts) {
   try {
     localStorage.setItem(`bf_dash_counts_${orgId}`, JSON.stringify(counts || {}));
+  } catch {}
+}
+
+function readDashHistory(orgId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`bf_dash_history_${orgId}`) || "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendDashHistory(orgId, sample) {
+  try {
+    const prev = readDashHistory(orgId);
+    const next = [...prev, sample].slice(-20);
+    localStorage.setItem(`bf_dash_history_${orgId}`, JSON.stringify(next));
   } catch {}
 }
 
@@ -127,10 +141,6 @@ function pill(text, tone) {
       {text}
     </span>
   );
-}
-
-function clamp(n, a, b) {
-  return Math.max(a, Math.min(b, n));
 }
 
 function Sparkline({ values, width = 120, height = 32 }) {
@@ -232,12 +242,6 @@ function readInvPar(orgId) {
   }
 }
 
-function writeInvPar(orgId, obj) {
-  try {
-    localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
-  } catch {}
-}
-
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
@@ -286,7 +290,6 @@ export default function Overview() {
     }
   }, []);
 
-  const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
   const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   useEffect(() => {
     setTickerDeltas({});
@@ -360,7 +363,6 @@ export default function Overview() {
       }
 
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
-
       const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`);
       const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
       const publicInboxResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`).catch(() => ({ items: [] }));
@@ -395,6 +397,7 @@ export default function Overview() {
         };
         setTickerDeltas(nextDeltas);
         writeRefreshBaseline(orgId, cn);
+        appendDashHistory(orgId, { t: Date.now(), ...cn });
       } catch {}
 
       writePrevCounts(orgId, rawCounts);
@@ -409,10 +412,12 @@ export default function Overview() {
 
   useEffect(() => {
     refresh().catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
-  if (!orgId) return <div style={{ padding: 16 }}>
-      <style>{`@keyframes bfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -40% 0; } }`}</style>No org selected.</div>;
+  if (!orgId) {
+    return <div style={{ padding: 16 }}><style>{`@keyframes bfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -40% 0; } }`}</style>No org selected.</div>;
+  }
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
 
@@ -442,41 +447,29 @@ export default function Overview() {
     };
   }, [tickerDeltas]);
 
-  const newsletterSpark = useMemo(() => {
-    const arr = Array.isArray(subs) ? subs : [];
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-
-    const buckets = [];
-    for (let i = 13; i >= 0; i--) {
-      const start = now - i * dayMs;
-      const end = start + dayMs;
-      const count = arr.filter((s) => {
-        const t = Number(s?.joined || s?.created_at || 0);
-        return Number.isFinite(t) && t >= start && t < end;
-      }).length;
-      buckets.push(count);
-    }
-
-    const cum = [];
-    let run = 0;
-    for (const c of buckets) {
-      run += c;
-      cum.push(run);
-    }
-
-    const any = buckets.some((x) => x > 0);
-    if (!any) {
-      const total = arr.length;
-      return new Array(14).fill(total);
-    }
-    return cum;
-  }, [subs]);
+  const historySeries = useMemo(() => {
+    const rows = readDashHistory(orgId);
+    const mk = (key, fallback) => {
+      const vals = rows.map((r) => Number(r?.[key] || 0)).filter((x) => Number.isFinite(x));
+      if (vals.length >= 2) return vals;
+      if (vals.length === 1) return [vals[0], vals[0]];
+      return [Math.max(0, Number(fallback || 0)), Math.max(0, Number(fallback || 0))];
+    };
+    return {
+      people: mk("people", countsNormalized.people),
+      inventory: mk("inventory", countsNormalized.inventory),
+      needsOpen: mk("needsOpen", countsNormalized.needsOpen),
+      meetingsUpcoming: mk("meetingsUpcoming", countsNormalized.meetingsUpcoming),
+      pledgesActive: mk("pledgesActive", countsNormalized.pledgesActive),
+      publicInbox: mk("publicInbox", countsNormalized.publicInbox),
+      subsTotal: mk("subsTotal", countsNormalized.subsTotal),
+    };
+  }, [orgId, countsNormalized]);
 
   const showSkeleton = loading && !hasLoadedOnce;
 
   const topCards = useMemo(() => {
-    const mk = (key, title, icon, value, sub, to, extra = null) => {
+    const mk = (key, title, icon, value, sub, to) => {
       const db = deltaBadge(deltas[key]);
       return {
         key,
@@ -486,33 +479,32 @@ export default function Overview() {
         sub,
         to,
         badge: db,
-        extra,
+        extra: (
+          <div
+            style={{
+              marginTop: 8,
+              borderRadius: 8,
+              padding: "4px 6px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+            title={`${title.toLowerCase()} trend`}
+          >
+            <Sparkline values={historySeries[key]} width={120} height={18} />
+          </div>
+        ),
       };
     };
-    const subsExtra = subs.length > 0 ? (
-      <div
-        style={{
-          marginTop: 8,
-          borderRadius: 8,
-          padding: "4px 6px",
-          background: "rgba(255,255,255,0.04)",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}
-        title="subscriber trend (last 14 days)"
-      >
-        <Sparkline values={newsletterSpark} width={120} height={18} />
-      </div>
-    ) : null;
     return [
       mk("people", "People", "👥", countsNormalized.people, "members", "people"),
       mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter", subsExtra),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-page"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
-  }, [countsNormalized, deltas, newsletterSpark, subs.length]);
+  }, [countsNormalized, deltas, historySeries]);
 
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
@@ -529,14 +521,6 @@ export default function Overview() {
       .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
       .slice(0, 6);
   }, [needs]);
-
-  const subsSorted = useMemo(() => {
-    const arr = Array.isArray(subs) ? subs : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
-      .slice(0, 6);
-  }, [subs]);
 
   const pledgesSorted = useMemo(() => {
     const arr = Array.isArray(pledges) ? pledges : [];
@@ -564,7 +548,6 @@ export default function Overview() {
     for (const it of arr) {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
-
       const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
       let cat = safeStr(catRaw).trim();
       if (!cat) {
@@ -626,14 +609,7 @@ export default function Overview() {
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const pct = qty / par;
       if (pct < 1) {
-        lows.push({
-          id,
-          name: it?.name,
-          category: it?.category,
-          qty,
-          par,
-          pct,
-        });
+        lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
       }
     }
 
@@ -646,19 +622,8 @@ export default function Overview() {
     setRsvpMsg("");
 
     try {
-      await api(
-        `/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`,
-        {
-          method: "POST",
-        }
-      );
-
-      setMeetings((prev) =>
-        prev.map((m) =>
-          m.id === meeting.id ? { ...m, my_rsvp: "going" } : m
-        )
-      );
-
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, { method: "POST" });
+      setMeetings((prev) => prev.map((m) => (m.id === meeting.id ? { ...m, my_rsvp: "going" } : m)));
       setRsvpMsg("RSVP saved.");
     } catch (e) {
       setRsvpMsg(e?.message || "Failed to RSVP");
@@ -704,7 +669,7 @@ export default function Overview() {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+              <div className="card" style={{ padding: 14, position: "relative", minHeight: 118 }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -723,14 +688,7 @@ export default function Overview() {
         )}
       </div>
 
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 12,
-          alignItems: "start",
-        }}
-      >
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
         {showSkeleton ? (
           <>
             <SectionCardSkeleton rows={2} />
@@ -741,229 +699,201 @@ export default function Overview() {
           </>
         ) : (
           <>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-            <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
-              Review
-            </button>
-          </div>
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
+                  Manage
+                </button>
+              </div>
 
-          {publicInboxSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {publicInboxSorted.map((item) => {
-                const kind = String(item?.kind || item?.type || "").toLowerCase();
-                const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
-                const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
-                const who = safeStr(item?.name || "anonymous");
-                const contact = safeStr(item?.contact || item?.email || item?.phone || "");
-                const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
-                const created = item?.created_at || item?.submitted_at;
-                return (
-                  <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        {pill(title, tone)}
-                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+              {publicInboxSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {publicInboxSorted.map((item) => {
+                    const kind = String(item?.kind || item?.type || "").toLowerCase();
+                    const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+                    const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+                    const who = safeStr(item?.name || "anonymous");
+                    const contact = safeStr(item?.contact || item?.email || item?.phone || "");
+                    const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
+                    const created = item?.created_at || item?.submitted_at;
+                    return (
+                      <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
+                        <div style={{ display: "grid", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            {pill(title, tone)}
+                            <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                          </div>
+                          {created ? <div className="helper">{fmtDT(created)}</div> : null}
+                          {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
+                          {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
+                        </div>
                       </div>
-                      {created ? <div className="helper">{fmtDT(created)}</div> : null}
-                      {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
-                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
-            <button className="btn" type="button" onClick={() => go("meetings")}>
-              View all
-            </button>
-          </div>
-          {meetingsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {meetingsSorted.map((m) => (
-                <div key={m.id} className="card" style={{ padding: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                      {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
-                    </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
-                      RSVP
-                    </button>
-                  </div>
-                  <div className="helper" style={{ marginTop: 6 }}>
-                    {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
-                  </div>
+                    );
+                  })}
                 </div>
-              ))}
+              ) : (
+                <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+              )}
             </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
-          )}
-        </div>
 
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
-            <button className="btn" type="button" onClick={() => go("inventory")}>
-              Manage
-            </button>
-          </div>
-
-          {invCatStats.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {invCatStats.map((x) => {
-                const pct = x.par > 0 ? x.pctClamped : 0;
-                const label = x.category;
-                return (
-                  <div key={label} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                        {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
+                <button className="btn" type="button" onClick={() => go("meetings")}>
+                  View all
+                </button>
+              </div>
+              {meetingsSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {meetingsSorted.map((m) => (
+                    <div key={m.id} className="card" style={{ padding: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                          {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                        </div>
+                        <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                          RSVP
+                        </button>
+                      </div>
+                      <div className="helper" style={{ marginTop: 6 }}>
+                        {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
                       </div>
                     </div>
-                    <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
-                    </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
+              )}
+            </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
-                <div className="helper">
-                  {invLowItems.length ? (
-                    <div
-                      style={{
-                        marginTop: 8,
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 10,
-                      }}
-                    >
-                      {invLowItems.map((item) => (
-                        <div key={item.id}>
-                          <div style={{ fontWeight: 600 }}>
-                            {item.name} {item.qty} / {item.par}
-                          </div>
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
+                <button className="btn" type="button" onClick={() => go("inventory")}>
+                  Manage
+                </button>
+              </div>
 
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>
-                            {item.category}
-                          </div>
-
-                          <div
-                            style={{
-                              height: 6,
-                              background: "#2a2a2a",
-                              borderRadius: 4,
-                              overflow: "hidden",
-                              marginTop: 4,
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                background:
-                                  item.qty <= item.par * 0.25
-                                    ? "#e11d48"
-                                    : item.qty <= item.par * 0.5
-                                    ? "#f97316"
-                                    : "#22c55e",
-                                height: "100%",
-                              }}
-                            />
+              {invCatStats.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {invCatStats.map((x) => {
+                    const pct = x.par > 0 ? x.pctClamped : 0;
+                    const label = x.category;
+                    return (
+                      <div key={label} style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                          <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                            {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span>No low items below par.</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-            <button className="btn" type="button" onClick={() => go("needs")}>
-              View all
-            </button>
-          </div>
-
-          {needsOpen.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {needsOpen.map((n) => {
-                const pr = Number(n?.priority || 0);
-                const urgency = String(n?.urgency || "").toLowerCase();
-                const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
-                const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
-                return (
-                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      {pill(tone.toUpperCase(), tone)}
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-                    </div>
-                    <div className="helper" style={{ marginTop: 6 }}>
-                      {urgency ? `${urgency}` : "open"} · priority {pr}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
-              View all
-            </button>
-          </div>
-
-          {pledgesSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {pledgesSorted.map((p) => {
-                const status = String(p?.status || "").toLowerCase();
-                const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
-                const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
-                const type = safeStr(p?.type || "").trim();
-                const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
-                const unit = safeStr(p?.unit || "").trim();
-                const when = fmtDT(p?.created_at);
-                return (
-                  <div key={p.id} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      {pill(status || "pledge", tone)}
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                        {who}{type ? ` · ${type}` : ""}
+                        <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct * 100}%`, background: "rgba(255,0,0,0.55)" }} />
+                        </div>
                       </div>
-                    </div>
+                    );
+                  })}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
                     <div className="helper">
-                      {amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}
+                      {invLowItems.length ? (
+                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                          {invLowItems.map((item) => (
+                            <div key={item.id}>
+                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                                <div
+                                  style={{
+                                    width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
+                                    background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
+                                    height: "100%",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span>No low items below par.</span>
+                      )}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
+              )}
             </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
-          )}
-        </div>
+
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
+                <button className="btn" type="button" onClick={() => go("needs")}>
+                  View all
+                </button>
+              </div>
+
+              {needsOpen.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {needsOpen.map((n) => {
+                    const pr = Number(n?.priority || 0);
+                    const urgency = String(n?.urgency || "").toLowerCase();
+                    const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
+                    const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
+                    return (
+                      <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          {pill(tone.toUpperCase(), tone)}
+                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
+                        </div>
+                        <div className="helper" style={{ marginTop: 6 }}>
+                          {urgency ? `${urgency}` : "open"} · priority {pr}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
+              )}
+            </div>
+
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
+                <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
+                  View all
+                </button>
+              </div>
+
+              {pledgesSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {pledgesSorted.map((p) => {
+                    const status = String(p?.status || "").toLowerCase();
+                    const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
+                    const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
+                    const type = safeStr(p?.type || "").trim();
+                    const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
+                    const unit = safeStr(p?.unit || "").trim();
+                    const when = fmtDT(p?.created_at);
+                    return (
+                      <div key={p.id} style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          {pill(status || "pledge", tone)}
+                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                            {who}{type ? ` · ${type}` : ""}
+                          </div>
+                        </div>
+                        <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
+              )}
+            </div>
           </>
         )}
       </div>
