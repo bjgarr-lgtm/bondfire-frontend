@@ -16,7 +16,27 @@ function safeStr(v) {
   return String(v ?? "");
 }
 
+function readParMap(orgId) {
+  try {
+    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
 
+function writeParMap(orgId, obj) {
+  try {
+    localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
+  } catch {}
+}
+
+function itemKeyFromFields({ name, unit, category, location }) {
+  const n = safeStr(name).trim().toLowerCase();
+  const u = safeStr(unit).trim().toLowerCase();
+  const c = safeStr(category).trim().toLowerCase();
+  const l = safeStr(location).trim().toLowerCase();
+  return `${n}|${u}|${c}|${l}`;
+}
 
 export default function Inventory() {
   const orgId = getOrgId();
@@ -27,9 +47,9 @@ export default function Inventory() {
       return false;
     }
   }, []);
-  const [parMap, setParMap] = useState({});
+  const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
   useEffect(() => {
-    setParMap({});
+    setParMap(orgId ? readParMap(orgId) : {});
   }, [orgId]);
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
@@ -44,28 +64,6 @@ export default function Inventory() {
   const [edit, setEdit] = useState(null);
 
   const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
-
-  function mergeServerPars(rows) {
-    const next = {};
-    for (const it of Array.isArray(rows) ? rows : []) {
-      if (it?.id == null) continue;
-      const raw = it?.par;
-      const n = raw === "" || raw == null ? NaN : Number(raw);
-      next[String(it.id)] = Number.isFinite(n) && n > 0 ? n : "";
-    }
-    return next;
-  }
-
-  async function saveParToBackend(id, rawValue) {
-    if (!orgId || !id) return;
-    const par = rawValue === "" || rawValue == null ? null : Number(rawValue);
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, par }),
-    });
-  }
-
 
   async function refresh() {
     if (!orgId) return;
@@ -92,10 +90,25 @@ export default function Inventory() {
           out.push(it);
         }
         setItems(out);
-        setParMap(mergeServerPars(out));
+        // Migrate any pending par values stored under a tmp key into real item ids.
+        const pm = readParMap(orgId);
+        let changed = false;
+        for (const it of out) {
+          if (it?.id == null) continue;
+          const id = String(it.id);
+          if (pm[id] != null) continue;
+          const tmpKey = `tmp:${itemKeyFromFields(it)}`;
+          if (pm[tmpKey] != null) {
+            pm[id] = pm[tmpKey];
+            delete pm[tmpKey];
+            changed = true;
+          }
+        }
+        if (changed) writeParMap(orgId, pm);
+        setParMap(pm);
       } else {
         setItems(raw);
-        setParMap(mergeServerPars(raw));
+        setParMap(readParMap(orgId));
       }
     } catch (e) {
       console.error(e);
@@ -171,6 +184,12 @@ export default function Inventory() {
     const unit = safeStr(form.unit).trim();
     const category = safeStr(form.category).trim();
     const parNum = form.par === "" ? null : Number(form.par);
+    if (parNum != null && Number.isFinite(parNum) && orgId) {
+      const pm = { ...(readParMap(orgId) || {}) };
+      pm[`tmp:${itemKeyFromFields({ ...form, category })}`] = parNum;
+      writeParMap(orgId, pm);
+      setParMap(pm);
+    }
     const location = safeStr(form.location).trim();
     const notes = safeStr(form.notes).trim();
     const is_public = !!form.is_public;
@@ -182,27 +201,14 @@ export default function Inventory() {
       payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
     }
 
-    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, par: Number.isFinite(parNum) && parNum > 0 ? parNum : null }),
+      body: JSON.stringify(payload),
     });
 
-    const createdItem = created?.item
-      ? { ...created.item, name, category, location, notes, unit, qty, is_public }
-      : null;
-
-    if (createdItem?.id) {
-      setItems((prev) => [createdItem, ...(Array.isArray(prev) ? prev : [])]);
-      setParMap((prev) => ({
-        ...(prev || {}),
-        [String(createdItem.id)]: Number.isFinite(parNum) && parNum > 0 ? parNum : "",
-      }));
-    } else {
-      refresh().catch(console.error);
-    }
-
     setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+    setTimeout(() => refresh().catch(console.error), 300);
   }
 
   function openItem(it) {
@@ -211,7 +217,7 @@ export default function Inventory() {
       id: it.id,
       name: it.name || "",
       qty: it.qty ?? 0,
-      par: it?.par ?? parMap?.[String(it.id)] ?? "",
+      par: parMap?.[String(it.id)] ?? "",
       unit: it.unit || "",
       category: it.category || "",
       location: it.location || "",
@@ -229,7 +235,18 @@ export default function Inventory() {
     if (!orgId || !edit?.id) return;
     setErr("");
     try {
+      // Persist par map changes from the modal (table edits already do this, but modal edits didn't).
       const idStr = String(edit.id);
+      const nextPm = { ...(readParMap(orgId) || {}) };
+      if (edit.par === "" || edit.par == null) {
+        delete nextPm[idStr];
+      } else {
+        const pv = Number(edit.par);
+        nextPm[idStr] = Number.isFinite(pv) ? pv : "";
+      }
+      writeParMap(orgId, nextPm);
+      setParMap(nextPm);
+
       const orgKey = getCachedOrgKey(orgId);
       const is_public = !!edit.is_public;
       const qty = Number.isFinite(Number(edit.qty)) ? Number(edit.qty) : 0;
@@ -268,39 +285,14 @@ export default function Inventory() {
         };
       }
 
-      const saved = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...payload,
-          par: edit.par === "" || edit.par == null ? null : Number(edit.par),
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const savedItem = saved?.item
-        ? {
-            ...saved.item,
-            name: safeStr(edit.name).trim(),
-            qty,
-            unit: safeStr(edit.unit).trim(),
-            category: safeStr(edit.category).trim(),
-            location: safeStr(edit.location).trim(),
-            notes: safeStr(edit.notes),
-            is_public,
-          }
-        : null;
-
-      if (savedItem?.id) {
-        setItems((prev) => (Array.isArray(prev) ? prev.map((it) => (it.id === savedItem.id ? savedItem : it)) : prev));
-        setParMap((prev) => ({
-          ...(prev || {}),
-          [idStr]: edit.par === "" || edit.par == null ? "" : (Number.isFinite(Number(edit.par)) ? Number(edit.par) : ""),
-        }));
-      } else {
-        refresh().catch(console.error);
-      }
-
       closeModal();
+      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -314,13 +306,8 @@ export default function Inventory() {
       await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory?id=${encodeURIComponent(edit.id)}`, {
         method: "DELETE",
       });
-      setItems((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== edit.id) : prev));
-      setParMap((prev) => {
-        const next = { ...(prev || {}) };
-        delete next[String(edit.id)];
-        return next;
-      });
       closeModal();
+      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -417,14 +404,11 @@ export default function Inventory() {
                           }}
                           onChange={(e) => {
                             const v = e.target.value;
-                            setParMap((prev) => ({ ...(prev || {}), [idStr]: v === "" ? "" : Number(v) }));
-                          }}
-                          onBlur={(e) => {
-                            const v = e.target.value;
-                            saveParToBackend(idStr, v).catch((er) => {
-                              console.error(er);
-                              setErr(er?.message || String(er));
-                              refresh().catch(console.error);
+                            setParMap((prev) => {
+                              const next = { ...(prev || {}) };
+                              next[idStr] = v === "" ? "" : Number(v);
+                              writeParMap(orgId, next);
+                              return next;
                             });
                           }}
                           style={{ width: "100%" }}
@@ -485,14 +469,11 @@ export default function Inventory() {
                       }}
                       onChange={(e) => {
                         const v = e.target.value;
-                        setParMap((prev) => ({ ...(prev || {}), [String(it.id)]: v === "" ? "" : Number(v) }));
-                      }}
-                      onBlur={(e) => {
-                        const v = e.target.value;
-                        saveParToBackend(String(it.id), v).catch((er) => {
-                          console.error(er);
-                          setErr(er?.message || String(er));
-                          refresh().catch(console.error);
+                        setParMap((prev) => {
+                          const next = { ...(prev || {}) };
+                          next[String(it.id)] = v === "" ? "" : Number(v);
+                          writeParMap(orgId, next);
+                          return next;
                         });
                       }}
                       style={{ width: 90 }}
