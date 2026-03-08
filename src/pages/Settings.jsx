@@ -32,7 +32,7 @@ async function authFetch(path, opts = {}) {
 
   // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
-    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges|public\/inbox)|invites\/redeem)\b/.test(
+    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges)|invites\/redeem)\b/.test(
       relative
     );
 
@@ -128,7 +128,7 @@ export default function Settings() {
       ["invites", "Invites"],
       ["members", "Members"],
       ["public", "Public page"],
-      ["public-inbox", "Public inbox"],
+      ["public-inbox", "Public Inbox"],
       ["newsletter", "Newsletter"],
       ["pledges", "Pledges"],
       ["security", "Security"],
@@ -493,6 +493,7 @@ React.useEffect(() => {
   const [publicInboxItems, setPublicInboxItems] = React.useState([]);
   const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
   const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
+  const [publicInboxDrafts, setPublicInboxDrafts] = React.useState({});
 
   const loadPublicInbox = React.useCallback(async () => {
     if (!orgId) return;
@@ -502,7 +503,18 @@ React.useEffect(() => {
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
         method: "GET",
       });
-      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+      const items = Array.isArray(r.items) ? r.items : [];
+      setPublicInboxItems(items);
+      const nextDrafts = {};
+      for (const item of items) {
+        const id = String(item?.id || "");
+        if (!id) continue;
+        nextDrafts[id] = {
+          review_status: String(item?.review_status || "new"),
+          admin_note: String(item?.admin_note || ""),
+        };
+      }
+      setPublicInboxDrafts(nextDrafts);
     } catch (e) {
       setPublicInboxItems([]);
       setPublicInboxMsg(e.message || "Failed to load public inbox");
@@ -512,29 +524,52 @@ React.useEffect(() => {
   }, [orgId]);
 
   React.useEffect(() => {
-    if (tab === "public-inbox") {
-      loadPublicInbox();
-    }
+    if (tab === "public-inbox") loadPublicInbox();
   }, [tab, loadPublicInbox]);
 
-  const savePublicInboxItem = async (item, patch) => {
-    if (!orgId || !item?.id) return;
+  const updatePublicInboxDraft = (id, patch) => {
+    const key = String(id || "");
+    if (!key) return;
+    setPublicInboxDrafts((prev) => ({
+      ...prev,
+      [key]: {
+        review_status: String(prev?.[key]?.review_status || "new"),
+        admin_note: String(prev?.[key]?.admin_note || ""),
+        ...patch,
+      },
+    }));
+  };
+
+  const savePublicInboxItem = async (item) => {
+    const id = String(item?.id || "");
+    if (!orgId || !id) return;
+    const draft = publicInboxDrafts?.[id] || {};
     setPublicInboxMsg("");
     setPublicInboxBusy(true);
     try {
-      const body = {
-        type: String(item.type || "intake"),
-        id: String(item.id),
-        review_status: patch?.review_status ?? item.review_status ?? "new",
-        admin_note: patch?.admin_note ?? item.admin_note ?? "",
-      };
       const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
         method: "PUT",
-        body,
+        body: {
+          type: "intake",
+          id,
+          review_status: String(draft.review_status || "new"),
+          admin_note: String(draft.admin_note || ""),
+        },
       });
-      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+      const items = Array.isArray(r.items) ? r.items : [];
+      setPublicInboxItems(items);
+      const nextDrafts = {};
+      for (const row of items) {
+        const rid = String(row?.id || "");
+        if (!rid) continue;
+        nextDrafts[rid] = {
+          review_status: String(row?.review_status || "new"),
+          admin_note: String(row?.admin_note || ""),
+        };
+      }
+      setPublicInboxDrafts(nextDrafts);
       setPublicInboxMsg("Saved.");
-      setTimeout(() => setPublicInboxMsg(""), 900);
+      setTimeout(() => setPublicInboxMsg(""), 1000);
     } catch (e) {
       setPublicInboxMsg(e.message || "Failed to save public inbox item");
     } finally {
@@ -1175,59 +1210,54 @@ React.useEffect(() => {
         </div>
       )}
 
+
+
       {/* Public Inbox */}
       {tab === "public-inbox" && (
         <div className="card" style={{ padding: 16 }}>
-          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <h2 style={{ marginTop: 0, marginBottom: 0, flex: 1 }}>Public Inbox</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <h2 style={{ marginTop: 0, marginBottom: 6 }}>Public Inbox</h2>
+              <div className="helper">
+                Review public Get Help, Offer Resources, and Volunteer submissions here. Meeting RSVPs stay attached to meetings.
+              </div>
+            </div>
             <button className="btn" type="button" onClick={() => loadPublicInbox()} disabled={publicInboxBusy}>
               {publicInboxBusy ? "Refreshing…" : "Refresh"}
             </button>
           </div>
 
-          <div className="helper" style={{ marginTop: 8 }}>
-            Review public Get Help, Offer Resources, and Volunteer submissions here. Meeting RSVPs stay attached to meetings.
+          <div style={{ marginTop: 10 }}>
+            {publicInboxMsg ? <div className={publicInboxMsg.includes("Saved") ? "success" : "error"}>{publicInboxMsg}</div> : null}
           </div>
 
-          {publicInboxMsg ? (
-            <div className={publicInboxMsg.toLowerCase().includes("fail") ? "error" : "helper"} style={{ marginTop: 8 }}>
-              {publicInboxMsg}
-            </div>
-          ) : null}
-
-          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-            {publicInboxItems.length === 0 ? (
-              <div className="helper">No public inbox items yet.</div>
-            ) : (
-              publicInboxItems.map((item) => {
-                const title = item?.title || (item?.source_kind === "offer_resources" ? "Offer Resources" : item?.source_kind === "volunteer" ? "Volunteer" : "Get Help");
-                const who = item?.name || "anonymous";
-                const contact = item?.contact || "";
-                const created = item?.created_at ? new Date(item.created_at).toLocaleString() : "";
-                const details = item?.details || item?.extra || "";
-                const status = item?.review_status || "new";
-                const adminNote = item?.admin_note || "";
+          {publicInboxItems.length ? (
+            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+              {publicInboxItems.map((item) => {
+                const id = String(item?.id || "");
+                const draft = publicInboxDrafts?.[id] || { review_status: String(item?.review_status || "new"), admin_note: String(item?.admin_note || "") };
+                const title = String(item?.title || item?.source_kind || "Public item");
+                const who = String(item?.name || "anonymous");
+                const contact = String(item?.contact || "");
+                const details = String(item?.details || "");
+                const createdAt = Number(item?.created_at || 0);
                 return (
-                  <div key={item.id} className="card" style={{ padding: 12, border: "1px solid #222" }}>
-                    <div className="row" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <div style={{ flex: "2 1 320px", minWidth: 260, display: "grid", gap: 8 }}>
-                        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <strong>{title}</strong>
-                          <span className="helper">{created}</span>
-                        </div>
-                        <div><strong>{who}</strong></div>
+                  <div key={id} className="card" style={{ padding: 12 }}>
+                    <div className="bf-two" style={{ gap: 14, alignItems: "start" }}>
+                      <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
+                        <div style={{ fontWeight: 900 }}>{title} {createdAt ? new Date(createdAt).toLocaleString() : ""}</div>
+                        <div style={{ fontWeight: 800 }}>{who}</div>
                         {contact ? <div style={{ overflowWrap: "anywhere" }}>{contact}</div> : null}
-                        {details ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{details}</div> : <div className="helper">No details.</div>}
+                        {details ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{details}</div> : null}
                       </div>
 
-                      <div style={{ flex: "1 1 260px", minWidth: 240, display: "grid", gap: 8 }}>
+                      <div style={{ minWidth: 260, display: "grid", gap: 10 }}>
                         <label className="grid" style={{ gap: 6 }}>
                           <span className="helper">Review status</span>
                           <select
                             className="input"
-                            value={status}
-                            onChange={(e) => savePublicInboxItem(item, { review_status: e.target.value })}
-                            disabled={publicInboxBusy}
+                            value={draft.review_status}
+                            onChange={(e) => updatePublicInboxDraft(id, { review_status: e.target.value })}
                           >
                             <option value="new">new</option>
                             <option value="reviewed">reviewed</option>
@@ -1240,26 +1270,37 @@ React.useEffect(() => {
                           <span className="helper">Admin note</span>
                           <textarea
                             className="textarea"
-                            rows={4}
-                            defaultValue={adminNote}
+                            rows={3}
+                            value={draft.admin_note}
+                            onChange={(e) => updatePublicInboxDraft(id, { admin_note: e.target.value })}
                             placeholder="Notes for your team"
-                            onBlur={(e) => {
-                              const next = String(e.target.value || "");
-                              if (next !== String(adminNote || "")) {
-                                savePublicInboxItem(item, { admin_note: next });
-                              }
-                            }}
                           />
                         </label>
+
+                        <div className="row" style={{ gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                          <button
+                            className="btn-red"
+                            type="button"
+                            onClick={() => savePublicInboxItem(item)}
+                            disabled={publicInboxBusy}
+                          >
+                            {publicInboxBusy ? "Saving…" : "Save"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 14 }}>
+              {publicInboxBusy ? "Loading public inbox…" : "No public inbox items yet."}
+            </div>
+          )}
         </div>
       )}
+
 
       {/* Newsletter */}
       {tab === "newsletter" && (

@@ -171,7 +171,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const trendUp = last >= first;
 
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", overflow: "hidden" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
       <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -487,10 +487,13 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              width: "100%",
+              boxSizing: "border-box",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={120} height={18} />
+            <Sparkline values={historySeries[key]} width={100} height={18} />
           </div>
         ),
       };
@@ -702,7 +705,7 @@ export default function Overview() {
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
                   Manage
                 </button>
               </div>
