@@ -16,46 +16,7 @@ function safeStr(v) {
   return String(v ?? "");
 }
 
-function readParMap(orgId) {
-  try {
-    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
 
-function writeParMap(orgId, obj) {
-  try {
-    localStorage.setItem(`bf_inv_par_${orgId}`, JSON.stringify(obj || {}));
-  } catch {}
-}
-
-async function saveParValue(orgId, id, value) {
-  if (!orgId || !id) return;
-  const payload = { id, par: value === "" || value == null ? null : Number(value) };
-  await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
-function itemKeyFromFields({ name, unit, category, location }) {
-  const n = safeStr(name).trim().toLowerCase();
-  const u = safeStr(unit).trim().toLowerCase();
-  const c = safeStr(category).trim().toLowerCase();
-  const l = safeStr(location).trim().toLowerCase();
-  return `${n}|${u}|${c}|${l}`;
-}
-
-function currentParFromItem(it, parMap) {
-  const id = it?.id != null ? String(it.id) : "";
-  const backendPar = Number(it?.par);
-  if (Number.isFinite(backendPar) && backendPar > 0) return backendPar;
-  const raw = parMap?.[id];
-  const localPar = raw === "" || raw == null ? NaN : Number(raw);
-  return Number.isFinite(localPar) && localPar > 0 ? localPar : "";
-}
 
 export default function Inventory() {
   const orgId = getOrgId();
@@ -66,9 +27,9 @@ export default function Inventory() {
       return false;
     }
   }, []);
-  const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
+  const [parMap, setParMap] = useState({});
   useEffect(() => {
-    setParMap(orgId ? readParMap(orgId) : {});
+    setParMap({});
   }, [orgId]);
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
@@ -83,6 +44,28 @@ export default function Inventory() {
   const [edit, setEdit] = useState(null);
 
   const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+
+  function mergeServerPars(rows) {
+    const next = {};
+    for (const it of Array.isArray(rows) ? rows : []) {
+      if (it?.id == null) continue;
+      const raw = it?.par;
+      const n = raw === "" || raw == null ? NaN : Number(raw);
+      next[String(it.id)] = Number.isFinite(n) && n > 0 ? n : "";
+    }
+    return next;
+  }
+
+  async function saveParToBackend(id, rawValue) {
+    if (!orgId || !id) return;
+    const par = rawValue === "" || rawValue == null ? null : Number(rawValue);
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, par }),
+    });
+  }
+
 
   async function refresh() {
     if (!orgId) return;
@@ -109,59 +92,10 @@ export default function Inventory() {
           out.push(it);
         }
         setItems(out);
-        const pm = readParMap(orgId);
-        const nextPm = { ...pm };
-        let localChanged = false;
-        const migrate = [];
-        for (const it of out) {
-          if (it?.id == null) continue;
-          const id = String(it.id);
-          const backendPar = Number(it?.par);
-          const tmpKey = `tmp:${itemKeyFromFields(it)}`;
-          const localRaw = nextPm[id] != null ? nextPm[id] : nextPm[tmpKey];
-          const localPar = localRaw === "" || localRaw == null ? NaN : Number(localRaw);
-          if (Number.isFinite(backendPar) && backendPar > 0) {
-            if (nextPm[id] != null) {
-              delete nextPm[id];
-              localChanged = true;
-            }
-            if (nextPm[tmpKey] != null) {
-              delete nextPm[tmpKey];
-              localChanged = true;
-            }
-            continue;
-          }
-          if (Number.isFinite(localPar) && localPar > 0) {
-            nextPm[id] = localPar;
-            if (nextPm[tmpKey] != null) {
-              delete nextPm[tmpKey];
-              localChanged = true;
-            }
-            migrate.push({ id, par: localPar });
-          }
-        }
-        if (localChanged) writeParMap(orgId, nextPm);
-        setParMap(nextPm);
-        if (migrate.length) {
-          Promise.allSettled(migrate.map((m) => saveParValue(orgId, m.id, m.par)))
-            .then(() => refresh().catch(console.error))
-            .catch(() => {});
-        }
+        setParMap(mergeServerPars(out));
       } else {
         setItems(raw);
-        const pm = readParMap(orgId);
-        const nextPm = { ...pm };
-        let localChanged = false;
-        for (const it of raw) {
-          const id = it?.id != null ? String(it.id) : "";
-          const backendPar = Number(it?.par);
-          if (Number.isFinite(backendPar) && backendPar > 0 && nextPm[id] != null) {
-            delete nextPm[id];
-            localChanged = true;
-          }
-        }
-        if (localChanged) writeParMap(orgId, nextPm);
-        setParMap(nextPm);
+        setParMap(mergeServerPars(raw));
       }
     } catch (e) {
       console.error(e);
@@ -203,7 +137,7 @@ export default function Inventory() {
     const pm = parMap || {};
     const meta = (it) => {
       const id = it?.id != null ? String(it.id) : "";
-      const parRaw = currentParFromItem(it, pm);
+      const parRaw = pm?.[id];
       const parV = parRaw === "" || parRaw == null ? NaN : Number(parRaw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : null;
       const qtyV = Number(it?.qty);
@@ -242,20 +176,33 @@ export default function Inventory() {
     const is_public = !!form.is_public;
 
     const orgKey = getCachedOrgKey(orgId);
-    let payload = { name, qty, unit, category, location, notes, is_public, par: Number.isFinite(parNum) && parNum > 0 ? parNum : null };
+    let payload = { name, qty, unit, category, location, notes, is_public };
     if (orgKey && !is_public) {
       const enc = await encryptWithOrgKey(orgKey, JSON.stringify({ name, category, location, notes }));
       payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
     }
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    const created = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, par: Number.isFinite(parNum) && parNum > 0 ? parNum : null }),
     });
 
+    const createdItem = created?.item
+      ? { ...created.item, name, category, location, notes, unit, qty, is_public }
+      : null;
+
+    if (createdItem?.id) {
+      setItems((prev) => [createdItem, ...(Array.isArray(prev) ? prev : [])]);
+      setParMap((prev) => ({
+        ...(prev || {}),
+        [String(createdItem.id)]: Number.isFinite(parNum) && parNum > 0 ? parNum : "",
+      }));
+    } else {
+      refresh().catch(console.error);
+    }
+
     setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
-    setTimeout(() => refresh().catch(console.error), 300);
   }
 
   function openItem(it) {
@@ -264,7 +211,7 @@ export default function Inventory() {
       id: it.id,
       name: it.name || "",
       qty: it.qty ?? 0,
-      par: currentParFromItem(it, parMap),
+      par: it?.par ?? parMap?.[String(it.id)] ?? "",
       unit: it.unit || "",
       category: it.category || "",
       location: it.location || "",
@@ -282,6 +229,7 @@ export default function Inventory() {
     if (!orgId || !edit?.id) return;
     setErr("");
     try {
+      const idStr = String(edit.id);
       const orgKey = getCachedOrgKey(orgId);
       const is_public = !!edit.is_public;
       const qty = Number.isFinite(Number(edit.qty)) ? Number(edit.qty) : 0;
@@ -295,7 +243,6 @@ export default function Inventory() {
         location: safeStr(edit.location).trim(),
         notes: safeStr(edit.notes),
         is_public,
-        par: edit.par === "" || edit.par == null ? null : Number(edit.par),
       };
 
       if (orgKey && !is_public) {
@@ -321,14 +268,39 @@ export default function Inventory() {
         };
       }
 
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      const saved = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          par: edit.par === "" || edit.par == null ? null : Number(edit.par),
+        }),
       });
 
+      const savedItem = saved?.item
+        ? {
+            ...saved.item,
+            name: safeStr(edit.name).trim(),
+            qty,
+            unit: safeStr(edit.unit).trim(),
+            category: safeStr(edit.category).trim(),
+            location: safeStr(edit.location).trim(),
+            notes: safeStr(edit.notes),
+            is_public,
+          }
+        : null;
+
+      if (savedItem?.id) {
+        setItems((prev) => (Array.isArray(prev) ? prev.map((it) => (it.id === savedItem.id ? savedItem : it)) : prev));
+        setParMap((prev) => ({
+          ...(prev || {}),
+          [idStr]: edit.par === "" || edit.par == null ? "" : (Number.isFinite(Number(edit.par)) ? Number(edit.par) : ""),
+        }));
+      } else {
+        refresh().catch(console.error);
+      }
+
       closeModal();
-      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -342,8 +314,13 @@ export default function Inventory() {
       await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory?id=${encodeURIComponent(edit.id)}`, {
         method: "DELETE",
       });
+      setItems((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== edit.id) : prev));
+      setParMap((prev) => {
+        const next = { ...(prev || {}) };
+        delete next[String(edit.id)];
+        return next;
+      });
       closeModal();
-      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -399,7 +376,7 @@ export default function Inventory() {
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {sorted.map((it) => {
                 const idStr = String(it.id);
-                const raw = currentParFromItem(it, parMap);
+                const raw = parMap?.[idStr];
                 const parV = raw === "" || raw == null ? NaN : Number(raw);
                 const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
                 const qtyV = Number(it?.qty);
@@ -429,29 +406,26 @@ export default function Inventory() {
                         <input
                           className="input"
                           type="number"
-                          value={parMap?.[idStr] ?? currentParFromItem(it, parMap)}
+                          value={parMap?.[idStr] ?? ""}
                           onFocus={(e) => {
-                            try { e.target.select(); } catch {}
+                            const v = String(e.target.value || "");
+                            if (v === "0") {
+                              setParMap((prev) => ({ ...prev, [idStr]: "" }));
+                            } else {
+                              try { e.target.select(); } catch {}
+                            }
                           }}
                           onChange={(e) => {
                             const v = e.target.value;
                             setParMap((prev) => ({ ...(prev || {}), [idStr]: v === "" ? "" : Number(v) }));
                           }}
-                          onBlur={async (e) => {
+                          onBlur={(e) => {
                             const v = e.target.value;
-                            try {
-                              await saveParValue(orgId, idStr, v === "" ? null : Number(v));
-                              setParMap((prev) => {
-                                const next = { ...(prev || {}) };
-                                if (v === "" || v == null) delete next[idStr];
-                                else next[idStr] = Number(v);
-                                writeParMap(orgId, next);
-                                return next;
-                              });
-                              await refresh();
-                            } catch (err) {
-                              setErr(err?.message || String(err));
-                            }
+                            saveParToBackend(idStr, v).catch((er) => {
+                              console.error(er);
+                              setErr(er?.message || String(er));
+                              refresh().catch(console.error);
+                            });
                           }}
                           style={{ width: "100%" }}
                         />
@@ -500,30 +474,26 @@ export default function Inventory() {
                     <input
                       className="input"
                       type="number"
-                      value={parMap?.[String(it.id)] ?? currentParFromItem(it, parMap)}
+                      value={parMap?.[String(it.id)] ?? ""}
                       onFocus={(e) => {
-                        try { e.target.select(); } catch {}
+                        const v = String(e.target.value || "");
+                        if (v === "0") {
+                          setParMap((prev) => ({ ...prev, [String(it.id)]: "" }));
+                        } else {
+                          try { e.target.select(); } catch {}
+                        }
                       }}
                       onChange={(e) => {
                         const v = e.target.value;
                         setParMap((prev) => ({ ...(prev || {}), [String(it.id)]: v === "" ? "" : Number(v) }));
                       }}
-                      onBlur={async (e) => {
-                        const idStr = String(it.id);
+                      onBlur={(e) => {
                         const v = e.target.value;
-                        try {
-                          await saveParValue(orgId, idStr, v === "" ? null : Number(v));
-                          setParMap((prev) => {
-                            const next = { ...(prev || {}) };
-                            if (v === "" || v == null) delete next[idStr];
-                            else next[idStr] = Number(v);
-                            writeParMap(orgId, next);
-                            return next;
-                          });
-                          await refresh();
-                        } catch (err) {
-                          setErr(err?.message || String(err));
-                        }
+                        saveParToBackend(String(it.id), v).catch((er) => {
+                          console.error(er);
+                          setErr(er?.message || String(er));
+                          refresh().catch(console.error);
+                        });
                       }}
                       style={{ width: 90 }}
                     />
@@ -531,7 +501,7 @@ export default function Inventory() {
                   <td>
                     {(() => {
                       const id = String(it.id);
-                      const raw = currentParFromItem(it, parMap);
+                      const raw = parMap?.[id];
                       const parV = raw === "" || raw == null ? NaN : Number(raw);
                       const par = Number.isFinite(parV) && parV > 0 ? parV : null;
                       const qtyV = Number(it?.qty);

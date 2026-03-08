@@ -23,23 +23,6 @@ async function safeAll(env, sql, binds = [], fallback = []) {
   }
 }
 
-
-async function ensureInventoryParsTable(db) {
-  try {
-    await db.prepare(
-      `CREATE TABLE IF NOT EXISTS inventory_pars (
-        org_id TEXT NOT NULL,
-        inventory_id TEXT NOT NULL,
-        par REAL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (org_id, inventory_id)
-      )`
-    ).run();
-  } catch (e) {
-    console.warn("dashboard ensureInventoryParsTable failed", e);
-  }
-}
-
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
@@ -105,14 +88,11 @@ export async function onRequestGet({ env, request, params }) {
     []
   );
 
-  await ensureInventoryParsTable(env.BF_DB);
-
   const inventory = await safeAll(
     env,
-    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.encrypted_blob, i.key_version, ip.par
+    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.encrypted_blob, i.key_version, COALESCE(p.par, NULL) AS par
      FROM inventory i
-     LEFT JOIN inventory_pars ip
-       ON ip.org_id = i.org_id AND ip.inventory_id = i.id
+     LEFT JOIN inventory_pars p ON p.org_id = i.org_id AND p.inventory_id = i.id
      WHERE i.org_id = ?
      ORDER BY COALESCE(i.updated_at, i.created_at) DESC LIMIT 5`,
     [orgId],
