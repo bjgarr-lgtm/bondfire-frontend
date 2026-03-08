@@ -60,7 +60,17 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       try {
         const decStr = await decryptWithOrgKey(orgKey, blob);
         const dec = JSON.parse(decStr);
-        out.push({ ...r, ...dec });
+        out.push({
+          ...r,
+          ...dec,
+          category:
+            dec?.category ??
+            dec?.cat ??
+            r?.category ??
+            r?.cat ??
+            r?.Category ??
+            r?.CATEGORY,
+        });
         continue;
       } catch {
         // fall through
@@ -171,7 +181,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const trendUp = last >= first;
 
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: "100%", overflow: "hidden" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
       <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -196,7 +206,7 @@ function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
 
 function MetricCardSkeleton({ icon = "⬛" }) {
   return (
-    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
         <SkeletonBox w={78} h={14} r={8} />
@@ -479,10 +489,15 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              boxSizing: "border-box",
+              width: "100%",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={120} height={18} />
+            <div style={{ width: "100%", height: 18, overflow: "hidden", boxSizing: "border-box" }}>
+              <Sparkline values={historySeries[key]} width={108} height={18} />
+            </div>
           </div>
         ),
       };
@@ -493,7 +508,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-page"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas, historySeries]);
@@ -656,7 +671,7 @@ export default function Overview() {
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
               <div className="card" style={{ padding: 14, position: "relative", minHeight: 118 }}>
                 {c.badge ? (
-                  <div style={{ position: "absolute", top: 12, right: 12 }}>
+                  <div style={{ position: "absolute", top: 10, right: 10, maxWidth: "calc(100% - 20px)" }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
                   </div>
                 ) : null}
@@ -687,7 +702,7 @@ export default function Overview() {
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
                   Manage
                 </button>
               </div>
