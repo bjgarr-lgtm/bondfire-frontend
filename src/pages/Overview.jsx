@@ -129,8 +129,6 @@ function pill(text, tone) {
   );
 }
 
-// ADD near the top (helpers/components), e.g. after pill() or before readInvPar()
-
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -170,7 +168,6 @@ function Sparkline({ values, width = 120, height = 32 }) {
   );
 }
 
-// Lightweight loading skeletons (no extra deps)
 function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
   return (
     <div
@@ -227,7 +224,6 @@ function SectionCardSkeleton({ rows = 3 }) {
   );
 }
 
-
 function readInvPar(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
@@ -272,7 +268,6 @@ export default function Overview() {
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
-  // Responsive layout helper (we do this here because inline styles can't use media queries).
   const [isNarrow, setIsNarrow] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.matchMedia && window.matchMedia("(max-width: 820px)").matches;
@@ -294,7 +289,6 @@ export default function Overview() {
   const prevCounts = useMemo(() => readPrevCounts(orgId), [orgId]);
   const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   useEffect(() => {
-    // New org, new baseline.
     setTickerDeltas({});
   }, [orgId]);
 
@@ -317,17 +311,14 @@ export default function Overview() {
     setErr("");
     setRsvpMsg("");
     try {
-      // Dashboard endpoint (counts + some previews)
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
 
       const rawCounts = d?.counts || {};
       setCounts(rawCounts);
 
-      // Pull previews if present, otherwise fetch lists
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
       const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
 
-      // Some dashboard previews are scrubbed (no encrypted_blob), which breaks categories/decrypt.
       let invRawFinal = invRaw;
       const invLooksScrubbed =
         Array.isArray(invRaw) &&
@@ -349,7 +340,6 @@ export default function Overview() {
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
 
-      // Some dashboard previews are scrubbed (missing priority/urgency/encrypted_blob). If so, fetch full needs list.
       let needsRawFinal = needsRaw;
       const needsLooksScrubbed =
         Array.isArray(needsRaw) &&
@@ -371,7 +361,6 @@ export default function Overview() {
 
       const meetsRaw = Array.isArray(d?.meetings) ? d.meetings : (await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings`))?.meetings;
 
-      // These live under Settings pages, so fetch directly.
       const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`);
       const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
       const publicInboxResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`).catch(() => ({ items: [] }));
@@ -391,7 +380,6 @@ export default function Overview() {
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
       setPublicInbox(Array.isArray(publicInboxResp?.items) ? publicInboxResp.items : Array.isArray(publicInboxResp?.submissions) ? publicInboxResp.submissions : []);
 
-      // Tickers: compute deltas vs the last refresh baseline (in this tab), then update baseline.
       try {
         const cn = countsNormalizedRef(rawCounts);
         const base = readRefreshBaseline(orgId);
@@ -409,7 +397,6 @@ export default function Overview() {
         writeRefreshBaseline(orgId, cn);
       } catch {}
 
-      // Save latest counts for the next-login fallback baseline.
       writePrevCounts(orgId, rawCounts);
       setHasLoadedOnce(true);
     } catch (e) {
@@ -422,7 +409,6 @@ export default function Overview() {
 
   useEffect(() => {
     refresh().catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
   if (!orgId) return <div style={{ padding: 16 }}>
@@ -455,6 +441,37 @@ export default function Overview() {
       subsTotal: Number(d.subsTotal || 0),
     };
   }, [tickerDeltas]);
+
+  const newsletterSpark = useMemo(() => {
+    const arr = Array.isArray(subs) ? subs : [];
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    const buckets = [];
+    for (let i = 13; i >= 0; i--) {
+      const start = now - i * dayMs;
+      const end = start + dayMs;
+      const count = arr.filter((s) => {
+        const t = Number(s?.joined || s?.created_at || 0);
+        return Number.isFinite(t) && t >= start && t < end;
+      }).length;
+      buckets.push(count);
+    }
+
+    const cum = [];
+    let run = 0;
+    for (const c of buckets) {
+      run += c;
+      cum.push(run);
+    }
+
+    const any = buckets.some((x) => x > 0);
+    if (!any) {
+      const total = arr.length;
+      return new Array(14).fill(total);
+    }
+    return cum;
+  }, [subs]);
 
   const showSkeleton = loading && !hasLoadedOnce;
 
@@ -539,43 +556,6 @@ export default function Overview() {
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
-  // ADD inside Overview() near other useMemos
-
-const newsletterSpark = useMemo(() => {
-  const arr = Array.isArray(subs) ? subs : [];
-  const now = Date.now();
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  // last 14 days, oldest -> newest
-  const buckets = [];
-  for (let i = 13; i >= 0; i--) {
-    const start = now - i * dayMs;
-    const end = start + dayMs;
-    const count = arr.filter((s) => {
-      const t = Number(s?.joined || s?.created_at || 0);
-      return Number.isFinite(t) && t >= start && t < end;
-    }).length;
-    buckets.push(count);
-  }
-
-  // cumulative looks nicer than spiky daily counts
-  const cum = [];
-  let run = 0;
-  for (const c of buckets) {
-    run += c;
-    cum.push(run);
-  }
-
-  // If there were no joins in 14d but we have subs, keep a flat line at total
-  const any = buckets.some((x) => x > 0);
-  if (!any) {
-    const total = arr.length;
-    return new Array(14).fill(total);
-  }
-  return cum;
-}, [subs]);
-
-  // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const parMap = invPar || {};
@@ -619,7 +599,6 @@ const newsletterSpark = useMemo(() => {
       };
     });
 
-    // Prefer categories with a par set, ordered by how low they are.
     out.sort((a, b) => {
       const ap = a.pct == null ? 999 : a.pct;
       const bp = b.pct == null ? 999 : b.pct;
@@ -630,7 +609,6 @@ const newsletterSpark = useMemo(() => {
     return out.slice(0, 6);
   }, [inventory, invPar]);
 
-  // Low items list: up to 4 items that are below par (qty/par < 1).
   const invLowItems = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
     const parMap = invPar || {};
@@ -639,7 +617,6 @@ const newsletterSpark = useMemo(() => {
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
       const raw = parMap?.[id];
-      // treat "" as unset
       if (raw === "" || raw == null) continue;
       const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
@@ -676,7 +653,6 @@ const newsletterSpark = useMemo(() => {
         }
       );
 
-      // Optimistic UI update
       setMeetings((prev) =>
         prev.map((m) =>
           m.id === meeting.id ? { ...m, my_rsvp: "going" } : m
@@ -700,7 +676,6 @@ const newsletterSpark = useMemo(() => {
 
   return (
     <div style={{ padding: 16 }}>
-      {/* Org name now lives in the global header; keep refresh + status messages compact. */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           {err ? <div className="helper" style={{ color: "tomato" }}>{err}</div> : null}
@@ -710,7 +685,6 @@ const newsletterSpark = useMemo(() => {
 
       <OrgKeyBackupNudge orgId={orgId} />
 
-      {/* Top metrics row: ONE row on desktop, wraps on small screens */}
       <div
         style={{
           display: "grid",
@@ -749,7 +723,6 @@ const newsletterSpark = useMemo(() => {
         )}
       </div>
 
-      {/* Main grid */}
       <div
         className="grid"
         style={{
@@ -768,7 +741,6 @@ const newsletterSpark = useMemo(() => {
           </>
         ) : (
           <>
-        {/* Public inbox */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
@@ -807,7 +779,6 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-        {/* Next meetings */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
@@ -838,7 +809,6 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-        {/* Inventory glance */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
@@ -924,7 +894,6 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-        {/* Open needs */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
@@ -958,7 +927,6 @@ const newsletterSpark = useMemo(() => {
           )}
         </div>
 
-        {/* Recent pledges */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
