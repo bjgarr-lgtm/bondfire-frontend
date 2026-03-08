@@ -1,6 +1,34 @@
 import { json, bad, now, uuid } from "../../_lib/http.js";
 import { requireOrgRole } from "../../_lib/auth.js";
 import { logActivity } from "../../_lib/activity.js";
+
+async function ensureInventoryParsTable(db) {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS inventory_pars (
+      org_id TEXT NOT NULL,
+      inventory_id TEXT NOT NULL,
+      par REAL,
+      updated_at INTEGER,
+      PRIMARY KEY (org_id, inventory_id)
+    )`
+  ).run();
+}
+
+async function saveInventoryPar(db, orgId, inventoryId, rawPar) {
+  await ensureInventoryParsTable(db);
+  const n = rawPar === "" || rawPar == null ? NaN : Number(rawPar);
+  if (!Number.isFinite(n) || n <= 0) {
+    await db.prepare(`DELETE FROM inventory_pars WHERE org_id = ? AND inventory_id = ?`).bind(orgId, inventoryId).run();
+    return null;
+  }
+  await db.prepare(
+    `INSERT INTO inventory_pars (org_id, inventory_id, par, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(org_id, inventory_id)
+     DO UPDATE SET par = excluded.par, updated_at = excluded.updated_at`
+  ).bind(orgId, inventoryId, n, now()).run();
+  return n;
+}
 async function getOrgCryptoKeyVersion(db, orgId) {
 	// org_crypto historically used either key_version or version.
 	try {
@@ -25,18 +53,22 @@ export async function onRequestGet({ env, request, params }) {
   const a = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!a.ok) return a.resp;
 
+  await ensureInventoryParsTable(env.BF_DB);
   const res = await env.BF_DB.prepare(
-    `SELECT id, name, qty, unit, category, location, notes,
-            encrypted_notes, encrypted_blob, key_version,
-            is_public, created_at, updated_at
-     FROM inventory
-     WHERE org_id = ?
-     ORDER BY created_at DESC`
+    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.location, i.notes,
+            i.encrypted_notes, i.encrypted_blob, i.key_version,
+            i.is_public, i.created_at, i.updated_at,
+            ip.par
+     FROM inventory i
+     LEFT JOIN inventory_pars ip
+       ON ip.org_id = i.org_id AND ip.inventory_id = i.id
+     WHERE i.org_id = ?
+     ORDER BY i.created_at DESC`
   )
     .bind(orgId)
     .all();
 
-  return json({ ok: true, inventory: res.results || [] });
+  return json({ ok: true, inventory: res.results || [], items: res.results || [] });
 }
 
 export async function onRequestPost({ env, request, params }) {
@@ -80,6 +112,8 @@ export async function onRequestPost({ env, request, params }) {
     )
     .run();
 
+  const savedPar = await saveInventoryPar(env.BF_DB, orgId, id, body.par);
+
   try {
     await logActivity(env, {
     orgId,
@@ -91,7 +125,23 @@ export async function onRequestPost({ env, request, params }) {
     console.error("ACTIVITY_FAIL", e);
   }
 
-  return json({ ok: true, id });
+  return json({ ok: true, id, item: {
+    id,
+    org_id: orgId,
+    name,
+    qty,
+    unit: String(body.unit || ""),
+    category: String(body.category || ""),
+    location: String(body.location || ""),
+    notes: String(body.notes || ""),
+    encrypted_notes: body.encrypted_notes ?? null,
+    encrypted_blob: body.encrypted_blob ?? null,
+    key_version: keyVersion,
+    is_public: body.is_public ? 1 : 0,
+    created_at: t,
+    updated_at: t,
+    par: savedPar,
+  } });
 }
 
 export async function onRequestPut({ env, request, params }) {
@@ -148,6 +198,8 @@ export async function onRequestPut({ env, request, params }) {
     )
     .run();
 
+  const savedPar = await saveInventoryPar(env.BF_DB, orgId, id, body.par);
+
   try {
     await logActivity(env, {
     orgId,
@@ -159,7 +211,18 @@ export async function onRequestPut({ env, request, params }) {
     console.error("ACTIVITY_FAIL", e);
   }
 
-  return json({ ok: true });
+  const item = await env.BF_DB.prepare(
+    `SELECT i.id, i.org_id, i.name, i.qty, i.unit, i.category, i.location, i.notes,
+            i.encrypted_notes, i.encrypted_blob, i.key_version,
+            i.is_public, i.created_at, i.updated_at,
+            ip.par
+     FROM inventory i
+     LEFT JOIN inventory_pars ip
+       ON ip.org_id = i.org_id AND ip.inventory_id = i.id
+     WHERE i.id = ? AND i.org_id = ?`
+  ).bind(id, orgId).first();
+
+  return json({ ok: true, item: item || { id, par: savedPar } });
 }
 
 export async function onRequestDelete({ env, request, params }) {
@@ -183,6 +246,10 @@ const label = name || shortId(id);
 
 await env.BF_DB.prepare("DELETE FROM inventory WHERE id = ? AND org_id = ?")
   .bind(id, orgId)
+  .run();
+await ensureInventoryParsTable(env.BF_DB);
+await env.BF_DB.prepare("DELETE FROM inventory_pars WHERE org_id = ? AND inventory_id = ?")
+  .bind(orgId, id)
   .run();
 
 logActivity(env, {

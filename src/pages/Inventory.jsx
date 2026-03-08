@@ -71,7 +71,7 @@ export default function Inventory() {
     setErr("");
     try {
       const data = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
-      const raw = Array.isArray(data.inventory) ? data.inventory : [];
+      const raw = Array.isArray(data.items) ? data.items : Array.isArray(data.inventory) ? data.inventory : [];
 
       const orgKey = getCachedOrgKey(orgId);
       if (orgKey) {
@@ -80,7 +80,11 @@ export default function Inventory() {
           if (it?.encrypted_blob) {
             try {
               const dec = JSON.parse(await decryptWithOrgKey(orgKey, it.encrypted_blob));
-              out.push({ ...it, ...dec });
+              out.push({
+                ...it,
+                ...dec,
+                category: dec?.category ?? dec?.cat ?? it?.category ?? it?.cat ?? "",
+              });
               continue;
             } catch {
               out.push({ ...it, name: "(encrypted)", category: it.category || "", location: "", notes: "" });

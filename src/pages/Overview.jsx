@@ -60,7 +60,11 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       try {
         const decStr = await decryptWithOrgKey(orgKey, blob);
         const dec = JSON.parse(decStr);
-        out.push({ ...r, ...dec });
+        out.push({
+          ...r,
+          ...dec,
+          category: dec?.category ?? dec?.cat ?? r?.category ?? r?.cat ?? r?.Category ?? r?.CATEGORY,
+        });
         continue;
       } catch {
         // fall through
@@ -487,10 +491,15 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              width: "100%",
+              boxSizing: "border-box",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={120} height={18} />
+            <div style={{ width: "100%", height: 18, overflow: "hidden" }}>
+              <Sparkline values={historySeries[key]} width={96} height={18} />
+            </div>
           </div>
         ),
       };
@@ -501,7 +510,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-page"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas, historySeries]);
@@ -538,16 +547,7 @@ export default function Overview() {
       .slice(0, 6);
   }, [publicInbox]);
 
-  const invPar = useMemo(() => {
-    const out = {};
-    for (const it of Array.isArray(inventory) ? inventory : []) {
-      if (it?.id == null) continue;
-      const raw = it?.par;
-      const n = raw === "" || raw == null ? NaN : Number(raw);
-      out[String(it.id)] = Number.isFinite(n) && n > 0 ? n : "";
-    }
-    return out;
-  }, [inventory]);
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
 
   const invCatStats = useMemo(() => {
     const arr = Array.isArray(inventory) ? inventory : [];
@@ -557,19 +557,8 @@ export default function Overview() {
     for (const it of arr) {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
-      const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
-      let cat = safeStr(catRaw).trim();
-      if (!cat) {
-        try {
-          for (const k of Object.keys(it || {})) {
-            if (String(k).toLowerCase() === "category") {
-              cat = safeStr(it[k]).trim();
-              break;
-            }
-          }
-        } catch {}
-      }
-      cat = (cat || "uncategorized").toLowerCase();
+      const catRaw = it?.category ?? it?.cat ?? it?.Category ?? it?.CATEGORY ?? "";
+      const cat = safeStr(catRaw).trim().toLowerCase() || "uncategorized";
 
       const id = it?.id != null ? String(it.id) : "";
       const parV = Number(parMap?.[id]);
@@ -678,7 +667,7 @@ export default function Overview() {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 14, position: "relative", minHeight: 118 }}>
+              <div className="card" style={{ padding: 14, position: "relative", minHeight: 118, overflow: "hidden" }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -711,7 +700,7 @@ export default function Overview() {
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
                   Manage
                 </button>
               </div>

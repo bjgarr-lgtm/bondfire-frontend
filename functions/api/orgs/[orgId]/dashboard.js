@@ -88,11 +88,25 @@ export async function onRequestGet({ env, request, params }) {
     []
   );
 
+  await safeFirst(
+    env,
+    `CREATE TABLE IF NOT EXISTS inventory_pars (
+      org_id TEXT NOT NULL,
+      inventory_id TEXT NOT NULL,
+      par REAL,
+      updated_at INTEGER,
+      PRIMARY KEY (org_id, inventory_id)
+    )`,
+    [],
+    null
+  );
+
   const inventory = await safeAll(
     env,
-    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.encrypted_blob, i.key_version, COALESCE(p.par, NULL) AS par
+    `SELECT i.id, i.name, i.qty, i.unit, i.category, i.encrypted_blob, i.key_version, ip.par
      FROM inventory i
-     LEFT JOIN inventory_pars p ON p.org_id = i.org_id AND p.inventory_id = i.id
+     LEFT JOIN inventory_pars ip
+       ON ip.org_id = i.org_id AND ip.inventory_id = i.id
      WHERE i.org_id = ?
      ORDER BY COALESCE(i.updated_at, i.created_at) DESC LIMIT 5`,
     [orgId],
