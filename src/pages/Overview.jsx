@@ -268,6 +268,7 @@ export default function Overview() {
   const [meetings, setMeetings] = useState([]);
   const [subs, setSubs] = useState([]);
   const [pledges, setPledges] = useState([]);
+  const [publicInbox, setPublicInbox] = useState([]);
 
   const [rsvpMsg, setRsvpMsg] = useState("");
 
@@ -305,7 +306,8 @@ export default function Overview() {
       needsOpen: Number(cc.needsOpen || cc.needs || 0),
       meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
       pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
-      subsTotal: Number(cc.subscribers || cc.subs || 0),
+      publicInbox: Number(cc.publicInbox || cc.public_inbox || cc.publicInboxOpen || 0),
+      subsTotal: Number(cc.subscribers || cc.subs || cc.subsTotal || 0),
     };
   }
 
@@ -372,6 +374,7 @@ export default function Overview() {
       // These live under Settings pages, so fetch directly.
       const subsResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/newsletter/subscribers`);
       const pledgesResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/pledges`);
+      const publicInboxResp = await api(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`).catch(() => ({ items: [] }));
 
       const pplDec = await tryDecryptList(orgId, pplRaw, "encrypted_blob");
       const invDec = await tryDecryptList(orgId, invRawFinal, "encrypted_blob");
@@ -386,6 +389,7 @@ export default function Overview() {
       setMeetings(Array.isArray(meetsDec) ? meetsDec : []);
       setSubs(Array.isArray(subsDec) ? subsDec : []);
       setPledges(Array.isArray(pledgesDec) ? pledgesDec : []);
+      setPublicInbox(Array.isArray(publicInboxResp?.items) ? publicInboxResp.items : Array.isArray(publicInboxResp?.submissions) ? publicInboxResp.submissions : []);
 
       // Tickers: compute deltas vs the last refresh baseline (in this tab), then update baseline.
       try {
@@ -398,6 +402,7 @@ export default function Overview() {
           needsOpen: hasBase ? cn.needsOpen - Number(base.needsOpen || 0) : 0,
           meetingsUpcoming: hasBase ? cn.meetingsUpcoming - Number(base.meetingsUpcoming || 0) : 0,
           pledgesActive: hasBase ? cn.pledgesActive - Number(base.pledgesActive || 0) : 0,
+          publicInbox: hasBase ? cn.publicInbox - Number(base.publicInbox || 0) : 0,
           subsTotal: hasBase ? cn.subsTotal - Number(base.subsTotal || 0) : 0,
         };
         setTickerDeltas(nextDeltas);
@@ -428,14 +433,15 @@ export default function Overview() {
   const countsNormalized = useMemo(() => {
     const c = counts || {};
     return {
-      people: Number(c.people || 0),
-      inventory: Number(c.inventory || 0),
-      needsOpen: Number(c.needsOpen || 0),
-      meetingsUpcoming: Number(c.meetingsUpcoming || 0),
-      pledgesActive: Number(c.pledgesActive || c.pledges || 0),
-      subsTotal: Number(c.subscribers || c.subs || 0),
+      people: Number(c.people || people.length || 0),
+      inventory: Number(c.inventory || inventory.length || 0),
+      needsOpen: Number(c.needsOpen || c.needs || needs.filter((n) => String(n?.status || "").toLowerCase() === "open").length || 0),
+      meetingsUpcoming: Number(c.meetingsUpcoming || meetings.filter((m) => Number(m?.starts_at) > 0).length || 0),
+      pledgesActive: Number(c.pledgesActive || c.pledges || pledges.length || 0),
+      publicInbox: Number(c.publicInbox || c.public_inbox || c.publicInboxOpen || publicInbox.length || 0),
+      subsTotal: Number(c.subscribers || c.subs || c.subsTotal || subs.length || 0),
     };
-  }, [counts]);
+  }, [counts, people, inventory, needs, meetings, pledges, publicInbox, subs]);
 
   const deltas = useMemo(() => {
     const d = tickerDeltas || {};
@@ -445,11 +451,95 @@ export default function Overview() {
       needsOpen: Number(d.needsOpen || 0),
       meetingsUpcoming: Number(d.meetingsUpcoming || 0),
       pledgesActive: Number(d.pledgesActive || 0),
+      publicInbox: Number(d.publicInbox || 0),
       subsTotal: Number(d.subsTotal || 0),
     };
   }, [tickerDeltas]);
 
-// ADD inside Overview() near other useMemos
+  const showSkeleton = loading && !hasLoadedOnce;
+
+  const topCards = useMemo(() => {
+    const mk = (key, title, icon, value, sub, to, extra = null) => {
+      const db = deltaBadge(deltas[key]);
+      return {
+        key,
+        title,
+        icon,
+        value,
+        sub,
+        to,
+        badge: db,
+        extra,
+      };
+    };
+    const subsExtra = subs.length > 0 ? (
+      <div
+        style={{
+          marginTop: 8,
+          borderRadius: 8,
+          padding: "4px 6px",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+        title="subscriber trend (last 14 days)"
+      >
+        <Sparkline values={newsletterSpark} width={120} height={18} />
+      </div>
+    ) : null;
+    return [
+      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
+      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
+      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
+      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter", subsExtra),
+    ];
+  }, [countsNormalized, deltas, newsletterSpark, subs.length]);
+
+  const meetingsSorted = useMemo(() => {
+    const arr = Array.isArray(meetings) ? meetings : [];
+    return arr
+      .filter((m) => Number(m?.starts_at) > 0)
+      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
+      .slice(0, 3);
+  }, [meetings]);
+
+  const needsOpen = useMemo(() => {
+    const arr = Array.isArray(needs) ? needs : [];
+    return arr
+      .filter((n) => String(n?.status || "").toLowerCase() === "open")
+      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
+      .slice(0, 6);
+  }, [needs]);
+
+  const subsSorted = useMemo(() => {
+    const arr = Array.isArray(subs) ? subs : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
+      .slice(0, 6);
+  }, [subs]);
+
+  const pledgesSorted = useMemo(() => {
+    const arr = Array.isArray(pledges) ? pledges : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
+      .slice(0, 6);
+  }, [pledges]);
+
+  const publicInboxSorted = useMemo(() => {
+    const arr = Array.isArray(publicInbox) ? publicInbox : [];
+    return arr
+      .slice()
+      .sort((a, b) => Number(b?.created_at || b?.submitted_at || 0) - Number(a?.created_at || a?.submitted_at || 0))
+      .slice(0, 6);
+  }, [publicInbox]);
+
+  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
+
+  // ADD inside Overview() near other useMemos
 
 const newsletterSpark = useMemo(() => {
   const arr = Array.isArray(subs) ? subs : [];
@@ -484,82 +574,6 @@ const newsletterSpark = useMemo(() => {
   }
   return cum;
 }, [subs]);
-
-  const showSkeleton = loading && !hasLoadedOnce;
-
-  const topCards = useMemo(() => {
-    const mk = (key, title, icon, value, sub, to, extra = null) => {
-      const db = deltaBadge(deltas[key]);
-      return {
-        key,
-        title,
-        icon,
-        value,
-        sub,
-        to,
-        badge: db,
-        extra,
-      };
-    };
-    const subsExtra = countsNormalized.subsTotal > 0 ? (
-      <div
-        style={{
-          marginTop: 8,
-          borderRadius: 8,
-          padding: "4px 6px",
-          background: "rgba(255,255,255,0.04)",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}
-        title="subscriber trend (last 14 days)"
-      >
-        <Sparkline values={newsletterSpark} width={140} height={20} />
-      </div>
-    ) : null;
-    return [
-      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
-      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
-      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
-      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter", subsExtra),
-    ];
-  }, [countsNormalized, deltas, newsletterSpark]);
-
-  const meetingsSorted = useMemo(() => {
-    const arr = Array.isArray(meetings) ? meetings : [];
-    return arr
-      .filter((m) => Number(m?.starts_at) > 0)
-      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
-      .slice(0, 3);
-  }, [meetings]);
-
-  const needsOpen = useMemo(() => {
-    const arr = Array.isArray(needs) ? needs : [];
-    return arr
-      .filter((n) => String(n?.status || "").toLowerCase() === "open")
-      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
-      .slice(0, 6);
-  }, [needs]);
-
-  const subsSorted = useMemo(() => {
-    const arr = Array.isArray(subs) ? subs : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.joined || b?.created_at || 0) - Number(a?.joined || a?.created_at || 0))
-      .slice(0, 6);
-  }, [subs]);
-
-  const pledgesSorted = useMemo(() => {
-    const arr = Array.isArray(pledges) ? pledges : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
-      .slice(0, 6);
-  }, [pledges]);
-
-  const invPar = useMemo(() => readInvPar(orgId), [orgId]);
-
-  
 
   // Category stats (Option C): show up to 6 categories with qty/par bars.
   const invCatStats = useMemo(() => {
@@ -700,14 +714,14 @@ const newsletterSpark = useMemo(() => {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(160px, 1fr))",
+          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(7, minmax(140px, 1fr))",
           gap: isNarrow ? 10 : 12,
           marginBottom: 12,
         }}
       >
         {!hasLoadedOnce && loading ? (
           <>
-            {["👥", "📦", "🧾", "📅", "🤝", "📰"].map((ic, i) => (
+            {["👥", "📦", "🧾", "📅", "🤝", "📨", "📰"].map((ic, i) => (
               <div key={i}>
                 <MetricCardSkeleton icon={ic} />
               </div>
@@ -754,6 +768,45 @@ const newsletterSpark = useMemo(() => {
           </>
         ) : (
           <>
+        {/* Public inbox */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
+            <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
+              Review
+            </button>
+          </div>
+
+          {publicInboxSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {publicInboxSorted.map((item) => {
+                const kind = String(item?.kind || item?.type || "").toLowerCase();
+                const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+                const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+                const who = safeStr(item?.name || "anonymous");
+                const contact = safeStr(item?.contact || item?.email || item?.phone || "");
+                const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
+                const created = item?.created_at || item?.submitted_at;
+                return (
+                  <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {pill(title, tone)}
+                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                      </div>
+                      {created ? <div className="helper">{fmtDT(created)}</div> : null}
+                      {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
+                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+          )}
+        </div>
+
         {/* Next meetings */}
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
