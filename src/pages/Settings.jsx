@@ -2,7 +2,6 @@
 import * as React from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
-import PublicPage from "./PublicPage.jsx";
 import Security from "./Security.jsx";
 
 /* ---------- API helper ---------- */
@@ -32,7 +31,7 @@ async function authFetch(path, opts = {}) {
 
   // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
-    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges)|invites\/redeem)\b/.test(
+    /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges|public(?:\/|$))|invites\/redeem)\b/.test(
       relative
     );
 
@@ -128,7 +127,7 @@ export default function Settings() {
       ["invites", "Invites"],
       ["members", "Members"],
       ["public", "Public page"],
-      ["public-inbox", "Public Inbox"],
+      ["public-inbox", "Public inbox"],
       ["newsletter", "Newsletter"],
       ["pledges", "Pledges"],
       ["security", "Security"],
@@ -382,12 +381,140 @@ export default function Settings() {
   const [enabled, setEnabled] = React.useState(false);
   const [publicNewsletterEnabled, setPublicNewsletterEnabled] = React.useState(false);
   const [publicPledgesEnabled, setPublicPledgesEnabled] = React.useState(false);
+  const [showActionStrip, setShowActionStrip] = React.useState(true);
+  const [showNeeds, setShowNeeds] = React.useState(true);
+  const [showMeetings, setShowMeetings] = React.useState(true);
+  const [showWhatWeDo, setShowWhatWeDo] = React.useState(true);
+  const [showGetInvolved, setShowGetInvolved] = React.useState(false);
+  const [showNewsletterCard, setShowNewsletterCard] = React.useState(false);
+  const [showWebsiteButton, setShowWebsiteButton] = React.useState(false);
   const [slug, setSlug] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [locationLine, setLocationLine] = React.useState("");
   const [about, setAbout] = React.useState("");
-  const [features, setFeatures] = React.useState("");
-  const [links, setLinks] = React.useState("");
+  const [accentColor, setAccentColor] = React.useState("#6d5efc");
+  const [themeMode, setThemeMode] = React.useState("light");
+  const [websiteLabel, setWebsiteLabel] = React.useState("Website");
+  const [websiteUrl, setWebsiteUrl] = React.useState("");
+  const [meetingRsvpUrl, setMeetingRsvpUrl] = React.useState("");
+  const [whatWeDo, setWhatWeDo] = React.useState("");
+  const [primaryActionItems, setPrimaryActionItems] = React.useState([]);
+  const [getInvolvedActionItems, setGetInvolvedActionItems] = React.useState([]);
   const [msg, setMsg] = React.useState("");
+  const [publicInboxItems, setPublicInboxItems] = React.useState([]);
+  const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
+  const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
+  const [publicInboxFilter, setPublicInboxFilter] = React.useState("all");
+
+  const actionTypeOptions = React.useMemo(() => ([
+    { value: "none", label: "Hide this button" },
+    { value: "modal:get_help", label: "Open Get Help form" },
+    { value: "modal:volunteer", label: "Open Volunteer form" },
+    { value: "modal:offer_resources", label: "Open Offer Resources form" },
+    { value: "#newsletter", label: "Jump to newsletter signup" },
+    { value: "external", label: "Open a custom link" },
+  ]), []);
+
+  const primaryActionDefaults = React.useMemo(() => ([
+    { label: "Get Help", kind: "modal:get_help", url: "" },
+    { label: "Offer Help", kind: "modal:offer_resources", url: "" },
+    { label: "Stay Connected", kind: "#newsletter", url: "" },
+  ]), []);
+
+  const getInvolvedDefaults = React.useMemo(() => ([
+    { label: "Volunteer", kind: "modal:volunteer", url: "" },
+    { label: "Donate Funds", kind: "external", url: "" },
+    { label: "Offer Resources", kind: "modal:offer_resources", url: "" },
+    { label: "Request Assistance", kind: "modal:get_help", url: "" },
+  ]), []);
+
+  const toActionEditorItems = React.useCallback((items, defaults = []) => {
+    const src = Array.isArray(items) ? items : [];
+    const base = (Array.isArray(defaults) ? defaults : []).map((item) => ({ ...item }));
+    return base.map((fallback, index) => {
+      const raw = src[index] || {};
+      const rawLabel = String(raw?.label || raw?.text || fallback?.label || "").trim();
+      const rawUrl = String(raw?.url || "").trim();
+      const lowered = rawUrl.toLowerCase();
+      let kind = fallback?.kind || "none";
+      let url = rawUrl;
+      if (!rawUrl) {
+        kind = fallback?.kind || "none";
+        url = fallback?.kind === "external" ? String(fallback?.url || "") : "";
+      } else if (lowered === "newsletter" || lowered === "#newsletter") {
+        kind = "#newsletter";
+        url = "";
+      } else if (lowered in {"modal:get_help":1, "modal:volunteer":1, "modal:offer_resources":1}) {
+        kind = lowered;
+        url = "";
+      } else {
+        kind = "external";
+      }
+      return {
+        label: rawLabel || fallback?.label || "",
+        kind,
+        url: kind === "external" ? url : "",
+      };
+    });
+  }, []);
+
+  const fromActionEditorItems = React.useCallback((items, limit = 4) => {
+    return (Array.isArray(items) ? items : [])
+      .slice(0, limit)
+      .map((item) => {
+        const label = String(item?.label || "").trim();
+        const kind = String(item?.kind || "none").trim();
+        const customUrl = String(item?.url || "").trim();
+        if (!label || kind === "none") return null;
+        if (kind === "external") {
+          if (!customUrl) return null;
+          return { label, url: customUrl };
+        }
+        return { label, url: kind === "#newsletter" ? "#newsletter" : kind };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const updateActionItem = React.useCallback((setter, index, patch) => {
+    setter((prev) => (Array.isArray(prev) ? prev : []).map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }, []);
+
+  const toggleActionItemEnabled = React.useCallback((setter, items, defaults, index, enabled) => {
+    const current = (Array.isArray(items) ? items : [])[index] || {};
+    const fallback = (Array.isArray(defaults) ? defaults : [])[index] || {};
+    if (!enabled) {
+      updateActionItem(setter, index, {
+        _savedKind: current.kind && current.kind !== "none" ? current.kind : (current._savedKind || fallback.kind || "external"),
+        _savedUrl: typeof current.url === "string" ? current.url : (current._savedUrl || fallback.url || ""),
+        kind: "none",
+      });
+      return;
+    }
+    const restoredKind = current._savedKind || fallback.kind || "external";
+    const restoredUrl = restoredKind === "external"
+      ? (current.url || current._savedUrl || fallback.url || "")
+      : "";
+    updateActionItem(setter, index, {
+      kind: restoredKind,
+      url: restoredUrl,
+    });
+  }, [updateActionItem]);
+
+  const parseLinkLines = React.useCallback((value) => {
+    return String(value || "")
+      .split("\n")
+      .map((line) => {
+        const [label, url] = line.split("|").map((s) => (s || "").trim());
+        return url ? { label: label || url, url } : null;
+      })
+      .filter(Boolean);
+  }, []);
+
+  const formatLinkLines = React.useCallback((items) => {
+    return Array.isArray(items)
+      ? items.map((item) => `${item?.label || item?.text || item?.url || ""} | ${item?.url || ""}`.trim()).filter(Boolean).join("\n")
+      : "";
+  }, []);
 
   const genSlug = async () => {
     setMsg("");
@@ -415,26 +542,83 @@ const loadPublic = React.useCallback(async () => {
     const pub = r.public || {};
     setEnabled(!!pub.enabled);
     setPublicNewsletterEnabled(!!pub.newsletter_enabled);
-    setPublicPledgesEnabled(!!pub.pledges_enabled);
+    setPublicPledgesEnabled(pub.pledges_enabled !== false);
+    setShowActionStrip(pub.show_action_strip !== false);
+    setShowNeeds(pub.show_needs !== false);
+    setShowMeetings(pub.show_meetings !== false);
+    setShowWhatWeDo(pub.show_what_we_do !== false);
+    setShowGetInvolved(!!pub.show_get_involved);
+    setShowNewsletterCard(!!pub.show_newsletter_card);
+    setShowWebsiteButton(!!pub.show_website_button);
     setSlug(String(pub.slug || ""));
     setTitle(String(pub.title || ""));
+    setLocationLine(String(pub.location || ""));
     setAbout(String(pub.about || ""));
-    setFeatures(Array.isArray(pub.features) ? pub.features.join("\n") : "");
-    setLinks(
-      Array.isArray(pub.links)
-        ? pub.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
-        : ""
-    );
+    setAccentColor(String(pub.accent_color || "#6d5efc"));
+    setThemeMode(String(pub.theme_mode || "light"));
+    setWebsiteLabel(String(pub.website_link?.label || pub.website_link?.text || "Website"));
+    setWebsiteUrl(String(pub.website_link?.url || ""));
+    setMeetingRsvpUrl(String(pub.meeting_rsvp_url || ""));
+    setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : Array.isArray(pub.features) ? pub.features.join("\n") : "");
+    setPrimaryActionItems(toActionEditorItems(pub.primary_actions, primaryActionDefaults));
+    setGetInvolvedActionItems(toActionEditorItems(pub.get_involved_links, getInvolvedDefaults));
   } catch (e) {
     setMsg(e.message || "Failed to load public settings");
   }
-}, [orgId]);
+}, [orgId, primaryActionDefaults, getInvolvedDefaults, toActionEditorItems]);
+
+  const loadPublicInbox = React.useCallback(async () => {
+    if (!orgId) return;
+    setPublicInboxBusy(true);
+    setPublicInboxMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, { method: "GET" });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+    } catch (e) {
+      setPublicInboxMsg(e.message || "Failed to load public inbox");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  }, [orgId]);
+
+  const savePublicInboxItem = async (item, review_status, admin_note) => {
+    if (!orgId || !item?.id) return;
+    setPublicInboxBusy(true);
+    setPublicInboxMsg("");
+    try {
+      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
+        method: "PUT",
+        body: {
+          id: item.id,
+          type: item.type,
+          review_status,
+          admin_note,
+        },
+      });
+      setPublicInboxItems(Array.isArray(r.items) ? r.items : []);
+      setPublicInboxMsg("Saved.");
+      setTimeout(() => setPublicInboxMsg(""), 1200);
+    } catch (e) {
+      setPublicInboxMsg(e.message || "Failed to save public inbox item");
+    } finally {
+      setPublicInboxBusy(false);
+    }
+  };
 
 React.useEffect(() => {
   if (tab === "public") {
     loadPublic();
   }
-}, [tab, loadPublic]);
+  if (tab === "public-inbox") {
+    loadPublicInbox();
+  }
+}, [tab, loadPublic, loadPublicInbox]);
+
+
+React.useEffect(() => {
+  if (!primaryActionItems.length) setPrimaryActionItems(primaryActionDefaults);
+  if (!getInvolvedActionItems.length) setGetInvolvedActionItems(getInvolvedDefaults);
+}, [primaryActionDefaults, getInvolvedDefaults, primaryActionItems.length, getInvolvedActionItems.length]);
 
 
   const savePublic = async (e) => {
@@ -445,20 +629,24 @@ React.useEffect(() => {
         enabled,
         newsletter_enabled: !!publicNewsletterEnabled,
         pledges_enabled: !!publicPledgesEnabled,
+        show_action_strip: !!showActionStrip,
+        show_needs: !!showNeeds,
+        show_meetings: !!showMeetings,
+        show_what_we_do: !!showWhatWeDo,
+        show_get_involved: !!showGetInvolved,
+        show_newsletter_card: !!showNewsletterCard,
+        show_website_button: !!showWebsiteButton,
         slug: (slug || "").trim(),
         title: (title || "").trim(),
+        location: (locationLine || "").trim(),
         about: (about || "").trim(),
-        features: (features || "")
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        links: (links || "")
-          .split("\n")
-          .map((line) => {
-            const [text, url] = line.split("|").map((s) => (s || "").trim());
-            return url ? { text: text || url, url } : null;
-          })
-          .filter(Boolean),
+        accent_color: (accentColor || "#6d5efc").trim(),
+        theme_mode: (themeMode || "light").trim(),
+        website_link: websiteUrl ? { label: (websiteLabel || "Website").trim(), url: (websiteUrl || "").trim() } : null,
+        meeting_rsvp_url: (meetingRsvpUrl || "").trim(),
+        what_we_do: (whatWeDo || "").split("\n").map((s) => s.trim()).filter(Boolean),
+        primary_actions: fromActionEditorItems(primaryActionItems, 3),
+        get_involved_links: fromActionEditorItems(getInvolvedActionItems, 4),
       };
 
       const r = await authFetch(
@@ -466,20 +654,29 @@ React.useEffect(() => {
         { method: "POST", body: payload }
       );
 
-      setSlug(r.public?.slug || payload.slug);
-      setTitle(r.public?.title ?? payload.title);
-      setAbout(r.public?.about ?? payload.about);
-      setFeatures(
-        Array.isArray(r.public?.features) ? r.public.features.join("\n") : features
-      );
-      setLinks(
-        Array.isArray(r.public?.links)
-          ? r.public.links.map((l) => `${l.text || l.url} | ${l.url}`).join("\n")
-          : links
-      );
-      setEnabled(!!r.public?.enabled);
-      setPublicNewsletterEnabled(!!r.public?.newsletter_enabled);
-      setPublicPledgesEnabled(!!r.public?.pledges_enabled);
+      const pub = r.public || payload;
+      setSlug(pub.slug || payload.slug);
+      setTitle(pub.title ?? payload.title);
+      setLocationLine(pub.location ?? payload.location);
+      setAbout(pub.about ?? payload.about);
+      setAccentColor(pub.accent_color ?? payload.accent_color);
+      setThemeMode(pub.theme_mode ?? payload.theme_mode);
+      setWebsiteLabel(pub.website_link?.label || payload.website_link?.label || "Website");
+      setWebsiteUrl(pub.website_link?.url || payload.website_link?.url || "");
+      setMeetingRsvpUrl(pub.meeting_rsvp_url ?? payload.meeting_rsvp_url);
+      setWhatWeDo(Array.isArray(pub.what_we_do) ? pub.what_we_do.join("\n") : whatWeDo);
+      setPrimaryActionItems(toActionEditorItems(pub.primary_actions || payload.primary_actions, primaryActionDefaults));
+      setGetInvolvedActionItems(toActionEditorItems(pub.get_involved_links || payload.get_involved_links, getInvolvedDefaults));
+      setEnabled(!!pub.enabled);
+      setPublicNewsletterEnabled(!!pub.newsletter_enabled);
+      setPublicPledgesEnabled(pub.pledges_enabled !== false);
+      setShowActionStrip(pub.show_action_strip !== false);
+      setShowNeeds(pub.show_needs !== false);
+      setShowMeetings(pub.show_meetings !== false);
+      setShowWhatWeDo(pub.show_what_we_do !== false);
+      setShowGetInvolved(!!pub.show_get_involved);
+      setShowNewsletterCard(!!pub.show_newsletter_card);
+      setShowWebsiteButton(!!pub.show_website_button);
       setMsg("Saved.");
       setTimeout(() => setMsg(""), 1200);
     } catch (e) {
@@ -489,93 +686,12 @@ React.useEffect(() => {
 
   const publicUrl = slug ? `${location.origin}/#/p/${slug}` : "";
 
-  /* ========== PUBLIC INBOX (backend) ========== */
-  const [publicInboxItems, setPublicInboxItems] = React.useState([]);
-  const [publicInboxMsg, setPublicInboxMsg] = React.useState("");
-  const [publicInboxBusy, setPublicInboxBusy] = React.useState(false);
-  const [publicInboxDrafts, setPublicInboxDrafts] = React.useState({});
-
-  const loadPublicInbox = React.useCallback(async () => {
-    if (!orgId) return;
-    setPublicInboxMsg("");
-    setPublicInboxBusy(true);
-    try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
-        method: "GET",
-      });
-      const items = Array.isArray(r.items) ? r.items : [];
-      setPublicInboxItems(items);
-      const nextDrafts = {};
-      for (const item of items) {
-        const id = String(item?.id || "");
-        if (!id) continue;
-        nextDrafts[id] = {
-          review_status: String(item?.review_status || "new"),
-          admin_note: String(item?.admin_note || ""),
-        };
-      }
-      setPublicInboxDrafts(nextDrafts);
-    } catch (e) {
-      setPublicInboxItems([]);
-      setPublicInboxMsg(e.message || "Failed to load public inbox");
-    } finally {
-      setPublicInboxBusy(false);
-    }
-  }, [orgId]);
-
-  React.useEffect(() => {
-    if (tab === "public-inbox") loadPublicInbox();
-  }, [tab, loadPublicInbox]);
-
-  const updatePublicInboxDraft = (id, patch) => {
-    const key = String(id || "");
-    if (!key) return;
-    setPublicInboxDrafts((prev) => ({
-      ...prev,
-      [key]: {
-        review_status: String(prev?.[key]?.review_status || "new"),
-        admin_note: String(prev?.[key]?.admin_note || ""),
-        ...patch,
-      },
-    }));
-  };
-
-  const savePublicInboxItem = async (item) => {
-    const id = String(item?.id || "");
-    if (!orgId || !id) return;
-    const draft = publicInboxDrafts?.[id] || {};
-    setPublicInboxMsg("");
-    setPublicInboxBusy(true);
-    try {
-      const r = await authFetch(`/api/orgs/${encodeURIComponent(orgId)}/public/inbox`, {
-        method: "PUT",
-        body: {
-          type: "intake",
-          id,
-          review_status: String(draft.review_status || "new"),
-          admin_note: String(draft.admin_note || ""),
-        },
-      });
-      const items = Array.isArray(r.items) ? r.items : [];
-      setPublicInboxItems(items);
-      const nextDrafts = {};
-      for (const row of items) {
-        const rid = String(row?.id || "");
-        if (!rid) continue;
-        nextDrafts[rid] = {
-          review_status: String(row?.review_status || "new"),
-          admin_note: String(row?.admin_note || ""),
-        };
-      }
-      setPublicInboxDrafts(nextDrafts);
-      setPublicInboxMsg("Saved.");
-      setTimeout(() => setPublicInboxMsg(""), 1000);
-    } catch (e) {
-      setPublicInboxMsg(e.message || "Failed to save public inbox item");
-    } finally {
-      setPublicInboxBusy(false);
-    }
-  };
+  const filteredPublicInboxItems = React.useMemo(() => {
+    if (publicInboxFilter === "all") return publicInboxItems;
+    if (publicInboxFilter === "intake") return publicInboxItems.filter((item) => item.type === "intake");
+    if (publicInboxFilter === "rsvp") return publicInboxItems.filter((item) => item.type === "rsvp");
+    return publicInboxItems.filter((item) => String(item.review_status || "new") === publicInboxFilter);
+  }, [publicInboxItems, publicInboxFilter]);
 
   /* ========== NEWSLETTER (backend, Riseup sends) ========== */
   const [nlEnabled, setNlEnabled] = React.useState(false);
@@ -1106,158 +1222,294 @@ React.useEffect(() => {
       {/* Public Page */}
       {tab === "public" && (
         <div className="card" style={{ padding: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Public Page</h2>
-          <p className="helper">Share a read-only page for your org. Only what you enable is shown.</p>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: 6 }}>Public Page</h2>
+              <p className="helper" style={{ margin: 0 }}>Set up the public-facing page visitors will see. Turn sections on or off, choose the theme, and decide what each button does.</p>
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {enabled && slug ? (
+                <a className="btn" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
+              ) : null}
+              <button className="btn-red" type="submit" form="public-page-settings-form">Save</button>
+            </div>
+          </div>
 
-          <form onSubmit={savePublic} className="grid" style={{ gap: 10, marginTop: 8 }}>
+          <form id="public-page-settings-form" onSubmit={savePublic} className="grid" style={{ gap: 12, marginTop: 12 }}>
             <label className="row" style={{ gap: 8, alignItems: "center" }}>
               <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
               <span>Enable public page</span>
             </label>
 
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={publicNewsletterEnabled}
-                onChange={(e) => setPublicNewsletterEnabled(e.target.checked)}
-              />
-              <span>Enable newsletter signup on public page</span>
-            </label>
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Share URL (slug)</span>
+                <div className="row" style={{ gap: 8 }}>
+                  <input className="input" style={{ flex: 1 }} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="e.g. chehalis-river-mutual-aid" />
+                  <button type="button" className="btn" onClick={genSlug}>Generate</button>
+                </div>
+                {slug ? <a className="helper" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">{publicUrl}</a> : null}
+              </label>
 
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={publicPledgesEnabled}
-                onChange={(e) => setPublicPledgesEnabled(e.target.checked)}
-              />
-              <span>Enable pledges on public page</span>
-            </label>
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Theme mode</span>
+                <select className="input" value={themeMode} onChange={(e) => setThemeMode(e.target.value)}>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+            </div>
 
+            <div className="bf-two">
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Title</span>
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chehalis River Mutual Aid Network" />
+              </label>
+
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">Location line</span>
+                <input className="input" value={locationLine} onChange={(e) => setLocationLine(e.target.value)} placeholder="Aberdeen, WA" />
+              </label>
+            </div>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Share URL (slug)</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input className="input" style={{ flex: 1 }} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="e.g. bondfire-team" />
-                <button type="button" className="btn" onClick={genSlug} title="Generate a nice slug">
-                  Generate
-                </button>
+              <span className="helper">Tagline / subtitle</span>
+              <input className="input" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Mutual aid, community meals, outreach" />
+            </label>
+
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Basics</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Start with the name, link, and color. This is the minimum needed to get the page live.</p>
+
+              <div className="bf-two">
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Accent color</span>
+                  <input className="input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
+                </label>
+                <div className="card" style={{ padding: 12, background: "rgba(255,255,255,0.02)" }}>
+                  <strong style={{ display: "block", marginBottom: 6 }}>How this works</strong>
+                  <div className="helper">1. Turn the public page on.</div>
+                  <div className="helper">2. Choose which sections visitors should see.</div>
+                  <div className="helper">3. Save, then open the live preview.</div>
+                </div>
               </div>
 
-              {slug && (
-                <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
-                  <span className="helper">Public link:</span>
-                  <a className="helper" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">
-                    {publicUrl}
-                  </a>
+              <div className="bf-two" style={{ marginTop: 12 }}>
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Website button label</span>
+                  <input className="input" value={websiteLabel} onChange={(e) => setWebsiteLabel(e.target.value)} placeholder="Website" />
+                </label>
+                <label className="grid" style={{ gap: 6 }}>
+                  <span className="helper">Website button URL</span>
+                  <input className="input" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://example.org" />
+                </label>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Sections</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Choose which blocks appear on the public page. You can hide anything that does not apply to this org.</p>
+              <h4 style={{ marginTop: 0 }}>What should appear on the public page?</h4>
+              <div className="bf-two">
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWebsiteButton} onChange={(e) => setShowWebsiteButton(e.target.checked)} /><span>Show the Website button in the header</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showActionStrip} onChange={(e) => setShowActionStrip(e.target.checked)} /><span>Show the main action buttons row</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showNeeds} onChange={(e) => setShowNeeds(e.target.checked)} /><span>Show the Current Needs section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showMeetings} onChange={(e) => setShowMeetings(e.target.checked)} /><span>Show the Public Meetings section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showWhatWeDo} onChange={(e) => setShowWhatWeDo(e.target.checked)} /><span>Show the What We Do section</span></label>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}><input type="checkbox" checked={showGetInvolved} onChange={(e) => setShowGetInvolved(e.target.checked)} /><span>Show the Get Involved buttons</span></label>
+              </div>
+
+              <div className="card" style={{ padding: 12, marginTop: 12, background: "rgba(255,255,255,0.02)" }}>
+                <strong>Stay Connected / Newsletter</strong>
+                <div className="grid" style={{ gap: 8, marginTop: 10 }}>
+                  <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <input type="checkbox" checked={showNewsletterCard} onChange={(e) => setShowNewsletterCard(e.target.checked)} />
+                    <span>Show the Stay Connected card on the public page</span>
+                  </label>
+                  <label className="row" style={{ gap: 8, alignItems: "center", opacity: showNewsletterCard ? 1 : 0.65 }}>
+                    <input type="checkbox" checked={publicNewsletterEnabled} onChange={(e) => setPublicNewsletterEnabled(e.target.checked)} disabled={!showNewsletterCard} />
+                    <span>Let visitors submit the email signup form</span>
+                  </label>
                 </div>
-              )}
-            </label>
+              </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Title</span>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Public page title" />
-            </label>
+              <div style={{ marginTop: 12 }}>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={publicPledgesEnabled} onChange={(e) => setPublicPledgesEnabled(e.target.checked)} />
+                  <span>Let visitors pledge support on public needs</span>
+                </label>
+              </div>
+            </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">About</span>
-              <textarea className="textarea" rows={3} value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Short description" />
-            </label>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>What We Do</h3>
+              <p className="helper" style={{ marginTop: 0 }}>Add a short list of what the org does. Use one line per item.</p>
+              <label className="grid" style={{ gap: 6 }}>
+                <span className="helper">What we do (one item per line)</span>
+              <textarea className="textarea" rows={4} value={whatWeDo} onChange={(e) => setWhatWeDo(e.target.value)} placeholder={`Free Store
+Community Meals
+Outreach`} />
+              </label>
+            </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Features (one per line)</span>
-              <textarea className="textarea" rows={3} value={features} onChange={(e) => setFeatures(e.target.value)} placeholder={"Donations tracker\nVolunteers\nEvents"} />
-            </label>
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Main action buttons</h3>
+              <p className="helper" style={{ marginTop: 0 }}>These are the big buttons near the top of the public page.</p>
+              <div className="grid" style={{ gap: 10 }}>
+                {primaryActionItems.map((item, index) => {
+                  const isEnabled = item.kind !== "none";
+                  return (
+                  <div key={`primary-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="grid" style={{ gap: 8 }}>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <strong>Button {index + 1}</strong>
+                        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => toggleActionItemEnabled(setPrimaryActionItems, primaryActionItems, primaryActionDefaults, index, e.target.checked)}
+                          />
+                          <span>Show this button</span>
+                        </label>
+                      </div>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">Button label</span>
+                        <input className="input" value={item.label} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
+                      </label>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">When someone clicks it</span>
+                        <select className="input" value={item.kind} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { kind: e.target.value, url: e.target.value === "external" ? item.url : "" })}>
+                          {actionTypeOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
+                      {item.kind === "external" ? (
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Link to open</span>
+                          <input className="input" value={item.url} onChange={(e) => updateActionItem(setPrimaryActionItems, index, { url: e.target.value })} placeholder="https://example.org/form" />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </div>
 
-            <label className="grid" style={{ gap: 6 }}>
-              <span className="helper">Links (Text | URL per line)</span>
-              <textarea className="textarea" rows={3} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={"Website | https://example.org\nTwitter | https://x.com/yourorg"} />
-            </label>
-
-            <div className="row" style={{ gap: 8, alignItems: "center" }}>
-              <button className="btn-red" type="submit">
-                Save
-              </button>
-              {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
+            <div className="card" style={{ padding: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>Get Involved buttons</h3>
+              <p className="helper" style={{ marginTop: 0 }}>These are the optional buttons lower on the page. You can hide any of them.</p>
+              <div className="grid" style={{ gap: 10 }}>
+                {getInvolvedActionItems.map((item, index) => {
+                  const isEnabled = item.kind !== "none";
+                  return (
+                  <div key={`involved-action-${index}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="grid" style={{ gap: 8 }}>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <strong>Button {index + 1}</strong>
+                        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => toggleActionItemEnabled(setGetInvolvedActionItems, getInvolvedActionItems, getInvolvedDefaults, index, e.target.checked)}
+                          />
+                          <span>Show this button</span>
+                        </label>
+                      </div>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">Button label</span>
+                        <input className="input" value={item.label} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { label: e.target.value })} placeholder={`Button ${index + 1}`} />
+                      </label>
+                      <label className="grid" style={{ gap: 6 }}>
+                        <span className="helper">When someone clicks it</span>
+                        <select className="input" value={item.kind} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { kind: e.target.value, url: e.target.value === "external" ? item.url : "" })}>
+                          {actionTypeOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
+                      {item.kind === "external" ? (
+                        <label className="grid" style={{ gap: 6 }}>
+                          <span className="helper">Link to open</span>
+                          <input className="input" value={item.url} onChange={(e) => updateActionItem(setGetInvolvedActionItems, index, { url: e.target.value })} placeholder="https://example.org/form" />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div>
+                {msg && <span className={msg.includes("Saved") ? "success" : "error"}>{msg}</span>}
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {enabled && slug ? (
+                  <a className="btn" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
+                ) : null}
+                <button className="btn-red" type="submit">Save</button>
+              </div>
             </div>
           </form>
-
-          {enabled && (
-            <div style={{ marginTop: 16 }}>
-              <h3 style={{ margin: "8px 0" }}>Preview</h3>
-              <PublicPage
-                data={{
-                  public: {
-                    title: (title || orgName || "Public page").trim(),
-                    about: (about || "").trim(),
-                    newsletter_enabled: !!publicNewsletterEnabled,
-                    pledges_enabled: !!publicPledgesEnabled,
-                    features: (features || "")
-                      .split("\n")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                    links: (links || "")
-                      .split("\n")
-                      .map((line) => {
-                        const [text, url] = line.split("|").map((s) => (s || "").trim());
-                        return url ? { text: text || url, url } : null;
-                      })
-                      .filter(Boolean),
-                  },
-                }}
-              />
-            </div>
-          )}
         </div>
       )}
-
-
 
       {/* Public Inbox */}
       {tab === "public-inbox" && (
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <h2 style={{ marginTop: 0, marginBottom: 6 }}>Public Inbox</h2>
-              <div className="helper">
-                Review public Get Help, Offer Resources, and Volunteer submissions here. Meeting RSVPs stay attached to meetings.
-              </div>
-            </div>
-            <button className="btn" type="button" onClick={() => loadPublicInbox()} disabled={publicInboxBusy}>
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0 }}>Public Inbox</h2>
+            <button className="btn" type="button" onClick={loadPublicInbox} disabled={publicInboxBusy}>
               {publicInboxBusy ? "Refreshing…" : "Refresh"}
             </button>
+            <select className="input" value={publicInboxFilter} onChange={(e) => setPublicInboxFilter(e.target.value)} style={{ maxWidth: 180 }}>
+              <option value="all">All</option>
+              <option value="intake">Intakes only</option>
+              <option value="rsvp">RSVPs only</option>
+              <option value="new">Status: new</option>
+              <option value="reviewed">Status: reviewed</option>
+              <option value="contacted">Status: contacted</option>
+              <option value="closed">Status: closed</option>
+            </select>
+            {publicInboxMsg ? <span className={publicInboxMsg.includes("Saved") ? "success" : "helper"}>{publicInboxMsg}</span> : null}
           </div>
 
-          <div style={{ marginTop: 10 }}>
-            {publicInboxMsg ? <div className={publicInboxMsg.includes("Saved") ? "success" : "error"}>{publicInboxMsg}</div> : null}
-          </div>
+          <p className="helper" style={{ marginTop: 8 }}>Review public help requests, volunteer offers, resource offers, and per-meeting RSVPs from the refreshed public page.</p>
 
-          {publicInboxItems.length ? (
-            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-              {publicInboxItems.map((item) => {
-                const id = String(item?.id || "");
-                const draft = publicInboxDrafts?.[id] || { review_status: String(item?.review_status || "new"), admin_note: String(item?.admin_note || "") };
-                const title = String(item?.title || item?.source_kind || "Public item");
-                const who = String(item?.name || "anonymous");
-                const contact = String(item?.contact || "");
-                const details = String(item?.details || "");
-                const createdAt = Number(item?.created_at || 0);
-                return (
-                  <div key={id} className="card" style={{ padding: 12 }}>
-                    <div className="bf-two" style={{ gap: 14, alignItems: "start" }}>
-                      <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 900 }}>{title} {createdAt ? new Date(createdAt).toLocaleString() : ""}</div>
-                        <div style={{ fontWeight: 800 }}>{who}</div>
-                        {contact ? <div style={{ overflowWrap: "anywhere" }}>{contact}</div> : null}
-                        {details ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{details}</div> : null}
+          <div style={{ marginTop: 12 }}>
+            {filteredPublicInboxItems.length === 0 ? (
+              <div className="helper">No public submissions yet.</div>
+            ) : (
+              <div className="grid" style={{ gap: 12 }}>
+                {filteredPublicInboxItems.map((item) => (
+                  <div key={`${item.type}:${item.id}`} className="card" style={{ padding: 12, border: "1px solid #222" }}>
+                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong>{item.title || (item.type === "rsvp" ? "Meeting RSVP" : "Public intake")}</strong>
+                      <span className="helper">{item.type === "rsvp" ? "RSVP" : (item.source_kind || "intake").replaceAll("_", " ")}</span>
+                      <span className="helper">{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
+                    </div>
+
+                    <div className="bf-two" style={{ marginTop: 10 }}>
+                      <div className="grid" style={{ gap: 8 }}>
+                        <div><div className="helper">Name</div><div>{item.name || ""}</div></div>
+                        <div><div className="helper">Contact</div><div style={{ overflowWrap: "anywhere" }}>{item.contact || ""}</div></div>
+                        {item.type === "rsvp" ? (
+                          <>
+                            <div><div className="helper">Attendance</div><div>{item.attendee_status || "yes"}</div></div>
+                            <div><div className="helper">Meeting</div><div>{item.meeting_title || "Public meeting"}{item.starts_at ? ` · ${new Date(item.starts_at).toLocaleString()}` : ""}</div></div>
+                            {item.location ? <div><div className="helper">Location</div><div>{item.location}</div></div> : null}
+                          </>
+                        ) : null}
                       </div>
 
-                      <div style={{ minWidth: 260, display: "grid", gap: 10 }}>
+                      <div className="grid" style={{ gap: 8 }}>
                         <label className="grid" style={{ gap: 6 }}>
-                          <span className="helper">Review status</span>
+                          <span className="helper">Admin status</span>
                           <select
                             className="input"
-                            value={draft.review_status}
-                            onChange={(e) => updatePublicInboxDraft(id, { review_status: e.target.value })}
+                            data-public-inbox-status={`${item.type}:${item.id}`}
+                            defaultValue={item.review_status || "new"}
+                            onChange={(e) => {
+                              const note = document.getElementById(`public-inbox-note-${item.type}-${item.id}`)?.value || "";
+                              savePublicInboxItem(item, e.target.value, note);
+                            }}
+                            disabled={publicInboxBusy}
                           >
                             <option value="new">new</option>
                             <option value="reviewed">reviewed</option>
@@ -1269,38 +1521,49 @@ React.useEffect(() => {
                         <label className="grid" style={{ gap: 6 }}>
                           <span className="helper">Admin note</span>
                           <textarea
+                            id={`public-inbox-note-${item.type}-${item.id}`}
                             className="textarea"
-                            rows={3}
-                            value={draft.admin_note}
-                            onChange={(e) => updatePublicInboxDraft(id, { admin_note: e.target.value })}
-                            placeholder="Notes for your team"
+                            rows={4}
+                            defaultValue={item.admin_note || ""}
+                            placeholder="Internal note for org admins"
                           />
                         </label>
 
-                        <div className="row" style={{ gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                          <button
-                            className="btn-red"
-                            type="button"
-                            onClick={() => savePublicInboxItem(item)}
-                            disabled={publicInboxBusy}
-                          >
-                            {publicInboxBusy ? "Saving…" : "Save"}
-                          </button>
-                        </div>
+                        <button
+                          className="btn-red"
+                          type="button"
+                          disabled={publicInboxBusy}
+                          onClick={() => {
+                            const status = document.querySelector(`select[data-public-inbox-status="${item.type}:${item.id}"]`)?.value || item.review_status || "new";
+                            const note = document.getElementById(`public-inbox-note-${item.type}-${item.id}`)?.value || "";
+                            savePublicInboxItem(item, status, note);
+                          }}
+                        >
+                          Save
+                        </button>
                       </div>
                     </div>
+
+                    {item.details ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="helper">Details</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>{item.details}</div>
+                      </div>
+                    ) : null}
+
+                    {item.extra ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="helper">Extra</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>{item.extra}</div>
+                      </div>
+                    ) : null}
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 14 }}>
-              {publicInboxBusy ? "Loading public inbox…" : "No public inbox items yet."}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
-
 
       {/* Newsletter */}
       {tab === "newsletter" && (
@@ -1701,4 +1964,3 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
   }
   return out;
 }
-
