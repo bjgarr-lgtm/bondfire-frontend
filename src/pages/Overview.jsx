@@ -510,7 +510,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
+      mk("publicInbox", "Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas, historySeries]);
@@ -699,7 +699,7 @@ export default function Overview() {
           <>
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
+                <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
                 <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
                   Manage
                 </button>
