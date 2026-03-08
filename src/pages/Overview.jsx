@@ -60,7 +60,17 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
       try {
         const decStr = await decryptWithOrgKey(orgKey, blob);
         const dec = JSON.parse(decStr);
-        out.push({ ...r, ...dec });
+        out.push({
+          ...r,
+          ...dec,
+          category:
+            dec?.category ??
+            dec?.cat ??
+            r?.category ??
+            r?.cat ??
+            r?.Category ??
+            r?.CATEGORY,
+        });
         continue;
       } catch {
         // fall through
@@ -171,7 +181,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const trendUp = last >= first;
 
   return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", overflow: "hidden" }}>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
       <path d={areaD} fill={"rgba(255,255,255,0.08)"} />
       <path d={d} fill="none" stroke={trendUp ? "rgba(120,255,200,0.9)" : "rgba(255,140,140,0.9)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -487,13 +497,10 @@ export default function Overview() {
               padding: "4px 6px",
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              overflow: "hidden",
-              width: "100%",
-              boxSizing: "border-box",
             }}
             title={`${title.toLowerCase()} trend`}
           >
-            <Sparkline values={historySeries[key]} width={100} height={18} />
+            <Sparkline values={historySeries[key]} width={120} height={18} />
           </div>
         ),
       };
@@ -504,7 +511,7 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
+      mk("publicInbox", "Public Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-page"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
     ];
   }, [countsNormalized, deltas, historySeries]);
@@ -551,19 +558,15 @@ export default function Overview() {
     for (const it of arr) {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
-      const catRaw = (it && (it.category ?? it.cat ?? it.Category ?? it.CATEGORY)) ?? "";
-      let cat = safeStr(catRaw).trim();
-      if (!cat) {
-        try {
-          for (const k of Object.keys(it || {})) {
-            if (String(k).toLowerCase() === "category") {
-              cat = safeStr(it[k]).trim();
-              break;
-            }
-          }
-        } catch {}
-      }
-      cat = (cat || "uncategorized").toLowerCase();
+      const rawCat =
+        it?.category ??
+        it?.cat ??
+        it?.Category ??
+        it?.CATEGORY ??
+        "";
+
+      let cat = String(rawCat).trim().toLowerCase();
+      if (!cat) cat = "uncategorized";
 
       const id = it?.id != null ? String(it.id) : "";
       const parV = Number(parMap?.[id]);
@@ -705,7 +708,7 @@ export default function Overview() {
             <div className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <h2 style={{ margin: 0, flex: 1 }}>Public Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
+                <button className="btn" type="button" onClick={() => go("settings?tab=public-page")}>
                   Manage
                 </button>
               </div>
