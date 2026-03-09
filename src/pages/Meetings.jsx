@@ -486,7 +486,7 @@ async function saveEdit() {
 						</div>
 					</div>
 				</div>
-			) : null}}
+			) : null}
 
 
 			<div className="card" style={{ margin: 16, padding: 16 }}>
