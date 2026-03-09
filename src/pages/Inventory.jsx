@@ -1,4 +1,3 @@
-// src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
@@ -16,17 +15,6 @@ function safeStr(v) {
   return String(v ?? "");
 }
 
-function buildParMapFromItems(rows) {
-  const next = {};
-  for (const it of Array.isArray(rows) ? rows : []) {
-    if (it?.id == null) continue;
-    const raw = it?.par;
-    const n = raw === "" || raw == null ? NaN : Number(raw);
-    next[String(it.id)] = Number.isFinite(n) && n > 0 ? n : "";
-  }
-  return next;
-}
-
 function readParMap(orgId) {
   try {
     return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
@@ -41,12 +29,15 @@ function writeParMap(orgId, obj) {
   } catch {}
 }
 
-function itemKeyFromFields({ name, unit, category, location }) {
-  const n = safeStr(name).trim().toLowerCase();
-  const u = safeStr(unit).trim().toLowerCase();
-  const c = safeStr(category).trim().toLowerCase();
-  const l = safeStr(location).trim().toLowerCase();
-  return `${n}|${u}|${c}|${l}`;
+function buildParMapFromItems(rows) {
+  const next = {};
+  for (const it of Array.isArray(rows) ? rows : []) {
+    if (it?.id == null) continue;
+    const raw = it?.par;
+    const n = raw === "" || raw == null ? NaN : Number(raw);
+    next[String(it.id)] = Number.isFinite(n) && n > 0 ? n : "";
+  }
+  return next;
 }
 
 export default function Inventory() {
@@ -58,23 +49,49 @@ export default function Inventory() {
       return false;
     }
   }, []);
+
   const [parMap, setParMap] = useState(() => (orgId ? readParMap(orgId) : {}));
   useEffect(() => {
     setParMap(orgId ? readParMap(orgId) : {});
   }, [orgId]);
+
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [sortMode, setSortMode] = useState("low");
   const [catFilter, setCatFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [busyZk, setBusyZk] = useState(false);
   const [zkMsg, setZkMsg] = useState("");
 
   const [selected, setSelected] = useState(null);
   const [edit, setEdit] = useState(null);
 
   const [form, setForm] = useState({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
+
+  async function saveParToBackend(id, rawValue) {
+    if (!orgId || !id) return;
+    const par = rawValue === "" || rawValue == null ? null : Number(rawValue);
+    const item = items.find((it) => String(it?.id) === String(id));
+    if (!item) return;
+
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        name: item.name,
+        qty: item.qty,
+        unit: item.unit,
+        category: item.category,
+        location: item.location,
+        notes: item.notes,
+        is_public: !!item.is_public,
+        encrypted_notes: item.encrypted_notes ?? null,
+        encrypted_blob: item.encrypted_blob ?? null,
+        par: Number.isFinite(par) && par > 0 ? par : null,
+      }),
+    });
+  }
 
   async function refresh() {
     if (!orgId) return;
@@ -85,8 +102,8 @@ export default function Inventory() {
       const raw = Array.isArray(data.items) ? data.items : Array.isArray(data.inventory) ? data.inventory : [];
 
       const orgKey = getCachedOrgKey(orgId);
+      const out = [];
       if (orgKey) {
-        const out = [];
         for (const it of raw) {
           if (it?.encrypted_blob) {
             try {
@@ -104,36 +121,20 @@ export default function Inventory() {
           }
           out.push(it);
         }
-        setItems(out);
-        // Migrate any pending par values stored under a tmp key into real item ids.
-        const pm = readParMap(orgId);
-        let changed = false;
-        for (const it of out) {
-          if (it?.id == null) continue;
-          const id = String(it.id);
-          if (pm[id] != null) continue;
-          const tmpKey = `tmp:${itemKeyFromFields(it)}`;
-          if (pm[tmpKey] != null) {
-            pm[id] = pm[tmpKey];
-            delete pm[tmpKey];
-            changed = true;
-          }
-        }
-        if (changed) writeParMap(orgId, pm);
-        setParMap(pm);
       } else {
-        setItems(raw);
-        setParMap(readParMap(orgId));
+        out.push(...raw);
       }
+
+      setItems(out);
+      const serverParMap = buildParMapFromItems(out);
+      setParMap(serverParMap);
+      writeParMap(orgId, serverParMap);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
     } finally {
       setLoading(false);
     }
-    const serverParMap = buildParMapFromItems(out);
-    setParMap(serverParMap);
-    writeParMap(orgId, serverParMap);
   }
 
   useEffect(() => {
@@ -183,7 +184,6 @@ export default function Inventory() {
       if (sortMode === "category") return A.cat.localeCompare(B.cat) || A.name.localeCompare(B.name);
       if (sortMode === "qty") return (A.qty - B.qty) || A.name.localeCompare(B.name);
       if (sortMode === "par") return ((A.par || 999999) - (B.par || 999999)) || A.name.localeCompare(B.name);
-      // default: lowest stock ratio first (items without par go last)
       const ap = A.pct == null ? 999 : A.pct;
       const bp = B.pct == null ? 999 : B.pct;
       if (ap !== bp) return ap - bp;
@@ -202,12 +202,6 @@ export default function Inventory() {
     const unit = safeStr(form.unit).trim();
     const category = safeStr(form.category).trim();
     const parNum = form.par === "" ? null : Number(form.par);
-    if (parNum != null && Number.isFinite(parNum) && orgId) {
-      const pm = { ...(readParMap(orgId) || {}) };
-      pm[`tmp:${itemKeyFromFields({ ...form, category })}`] = parNum;
-      writeParMap(orgId, pm);
-      setParMap(pm);
-    }
     const location = safeStr(form.location).trim();
     const notes = safeStr(form.notes).trim();
     const is_public = !!form.is_public;
@@ -219,14 +213,40 @@ export default function Inventory() {
       payload = { name: "__encrypted__", qty, unit, category, location: "", notes: "", is_public, encrypted_blob: enc };
     }
 
-    await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        par: Number.isFinite(parNum) && parNum > 0 ? parNum : null,
+      }),
     });
 
+    const createdItem = res?.item
+      ? {
+          ...res.item,
+          name,
+          qty,
+          unit,
+          category,
+          location,
+          notes,
+          is_public,
+        }
+      : null;
+
+    if (createdItem?.id) {
+      setItems((prev) => [createdItem, ...(Array.isArray(prev) ? prev : [])]);
+      setParMap((prev) => {
+        const next = { ...(prev || {}), [String(createdItem.id)]: Number.isFinite(parNum) && parNum > 0 ? parNum : "" };
+        writeParMap(orgId, next);
+        return next;
+      });
+    } else {
+      await refresh();
+    }
+
     setForm({ name: "", qty: 0, par: "", unit: "", category: "", location: "", notes: "", is_public: false });
-    setTimeout(() => refresh().catch(console.error), 300);
   }
 
   function openItem(it) {
@@ -235,7 +255,7 @@ export default function Inventory() {
       id: it.id,
       name: it.name || "",
       qty: it.qty ?? 0,
-      par: parMap?.[String(it.id)] ?? "",
+      par: parMap?.[String(it.id)] ?? it?.par ?? "",
       unit: it.unit || "",
       category: it.category || "",
       location: it.location || "",
@@ -253,18 +273,6 @@ export default function Inventory() {
     if (!orgId || !edit?.id) return;
     setErr("");
     try {
-      // Persist par map changes from the modal (table edits already do this, but modal edits didn't).
-      const idStr = String(edit.id);
-      const nextPm = { ...(readParMap(orgId) || {}) };
-      if (edit.par === "" || edit.par == null) {
-        delete nextPm[idStr];
-      } else {
-        const pv = Number(edit.par);
-        nextPm[idStr] = Number.isFinite(pv) ? pv : "";
-      }
-      writeParMap(orgId, nextPm);
-      setParMap(nextPm);
-
       const orgKey = getCachedOrgKey(orgId);
       const is_public = !!edit.is_public;
       const qty = Number.isFinite(Number(edit.qty)) ? Number(edit.qty) : 0;
@@ -295,7 +303,7 @@ export default function Inventory() {
           name: "__encrypted__",
           qty,
           unit: payload.unit,
-          category: payload.category, // FIX: was a bare `category` variable (ReferenceError)
+          category: payload.category,
           location: "",
           notes: "",
           is_public,
@@ -303,14 +311,43 @@ export default function Inventory() {
         };
       }
 
-      await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
+      const saved = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          par: edit.par === "" || edit.par == null ? null : Number(edit.par),
+        }),
       });
 
+      const savedItem = saved?.item
+        ? {
+            ...saved.item,
+            name: safeStr(edit.name).trim(),
+            qty,
+            unit: safeStr(edit.unit).trim(),
+            category: safeStr(edit.category).trim(),
+            location: safeStr(edit.location).trim(),
+            notes: safeStr(edit.notes),
+            is_public,
+          }
+        : null;
+
+      if (savedItem?.id) {
+        setItems((prev) => (Array.isArray(prev) ? prev.map((it) => (it.id === savedItem.id ? savedItem : it)) : prev));
+        setParMap((prev) => {
+          const next = {
+            ...(prev || {}),
+            [String(savedItem.id)]: edit.par === "" || edit.par == null ? "" : (Number.isFinite(Number(edit.par)) ? Number(edit.par) : ""),
+          };
+          writeParMap(orgId, next);
+          return next;
+        });
+      } else {
+        await refresh();
+      }
+
       closeModal();
-      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -324,8 +361,14 @@ export default function Inventory() {
       await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory?id=${encodeURIComponent(edit.id)}`, {
         method: "DELETE",
       });
+      setItems((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== edit.id) : prev));
+      setParMap((prev) => {
+        const next = { ...(prev || {}) };
+        delete next[String(edit.id)];
+        writeParMap(orgId, next);
+        return next;
+      });
       closeModal();
-      setTimeout(() => refresh().catch(console.error), 250);
     } catch (e) {
       console.error(e);
       setErr(e?.message || String(e));
@@ -429,6 +472,14 @@ export default function Inventory() {
                               return next;
                             });
                           }}
+                          onBlur={(e) => {
+                            const v = e.target.value;
+                            saveParToBackend(idStr, v).catch((er) => {
+                              console.error(er);
+                              setErr(er?.message || String(er));
+                              refresh().catch(console.error);
+                            });
+                          }}
                           style={{ width: "100%" }}
                         />
                       </div>
@@ -492,6 +543,14 @@ export default function Inventory() {
                           next[String(it.id)] = v === "" ? "" : Number(v);
                           writeParMap(orgId, next);
                           return next;
+                        });
+                      }}
+                      onBlur={(e) => {
+                        const v = e.target.value;
+                        saveParToBackend(String(it.id), v).catch((er) => {
+                          console.error(er);
+                          setErr(er?.message || String(er));
+                          refresh().catch(console.error);
                         });
                       }}
                       style={{ width: 90 }}
@@ -599,3 +658,11 @@ export default function Inventory() {
     </div>
   );
 }
+ need a zip now make it and stop making me ask twice for shit i ALWAYS need zipped to continue my workflow and if it breaks because i TOLD you the backend and dashboard and sparkline shit is correct, then im gonna lose it. it is JUST INVENTORY RIGHT NOW. fix the actual problem i fucking identified and leave everything else alone. 
+
+
+i dont know why you forgot that zips are the whole fucking point of all this but stop.
+
+ok now do it right and no overview no dashboard no anything but inventory unless truly literally functionally needed. if so warn me. 
+
+and yes go use what we just figured out out
