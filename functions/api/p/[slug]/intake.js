@@ -4,7 +4,8 @@ async function getOrgIdBySlug(env, slug) {
   if (!s) return null;
   const orgId = await env.BF_PUBLIC.get(`slug:${s}`);
   return orgId || null;
-}import { getDB } from "../../_bf.js";
+}
+import { getDB } from "../../_bf.js";
 
 function clean(v, max = 2000) {
   return String(v || "").trim().slice(0, max);
