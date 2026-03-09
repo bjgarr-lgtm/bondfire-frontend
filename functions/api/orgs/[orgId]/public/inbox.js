@@ -1,3 +1,5 @@
+import { getDB } from "../../_bf.js";
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -24,7 +26,13 @@ function mapInboxItem(row) {
       if (parsed?.note) extra = String(parsed.note || "").trim();
       if (Array.isArray(parsed?.items) && parsed.items.length) {
         details = parsed.items
-          .map((item) => `${String(item?.name || "item").trim()} x ${Math.max(1, Math.floor(Number(item?.qty_requested || 1) || 1))}${item?.unit ? ` ${String(item.unit).trim()}` : ""}`)
+          .map(
+            (item) =>
+              `${String(item?.name || "item").trim()} x ${Math.max(
+                1,
+                Math.floor(Number(item?.qty_requested || 1) || 1)
+              )}${item?.unit ? ` ${String(item.unit).trim()}` : ""}`
+          )
           .join("\n");
       }
     } catch {
@@ -46,8 +54,8 @@ export async function onRequestGet(context) {
     const orgId = String(params?.orgId || "").trim();
     if (!orgId) return json({ ok: false, error: "BAD_ORG" }, 400);
 
-    const db = env.DB;
-    if (!db) return json({ ok: false, error: "NO_DB" }, 500);
+    const db = getDB(env);
+    if (!db) return json({ ok: false, error: "DB_NOT_CONFIGURED" }, 500);
 
     const rows = await db
       .prepare(
@@ -59,7 +67,10 @@ export async function onRequestGet(context) {
       .bind(orgId)
       .all();
 
-    return json({ ok: true, items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem) });
+    return json({
+      ok: true,
+      items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem),
+    });
   } catch (err) {
     return json({ ok: false, error: "INTERNAL", detail: String(err?.message || err || "") }, 500);
   }
@@ -78,8 +89,8 @@ export async function onRequestPut(context) {
     const status = String(body?.review_status || "new").trim().toLowerCase();
     const adminNote = String(body?.admin_note || "");
 
-    const db = env.DB;
-    if (!db) return json({ ok: false, error: "NO_DB" }, 500);
+    const db = getDB(env);
+    if (!db) return json({ ok: false, error: "DB_NOT_CONFIGURED" }, 500);
 
     await db
       .prepare(
@@ -100,7 +111,10 @@ export async function onRequestPut(context) {
       .bind(orgId)
       .all();
 
-    return json({ ok: true, items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem) });
+    return json({
+      ok: true,
+      items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem),
+    });
   } catch (err) {
     return json({ ok: false, error: "INTERNAL", detail: String(err?.message || err || "") }, 500);
   }
