@@ -62,3 +62,17 @@
   0% { transform: translateX(-120%); }
   100% { transform: translateX(120%); }
 }
+
+.dash-grid {
+  display: flex;
+  margin-left: -16px;
+}
+
+.dash-grid-col {
+  padding-left: 16px;
+  background-clip: padding-box;
+}
+
+.dash-grid-col > div {
+  margin-bottom: 16px;
+}

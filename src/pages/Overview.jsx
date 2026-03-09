@@ -4,6 +4,28 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
+import Masonry from "react-masonry-css";
+
+const breakpoints = {
+  default: 3,
+  1100: 2,
+  700: 1
+};
+
+export default function Dashboard() {
+  return (
+    <Masonry
+      breakpointCols={breakpoints}
+      className="dash-grid"
+      columnClassName="dash-grid-col"
+    >
+      <InboxCard />
+      <InventoryCard />
+      <NeedsCard />
+      <MeetingsCard />
+    </Masonry>
+  );
+}
 
 function readOrgInfo(orgId) {
   try {
