@@ -5,6 +5,7 @@ import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
 import Masonry from "react-masonry-css";
+import "./overview.css";
 
 function readOrgInfo(orgId) {
   try {
@@ -692,227 +693,229 @@ export default function Overview() {
           ))
         )}
       </div>
-
+    {showSkeleton ? (
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
-        {showSkeleton ? (
-          <>
-            <SectionCardSkeleton rows={2} />
-            <SectionCardSkeleton rows={3} />
-            <SectionCardSkeleton rows={3} />
-            <SectionCardSkeleton rows={3} />
-            <SectionCardSkeleton rows={3} />
-          </>
-        ) : (
-          <>
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
-                  Manage
-                </button>
-              </div>
+        <SectionCardSkeleton rows={2} />
+        <SectionCardSkeleton rows={3} />
+        <SectionCardSkeleton rows={3} />
+        <SectionCardSkeleton rows={3} />
+        <SectionCardSkeleton rows={3} />
+      </div>
+    ) : (
+      <Masonry
+        breakpointCols={masonryBreakpoints}
+        className="bfDashMasonry"
+        columnClassName="bfDashMasonryCol"
+      >
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
+            <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
+              Manage
+            </button>
+          </div>
 
-              {publicInboxSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {publicInboxSorted.map((item) => {
-                    const kind = String(item?.kind || item?.type || "").toLowerCase();
-                    const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
-                    const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
-                    const who = safeStr(item?.name || "anonymous");
-                    const contact = safeStr(item?.contact || item?.email || item?.phone || "");
-                    const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
-                    const created = item?.created_at || item?.submitted_at;
-                    return (
-                      <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            {pill(title, tone)}
-                            <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
-                          </div>
-                          {created ? <div className="helper">{fmtDT(created)}</div> : null}
-                          {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
-                          {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
-                        </div>
+          {publicInboxSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {publicInboxSorted.map((item) => {
+                const kind = String(item?.kind || item?.type || "").toLowerCase();
+                const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+                const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+                const who = safeStr(item?.name || "anonymous");
+                const contact = safeStr(item?.contact || item?.email || item?.phone || "");
+                const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
+                const created = item?.created_at || item?.submitted_at;
+                return (
+                  <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {pill(title, tone)}
+                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
-              )}
-            </div>
-
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
-                <button className="btn" type="button" onClick={() => go("meetings")}>
-                  View all
-                </button>
-              </div>
-              {meetingsSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {meetingsSorted.map((m) => (
-                    <div key={m.id} className="card" style={{ padding: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                          {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
-                        </div>
-                        <button className="btn-red" type="button" onClick={() => rsvp(m)}>
-                          RSVP
-                        </button>
-                      </div>
-                      <div className="helper" style={{ marginTop: 6 }}>
-                        {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
-              )}
-            </div>
-
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
-                <button className="btn" type="button" onClick={() => go("inventory")}>
-                  Manage
-                </button>
-              </div>
-
-              {invCatStats.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {invCatStats.map((x) => {
-                    const pct = x.par > 0 ? x.pctClamped : 0;
-                    const label = x.category;
-                    return (
-                      <div key={label} style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                          <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                            {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
-                          </div>
-                        </div>
-                        <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                          <div
-                            style={{
-                              height: "100%",
-                              width: `${pct * 100}%`,
-                              background:
-                                pct <= 0.25
-                                  ? "#ff4d4d"   // red
-                                  : pct <= 0.5
-                                  ? "#ff9a3c"   // yellow/orange
-                                  : "#39d98a",  // green
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
-                    <div className="helper">
-                      {invLowItems.length ? (
-                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                          {invLowItems.map((item) => (
-                            <div key={item.id}>
-                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
-                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
-                                <div
-                                  style={{
-                                    width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                    background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
-                                    height: "100%",
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span>No low items below par.</span>
-                      )}
+                      {created ? <div className="helper">{fmtDT(created)}</div> : null}
+                      {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
+                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
-              )}
+                );
+              })}
             </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+          )}
+        </div>
 
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-                <button className="btn" type="button" onClick={() => go("needs")}>
-                  View all
-                </button>
-              </div>
-
-              {needsOpen.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {needsOpen.map((n) => {
-                    const pr = Number(n?.priority || 0);
-                    const urgency = String(n?.urgency || "").toLowerCase();
-                    const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
-                    const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
-                    return (
-                      <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          {pill(tone.toUpperCase(), tone)}
-                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-                        </div>
-                        <div className="helper" style={{ marginTop: 6 }}>
-                          {urgency ? `${urgency}` : "open"} · priority {pr}
-                        </div>
-                      </button>
-                    );
-                  })}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
+            <button className="btn" type="button" onClick={() => go("meetings")}>
+              View all
+            </button>
+          </div>
+          {meetingsSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {meetingsSorted.map((m) => (
+                <div key={m.id} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                      {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                    </div>
+                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                      RSVP
+                    </button>
+                  </div>
+                  <div className="helper" style={{ marginTop: 6 }}>
+                    {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
+                  </div>
                 </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
-              )}
+              ))}
             </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
+          )}
+        </div>
 
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-                <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
-                  View all
-                </button>
-              </div>
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
+            <button className="btn" type="button" onClick={() => go("inventory")}>
+              Manage
+            </button>
+          </div>
 
-              {pledgesSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {pledgesSorted.map((p) => {
-                    const status = String(p?.status || "").toLowerCase();
-                    const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
-                    const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
-                    const type = safeStr(p?.type || "").trim();
-                    const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
-                    const unit = safeStr(p?.unit || "").trim();
-                    const when = fmtDT(p?.created_at);
-                    return (
-                      <div key={p.id} style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          {pill(status || "pledge", tone)}
-                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                            {who}{type ? ` · ${type}` : ""}
+          {invCatStats.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {invCatStats.map((x) => {
+                const pct = x.par > 0 ? x.pctClamped : 0;
+                const label = x.category;
+                return (
+                  <div key={label} style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                        {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${pct * 100}%`,
+                          background:
+                            pct <= 0.25
+                              ? "#ff4d4d"
+                              : pct <= 0.5
+                              ? "#ff9a3c"
+                              : "#39d98a",
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+                <div className="helper">
+                  {invLowItems.length ? (
+                    <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                      {invLowItems.map((item) => (
+                        <div key={item.id}>
+                          <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                          <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                            <div
+                              style={{
+                                width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
+                                background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
+                                height: "100%",
+                              }}
+                            />
                           </div>
                         </div>
-                        <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  ) : (
+                    <span>No low items below par.</span>
+                  )}
                 </div>
-              ) : (
-                <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
-              )}
+              </div>
             </div>
-          </>
-        )}
-      </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
+          )}
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
+            <button className="btn" type="button" onClick={() => go("needs")}>
+              View all
+            </button>
+          </div>
+
+          {needsOpen.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {needsOpen.map((n) => {
+                const pr = Number(n?.priority || 0);
+                const urgency = String(n?.urgency || "").toLowerCase();
+                const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
+                const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
+                return (
+                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {pill(tone.toUpperCase(), tone)}
+                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
+                    </div>
+                    <div className="helper" style={{ marginTop: 6 }}>
+                      {urgency ? `${urgency}` : "open"} · priority {pr}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
+          )}
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
+            <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
+              View all
+            </button>
+          </div>
+
+          {pledgesSorted.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              {pledgesSorted.map((p) => {
+                const status = String(p?.status || "").toLowerCase();
+                const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
+                const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
+                const type = safeStr(p?.type || "").trim();
+                const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
+                const unit = safeStr(p?.unit || "").trim();
+                const when = fmtDT(p?.created_at);
+                return (
+                  <div key={p.id} style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      {pill(status || "pledge", tone)}
+                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                        {who}{type ? ` · ${type}` : ""}
+                      </div>
+                    </div>
+                    <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
+          )}
+        </div>
+      </Masonry>
+    )}
+
     </div>
   );
 }
