@@ -62,7 +62,7 @@ async function ensureTables(db) {
 async function listInbox(db, orgId) {
   const intakesRes = await db.prepare(`SELECT id, kind, name, contact, details, extra, status, admin_note, created_at, updated_at
                 FROM public_intakes
-                WHERE org_id=? AND kind IN ('get_help', 'offer_resources', 'volunteer')
+                WHERE org_id=? AND kind IN ('get_help', 'offer_resources', 'volunteer', 'inventory_request')
                 ORDER BY created_at DESC`).bind(orgId).all();
 
   const intakes = (intakesRes.results || []).map((row) => ({
@@ -76,6 +76,8 @@ async function listInbox(db, orgId) {
         ? "Offer Resources"
         : row.kind === "volunteer"
         ? "Volunteer"
+        : row.kind === "inventory_request"
+        ? "Inventory Request"
         : "Public Intake",
     name: row.name || "",
     contact: row.contact || "",

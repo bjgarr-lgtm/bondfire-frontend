@@ -8,7 +8,7 @@ function clean(v, max = 2000) {
 
 function normKind(v) {
   const s = String(v || "").trim().toLowerCase();
-  if (["get_help", "volunteer", "offer_resources"].includes(s)) return s;
+  if (["get_help", "volunteer", "offer_resources", "inventory_request"].includes(s)) return s;
   return "";
 }
 
