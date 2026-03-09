@@ -63,16 +63,17 @@
   100% { transform: translateX(120%); }
 }
 
-.dash-grid {
+.bfDashMasonry {
   display: flex;
-  margin-left: -16px;
+  margin-left: -12px;
+  width: auto;
 }
 
-.dash-grid-col {
-  padding-left: 16px;
+.bfDashMasonryCol {
+  padding-left: 12px;
   background-clip: padding-box;
 }
 
-.dash-grid-col > div {
-  margin-bottom: 16px;
+.bfDashMasonryCol > * {
+  margin-bottom: 12px;
 }
