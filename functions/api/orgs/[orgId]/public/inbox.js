@@ -1,4 +1,4 @@
-import { getDB } from "../../../../_bf.js";
+import { getDB } from "../../../_bf.js";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
