@@ -11,7 +11,7 @@ export async function onRequestPost(context) {
     const slug = String(params?.slug || "").trim().toLowerCase();
     if (!slug) return json({ ok: false, error: "BAD_SLUG" }, 400);
 
-    const db = env.DB;
+    const db = getDB(env);
     if (!db) return json({ ok: false, error: "NO_DB" }, 500);
 
     const pub = await db
