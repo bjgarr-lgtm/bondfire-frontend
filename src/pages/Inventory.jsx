@@ -658,11 +658,3 @@ export default function Inventory() {
     </div>
   );
 }
- need a zip now make it and stop making me ask twice for shit i ALWAYS need zipped to continue my workflow and if it breaks because i TOLD you the backend and dashboard and sparkline shit is correct, then im gonna lose it. it is JUST INVENTORY RIGHT NOW. fix the actual problem i fucking identified and leave everything else alone. 
-
-
-i dont know why you forgot that zips are the whole fucking point of all this but stop.
-
-ok now do it right and no overview no dashboard no anything but inventory unless truly literally functionally needed. if so warn me. 
-
-and yes go use what we just figured out out
