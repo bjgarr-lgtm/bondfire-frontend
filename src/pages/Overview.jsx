@@ -5,7 +5,7 @@ import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
 import Masonry from "react-masonry-css";
-import "./overview.css";
+import "./Overview.css";
 
 function readOrgInfo(orgId) {
   try {
