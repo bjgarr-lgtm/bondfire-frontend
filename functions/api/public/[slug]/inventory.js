@@ -1,53 +1,52 @@
-export async function onRequestGet(context) {
-  const { request, env, params } = context;
+// functions/api/public/[slug]/inventory.js
+import { getDB } from "../../_bf.js";
+import { getPublicCfg, getOrgIdBySlug } from "../../_lib/publicPageStore.js";
+
+export async function onRequestGet({ env, params }) {
   try {
     const slug = String(params?.slug || "").trim().toLowerCase();
-    if (!slug) {
-      return Response.json({ ok: false, error: "BAD_SLUG" }, { status: 400 });
-    }
-
-    const db = env.DB;
+    const db = getDB(env);
     if (!db) {
-      return Response.json({ ok: false, error: "NO_DB" }, { status: 500 });
+      return Response.json({ ok: false, error: "DB_NOT_CONFIGURED" }, { status: 500 });
     }
 
-    const pub = await db
-      .prepare(`select org_id from public_pages where lower(slug) = ? and enabled = 1 limit 1`)
-      .bind(slug)
-      .first();
-
-    if (!pub?.org_id) {
+    const orgId = await getOrgIdBySlug(env, slug);
+    if (!orgId) {
       return Response.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
     }
 
-    const rows = await db
+    const pub = await getPublicCfg(env, orgId);
+    if (!pub?.enabled) {
+      return Response.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
+    }
+
+    const r = await db
       .prepare(
-        `select
-          i.id,
-          i.name,
-          i.qty,
-          i.unit,
-          i.category,
-          i.notes,
-          i.location,
-          i.is_public,
-          i.encrypted_blob,
-          coalesce(ip.par, null) as par
-         from inventory i
-         left join inventory_pars ip
-           on ip.org_id = i.org_id and ip.inventory_id = i.id
-         where i.org_id = ?
-           and coalesce(i.is_public, 0) = 1
-           and coalesce(i.qty, 0) > 0
-         order by lower(coalesce(i.category, '')), lower(coalesce(i.name, ''))`
+        `SELECT
+           id,
+           org_id,
+           name,
+           qty,
+           unit,
+           category,
+           location,
+           notes,
+           is_public,
+           created_at,
+           updated_at
+         FROM inventory
+         WHERE org_id = ?
+           AND COALESCE(is_public, 0) = 1
+           AND COALESCE(qty, 0) > 0
+         ORDER BY lower(COALESCE(category, '')), lower(COALESCE(name, '')), updated_at DESC, created_at DESC`
       )
-      .bind(pub.org_id)
+      .bind(orgId)
       .all();
 
-    return Response.json({ ok: true, items: Array.isArray(rows?.results) ? rows.results : [] });
+    return Response.json({ ok: true, items: Array.isArray(r?.results) ? r.results : [] });
   } catch (err) {
     return Response.json(
-      { ok: false, error: "INTERNAL", detail: String(err?.message || err || "") },
+      { ok: false, error: "INTERNAL", detail: String(err?.message || err) },
       { status: 500 }
     );
   }
