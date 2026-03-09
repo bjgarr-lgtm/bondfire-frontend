@@ -1,64 +1,68 @@
-import { bad, ok, readJSON, now } from "../../_lib/http.js";
-import { getOrgIdBySlug } from "../../_lib/publicPageStore.js";
-import { getDB } from "../../_bf.js";
-
-function clean(v, max = 2000) {
-  return String(v || "").trim().slice(0, max);
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
-function normKind(v) {
-  const s = String(v || "").trim().toLowerCase();
-  if (["get_help", "volunteer", "offer_resources", "inventory_request"].includes(s)) return s;
-  return "";
-}
+export async function onRequestPost(context) {
+  const { env, params, request } = context;
+  try {
+    const slug = String(params?.slug || "").trim().toLowerCase();
+    if (!slug) return json({ ok: false, error: "BAD_SLUG" }, 400);
 
-async function ensureTable(db) {
-  await db.prepare(`CREATE TABLE IF NOT EXISTS public_intakes (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    name TEXT,
-    contact TEXT,
-    details TEXT,
-    extra TEXT,
-    status TEXT NOT NULL DEFAULT 'new',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  )`).run();
-  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_intakes_org_created ON public_intakes(org_id, created_at DESC)`).run();
-}
+    const db = env.DB;
+    if (!db) return json({ ok: false, error: "NO_DB" }, 500);
 
-export async function onRequestPost({ env, params, request }) {
-  const slug = String(params?.slug || "").trim();
-  if (!slug) return bad(400, "MISSING_SLUG");
+    const pub = await db
+      .prepare(`select org_id from public_pages where lower(slug) = ? and enabled = 1 limit 1`)
+      .bind(slug)
+      .first();
+    if (!pub?.org_id) return json({ ok: false, error: "NOT_FOUND" }, 404);
 
-  const orgId = await getOrgIdBySlug(env, slug);
-  if (!orgId) return bad(404, "NOT_FOUND");
+    const body = await request.json().catch(() => ({}));
+    const kind = String(body?.kind || "").trim().toLowerCase();
+    const name = String(body?.name || "").trim();
+    const contact = String(body?.contact || "").trim();
+    const details = String(body?.details || "").trim();
+    const extra = String(body?.extra || "").trim();
+    const items = Array.isArray(body?.items) ? body.items : [];
 
-  const db = getDB(env);
-  if (!db) return bad(500, "DB_NOT_CONFIGURED");
-  await ensureTable(db);
+    if (!kind) return json({ ok: false, error: "BAD_KIND" }, 400);
+    if (!name || !contact) return json({ ok: false, error: "MISSING_CONTACT" }, 400);
 
-  const body = await readJSON(request);
-  const kind = normKind(body?.kind);
-  if (!kind) return bad(400, "BAD_KIND");
+    const normalizedItems = items
+      .map((item) => ({
+        inventory_id: item?.inventory_id != null ? String(item.inventory_id) : "",
+        name: String(item?.name || "").trim(),
+        qty_requested: Math.max(1, Math.floor(Number(item?.qty_requested || 1) || 1)),
+        unit: String(item?.unit || "").trim(),
+        category: String(item?.category || "").trim(),
+      }))
+      .filter((item) => item.inventory_id || item.name);
 
-  const id = crypto.randomUUID();
-  const created = now();
-  await db.prepare(`INSERT INTO public_intakes (
-    id, org_id, kind, name, contact, details, extra, status, created_at, updated_at
-  ) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
-    id,
-    orgId,
-    kind,
-    clean(body?.name, 160),
-    clean(body?.contact, 220),
-    clean(body?.details, 4000),
-    clean(body?.extra, 4000),
-    "new",
-    created,
-    created,
-  ).run();
+    const detailText =
+      kind === "inventory_request" && normalizedItems.length
+        ? normalizedItems
+            .map((item) => `${item.name || "item"} x ${item.qty_requested}${item.unit ? ` ${item.unit}` : ""}`)
+            .join("\n")
+        : details;
 
-  return ok({ id, kind, saved: true });
+    const extraText =
+      kind === "inventory_request" && normalizedItems.length
+        ? JSON.stringify({ note: extra, items: normalizedItems })
+        : extra;
+
+    await db.prepare(
+      `insert into public_inbox
+        (org_id, type, source_kind, name, contact, details, extra, review_status, created_at, updated_at)
+       values (?, 'intake', ?, ?, ?, ?, ?, 'new', unixepoch('now') * 1000, unixepoch('now') * 1000)`
+    )
+      .bind(pub.org_id, kind, name, contact, detailText, extraText)
+      .run();
+
+    return json({ ok: true });
+  } catch (err) {
+    return json({ ok: false, error: "INTERNAL", detail: String(err?.message || err || "") }, 500);
+  }
 }

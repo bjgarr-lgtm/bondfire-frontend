@@ -1,145 +1,107 @@
-import { ok, err } from "../../../_lib/http.js";
-import { requireOrgRole } from "../../../_lib/auth.js";
-import { getDB } from "../../../_bf.js";
-
-function clean(v, max = 4000) {
-  return String(v || "").trim().slice(0, max);
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
-function normReviewStatus(v) {
-  const s = String(v || "").trim().toLowerCase();
-  if (["reviewed", "contacted", "closed"].includes(s)) return s;
-  return "new";
-}
+function mapInboxItem(row) {
+  const sourceKind = String(row?.source_kind || "").trim().toLowerCase();
+  const type = String(row?.type || "intake").trim().toLowerCase();
+  let title = "Public intake";
+  if (sourceKind === "get_help") title = "Get Help";
+  else if (sourceKind === "volunteer") title = "Volunteer";
+  else if (sourceKind === "offer_resources") title = "Offer Resources";
+  else if (sourceKind === "inventory_request") title = "Inventory Request";
+  else if (type === "rsvp") title = "Meeting RSVP";
 
-function normType(v) {
-  const s = String(v || "").trim().toLowerCase();
-  return s === "rsvp" ? "rsvp" : "intake";
-}
+  let details = String(row?.details || "").trim();
+  let extra = String(row?.extra || "").trim();
 
-async function ensureTables(db) {
-  await db.prepare(`CREATE TABLE IF NOT EXISTS public_intakes (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    name TEXT,
-    contact TEXT,
-    details TEXT,
-    extra TEXT,
-    status TEXT NOT NULL DEFAULT 'new',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  )`).run();
-  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_intakes_org_created ON public_intakes(org_id, created_at DESC)`).run();
-
-  await db.prepare(`CREATE TABLE IF NOT EXISTS public_meeting_rsvps (
-    id TEXT PRIMARY KEY,
-    org_id TEXT NOT NULL,
-    meeting_id TEXT NOT NULL,
-    name TEXT,
-    contact TEXT,
-    status TEXT NOT NULL,
-    note TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  )`).run();
-  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_meeting_rsvps_lookup ON public_meeting_rsvps(org_id, meeting_id, created_at DESC)`).run();
-
-  for (const sql of [
-    "ALTER TABLE public_intakes ADD COLUMN admin_note TEXT",
-    "ALTER TABLE public_meeting_rsvps ADD COLUMN admin_status TEXT DEFAULT 'new'",
-    "ALTER TABLE public_meeting_rsvps ADD COLUMN admin_note TEXT"
-  ]) {
+  if (sourceKind === "inventory_request" && extra) {
     try {
-      await db.prepare(sql).run();
-    } catch (e) {
-      const msg = String(e?.message || e).toLowerCase();
-      if (!msg.includes("duplicate") && !msg.includes("exists")) throw e;
+      const parsed = JSON.parse(extra);
+      if (parsed?.note) extra = String(parsed.note || "").trim();
+      if (Array.isArray(parsed?.items) && parsed.items.length) {
+        details = parsed.items
+          .map((item) => `${String(item?.name || "item").trim()} x ${Math.max(1, Math.floor(Number(item?.qty_requested || 1) || 1))}${item?.unit ? ` ${String(item.unit).trim()}` : ""}`)
+          .join("\n");
+      }
+    } catch {
+      // keep raw extra/details
     }
+  }
+
+  return {
+    ...row,
+    title,
+    details,
+    extra,
+  };
+}
+
+export async function onRequestGet(context) {
+  const { env, params } = context;
+  try {
+    const orgId = String(params?.orgId || "").trim();
+    if (!orgId) return json({ ok: false, error: "BAD_ORG" }, 400);
+
+    const db = env.DB;
+    if (!db) return json({ ok: false, error: "NO_DB" }, 500);
+
+    const rows = await db
+      .prepare(
+        `select id, org_id, type, source_kind, name, contact, details, extra, review_status, admin_note, created_at, updated_at
+         from public_inbox
+         where org_id = ?
+         order by coalesce(updated_at, created_at) desc, created_at desc`
+      )
+      .bind(orgId)
+      .all();
+
+    return json({ ok: true, items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem) });
+  } catch (err) {
+    return json({ ok: false, error: "INTERNAL", detail: String(err?.message || err || "") }, 500);
   }
 }
 
-async function listInbox(db, orgId) {
-  const intakesRes = await db.prepare(`SELECT id, kind, name, contact, details, extra, status, admin_note, created_at, updated_at
-                FROM public_intakes
-                WHERE org_id=? AND kind IN ('get_help', 'offer_resources', 'volunteer', 'inventory_request')
-                ORDER BY created_at DESC`).bind(orgId).all();
-
-  const intakes = (intakesRes.results || []).map((row) => ({
-    id: row.id,
-    type: "intake",
-    source_kind: row.kind || "",
-    title:
-      row.kind === "get_help"
-        ? "Get Help"
-        : row.kind === "offer_resources"
-        ? "Offer Resources"
-        : row.kind === "volunteer"
-        ? "Volunteer"
-        : row.kind === "inventory_request"
-        ? "Inventory Request"
-        : "Public Intake",
-    name: row.name || "",
-    contact: row.contact || "",
-    details: row.details || "",
-    extra: row.extra || "",
-    attendee_status: "",
-    review_status: row.status || "new",
-    admin_note: row.admin_note || "",
-    created_at: row.created_at || 0,
-    updated_at: row.updated_at || 0,
-    meeting_id: "",
-    meeting_title: "",
-    starts_at: null,
-    location: "",
-  }));
-
-  return [...intakes].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
-
-}
-
-export async function onRequest(context) {
-  const { env, request, params } = context;
-  const orgId = String(params?.orgId || "").trim();
-  if (!orgId) return err(400, "BAD_ORG_ID");
-
-  const db = getDB(env);
-  if (!db) return err(500, "DB_NOT_CONFIGURED");
-  await ensureTables(db);
-
-  const gate = await requireOrgRole({ env, request, orgId, minRole: "admin" });
-  if (!gate.ok) return gate.resp;
-
+export async function onRequestPut(context) {
+  const { env, params, request } = context;
   try {
-    if (request.method === "GET") {
-      const items = await listInbox(db, orgId);
-      return ok({ items });
-    }
+    const orgId = String(params?.orgId || "").trim();
+    if (!orgId) return json({ ok: false, error: "BAD_ORG" }, 400);
 
-    if (request.method === "PUT") {
-      const body = await request.json().catch(() => ({}));
-      const type = normType(body?.type);
-      const id = clean(body?.id, 128);
-      if (!id) return err(400, "MISSING_ID");
-      const reviewStatus = normReviewStatus(body?.review_status);
-      const adminNote = clean(body?.admin_note, 4000);
-      const t = Date.now();
+    const body = await request.json().catch(() => ({}));
+    const id = body?.id != null ? String(body.id) : "";
+    if (!id) return json({ ok: false, error: "BAD_ID" }, 400);
 
-      if (type !== "intake") return err(400, "RSVP_NOT_MANAGED_IN_PUBLIC_INBOX");
-      await db.prepare(`UPDATE public_intakes SET status=?, admin_note=?, updated_at=? WHERE org_id=? AND id=?`).bind(
-        reviewStatus,
-        adminNote,
-        t,
-        orgId,
-        id,
-      ).run();
+    const status = String(body?.review_status || "new").trim().toLowerCase();
+    const adminNote = String(body?.admin_note || "");
 
-      const items = await listInbox(db, orgId);
-      return ok({ items });
-    }
+    const db = env.DB;
+    if (!db) return json({ ok: false, error: "NO_DB" }, 500);
 
-    return err(405, "METHOD_NOT_ALLOWED");
-  } catch (e) {
-    return err(500, "SERVER_ERROR", { message: String(e?.message || e) });
+    await db
+      .prepare(
+        `update public_inbox
+         set review_status = ?, admin_note = ?, updated_at = unixepoch('now') * 1000
+         where org_id = ? and id = ?`
+      )
+      .bind(status, adminNote, orgId, id)
+      .run();
+
+    const rows = await db
+      .prepare(
+        `select id, org_id, type, source_kind, name, contact, details, extra, review_status, admin_note, created_at, updated_at
+         from public_inbox
+         where org_id = ?
+         order by coalesce(updated_at, created_at) desc, created_at desc`
+      )
+      .bind(orgId)
+      .all();
+
+    return json({ ok: true, items: (Array.isArray(rows?.results) ? rows.results : []).map(mapInboxItem) });
+  } catch (err) {
+    return json({ ok: false, error: "INTERNAL", detail: String(err?.message || err || "") }, 500);
   }
 }

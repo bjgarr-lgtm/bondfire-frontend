@@ -1,31 +1,54 @@
-// functions/api/public/[slug]/inventory.js
-import { getDB } from "../../_bf.js";
-import { getPublicCfg, getOrgIdBySlug } from "../../_lib/publicPageStore.js";
+export async function onRequestGet(context) {
+  const { request, env, params } = context;
+  try {
+    const slug = String(params?.slug || "").trim().toLowerCase();
+    if (!slug) {
+      return Response.json({ ok: false, error: "BAD_SLUG" }, { status: 400 });
+    }
 
-export async function onRequestGet({ env, params }) {
-  const slug = params.slug;
-  const db = getDB(env);
-  if (!db) return Response.json({ ok: false, error: "DB_NOT_CONFIGURED" }, { status: 500 });
+    const db = env.DB;
+    if (!db) {
+      return Response.json({ ok: false, error: "NO_DB" }, { status: 500 });
+    }
 
-  // Resolve slug to org
-  const orgId = await getOrgIdBySlug(env, slug);
-  if (!orgId) return Response.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
+    const pub = await db
+      .prepare(`select org_id from public_pages where lower(slug) = ? and enabled = 1 limit 1`)
+      .bind(slug)
+      .first();
 
-  // Public config gate
-  const pub = await getPublicCfg(env, orgId);
-  if (!pub?.enabled) return Response.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
+    if (!pub?.org_id) {
+      return Response.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
+    }
 
-  // Inventory table is expected to exist already via org routes.
-  // We only read public items.
-  const r = await db
-    .prepare(
-      `SELECT id, org_id, name, qty, unit, category, location, notes, is_public, created_at, updated_at
-       FROM inventory
-       WHERE org_id=? AND is_public=1
-       ORDER BY updated_at DESC, created_at DESC`
-    )
-    .bind(orgId)
-    .all();
+    const rows = await db
+      .prepare(
+        `select
+          i.id,
+          i.name,
+          i.qty,
+          i.unit,
+          i.category,
+          i.notes,
+          i.location,
+          i.is_public,
+          i.encrypted_blob,
+          coalesce(ip.par, null) as par
+         from inventory i
+         left join inventory_pars ip
+           on ip.org_id = i.org_id and ip.inventory_id = i.id
+         where i.org_id = ?
+           and coalesce(i.is_public, 0) = 1
+           and coalesce(i.qty, 0) > 0
+         order by lower(coalesce(i.category, '')), lower(coalesce(i.name, ''))`
+      )
+      .bind(pub.org_id)
+      .all();
 
-  return Response.json({ ok: true, items: r.results || [] });
+    return Response.json({ ok: true, items: Array.isArray(rows?.results) ? rows.results : [] });
+  } catch (err) {
+    return Response.json(
+      { ok: false, error: "INTERNAL", detail: String(err?.message || err || "") },
+      { status: 500 }
+    );
+  }
 }
