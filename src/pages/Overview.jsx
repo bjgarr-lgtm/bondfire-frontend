@@ -236,7 +236,7 @@ function SectionCardSkeleton({ rows = 3 }) {
 }
 
 function layoutKey(orgId) {
-  return `bf_dash_layouts_${orgId}`;
+  return `bf_dash_layouts_v2_${orgId}`;
 }
 
 function defaultLayouts() {
