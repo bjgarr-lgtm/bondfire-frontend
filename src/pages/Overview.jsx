@@ -264,11 +264,11 @@ function defaultLayouts() {
       { i: "pledges", x: 6, y: 12, w: 6, h: 6, minW: 4, minH: 5 },
     ],
     sm: [
-      { i: "inbox", x: 0, y: 0, w: 1, h: 12, minH: 6, static: True },
-      { i: "meetings", x: 0, y: 12, w: 1, h: 8, minH: 5, static: True },
-      { i: "inventory", x: 0, y: 20, w: 1, h: 8, minH: 5, static: True },
-      { i: "needs", x: 0, y: 28, w: 1, h: 8, minH: 5, static: True },
-      { i: "pledges", x: 0, y: 36, w: 1, h: 8, minH: 5, static: True },
+      { i: "inbox", x: 0, y: 0, w: 1, h: 12, minH: 6, static: true },
+      { i: "meetings", x: 0, y: 12, w: 1, h: 8, minH: 5, static: true },
+      { i: "inventory", x: 0, y: 20, w: 1, h: 8, minH: 5, static: true },
+      { i: "needs", x: 0, y: 28, w: 1, h: 8, minH: 5, static: true },
+      { i: "pledges", x: 0, y: 36, w: 1, h: 8, minH: 5, static: true },
     ],
   };
 }
