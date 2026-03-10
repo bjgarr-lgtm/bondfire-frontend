@@ -4,10 +4,9 @@
   display: grid;
   gap: 12px;
   margin-bottom: 12px;
-  grid-template-columns: repeat(6, minmax(160px, 1fr));
+  grid-template-columns: repeat(7, minmax(140px, 1fr));
 }
 
-/* Mobile: stop spilloff. Use horizontal snap-scroll instead of overflowing the viewport. */
 @media (max-width: 760px) {
   .bfTopMetricsRow {
     grid-template-columns: none;
@@ -19,15 +18,16 @@
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
   }
+
   .bfTopMetricsRow > * {
     scroll-snap-align: start;
   }
 }
 
-/* Hover glow for dashboard cards */
 .bfDashCard {
   transition: box-shadow 140ms ease, transform 140ms ease;
 }
+
 .bfDashCard:hover {
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.10),
@@ -35,21 +35,13 @@
   transform: translateY(-1px);
 }
 
-/* Drag hint */
-.bfDashCard[draggable="true"] {
-  cursor: grab;
-}
-.bfDashCard[draggable="true"]:active {
-  cursor: grabbing;
-}
-
-/* Skeleton blocks */
 .bfSkel {
   border-radius: 12px;
   background: rgba(255,255,255,0.06);
   overflow: hidden;
   position: relative;
 }
+
 .bfSkel::after {
   content: "";
   position: absolute;
@@ -58,22 +50,55 @@
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
   animation: bfShimmer 1.15s infinite;
 }
+
 @keyframes bfShimmer {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(120%); }
 }
 
-.bfDashMasonry {
-  display: flex;
-  margin-left: -12px;
-  width: auto;
+.layout {
+  min-height: 260px;
 }
 
-.bfDashMasonryCol {
-  padding-left: 12px;
-  background-clip: padding-box;
+.layout > div {
+  overflow: hidden;
 }
 
-.bfDashMasonryCol > * {
-  margin-bottom: 12px;
+.bfDashPanel {
+  height: 100%;
+  overflow: auto;
+}
+
+.bfDashGrab {
+  cursor: grab;
+  user-select: none;
+}
+
+.bfDashGrab:active {
+  cursor: grabbing;
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 0.45;
+}
+
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 0.9;
+}
+
+.react-grid-placeholder {
+  background: rgba(255, 0, 80, 0.12);
+  border: 1px dashed rgba(255, 0, 80, 0.35);
+  border-radius: 16px;
+}
+
+@media (max-width: 820px) {
+  .bfDashGrab,
+  .bfDashGrab:active {
+    cursor: default;
+  }
+
+  .bfDashPanel {
+    overflow: visible;
+  }
 }

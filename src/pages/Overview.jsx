@@ -1,11 +1,14 @@
-// src/pages/Overview.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { Responsive, WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
-import Masonry from "react-masonry-css";
 import "./Overview.css";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 function readOrgInfo(orgId) {
   try {
@@ -91,14 +94,6 @@ function writeRefreshBaseline(orgId, baseline) {
   } catch {}
 }
 
-function readPrevCounts(orgId) {
-  try {
-    return JSON.parse(localStorage.getItem(`bf_dash_counts_${orgId}`) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
 function writePrevCounts(orgId, counts) {
   try {
     localStorage.setItem(`bf_dash_counts_${orgId}`, JSON.stringify(counts || {}));
@@ -120,6 +115,14 @@ function appendDashHistory(orgId, sample) {
     const next = [...prev, sample].slice(-20);
     localStorage.setItem(`bf_dash_history_${orgId}`, JSON.stringify(next));
   } catch {}
+}
+
+function readInvPar(orgId) {
+  try {
+    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+  } catch {
+    return {};
+  }
 }
 
 function deltaBadge(delta) {
@@ -202,7 +205,7 @@ function SkeletonBox({ w = "100%", h = 12, r = 10, style }) {
 
 function MetricCardSkeleton({ icon = "⬛" }) {
   return (
-    <div className="card" style={{ padding: 14, position: "relative", minHeight: 98 }}>
+    <div className="card bfDashCard" style={{ padding: 14, position: "relative", minHeight: 98 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ fontSize: 18, opacity: 0.75 }}>{icon}</div>
         <SkeletonBox w={78} h={14} r={8} />
@@ -219,7 +222,7 @@ function MetricCardSkeleton({ icon = "⬛" }) {
 
 function SectionCardSkeleton({ rows = 3 }) {
   return (
-    <div className="card" style={{ padding: 16 }}>
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <SkeletonBox w={160} h={18} r={10} />
         <div style={{ marginLeft: "auto" }}>
@@ -240,25 +243,81 @@ function SectionCardSkeleton({ rows = 3 }) {
   );
 }
 
-function readInvPar(orgId) {
+function layoutKey(orgId) {
+  return `bf_dash_layouts_${orgId}`;
+}
+
+function defaultLayouts() {
+  return {
+    lg: [
+      { i: "inbox", x: 0, y: 0, w: 5, h: 12, minW: 3, minH: 6 },
+      { i: "meetings", x: 5, y: 0, w: 5, h: 7, minW: 3, minH: 5 },
+      { i: "inventory", x: 10, y: 0, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "needs", x: 5, y: 7, w: 5, h: 7, minW: 3, minH: 5 },
+      { i: "pledges", x: 10, y: 7, w: 4, h: 7, minW: 3, minH: 5 },
+    ],
+    md: [
+      { i: "inbox", x: 0, y: 0, w: 6, h: 10, minW: 4, minH: 6 },
+      { i: "meetings", x: 6, y: 0, w: 6, h: 6, minW: 4, minH: 5 },
+      { i: "inventory", x: 6, y: 6, w: 6, h: 6, minW: 4, minH: 5 },
+      { i: "needs", x: 0, y: 10, w: 6, h: 6, minW: 4, minH: 5 },
+      { i: "pledges", x: 6, y: 12, w: 6, h: 6, minW: 4, minH: 5 },
+    ],
+    sm: [
+      { i: "inbox", x: 0, y: 0, w: 1, h: 10, minH: 6 },
+      { i: "meetings", x: 0, y: 10, w: 1, h: 6, minH: 5 },
+      { i: "inventory", x: 0, y: 16, w: 1, h: 6, minH: 5 },
+      { i: "needs", x: 0, y: 22, w: 1, h: 6, minH: 5 },
+      { i: "pledges", x: 0, y: 28, w: 1, h: 6, minH: 5 },
+    ],
+  };
+}
+
+function readLayouts(orgId) {
   try {
-    return JSON.parse(localStorage.getItem(`bf_inv_par_${orgId}`) || "{}") || {};
+    const raw = JSON.parse(localStorage.getItem(layoutKey(orgId)) || "null");
+    if (!raw || typeof raw !== "object") return defaultLayouts();
+    const defs = defaultLayouts();
+    return {
+      lg: Array.isArray(raw.lg) ? raw.lg : defs.lg,
+      md: Array.isArray(raw.md) ? raw.md : defs.md,
+      sm: Array.isArray(raw.sm) ? raw.sm : defs.sm,
+    };
   } catch {
-    return {};
+    return defaultLayouts();
   }
 }
 
-const masonryBreakpoints = {
-  default: 3,
-  1100: 2,
-  700: 1,
-};
+function writeLayouts(orgId, layouts) {
+  try {
+    localStorage.setItem(layoutKey(orgId), JSON.stringify(layouts || defaultLayouts()));
+  } catch {}
+}
 
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
 
   const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
+  const [loading, setLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [err, setErr] = useState("");
+  const [counts, setCounts] = useState({});
+  const [people, setPeople] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [needs, setNeeds] = useState([]);
+  const [meetings, setMeetings] = useState([]);
+  const [subs, setSubs] = useState([]);
+  const [pledges, setPledges] = useState([]);
+  const [publicInbox, setPublicInbox] = useState([]);
+  const [rsvpMsg, setRsvpMsg] = useState("");
+  const [isNarrow, setIsNarrow] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia("(max-width: 820px)").matches;
+  });
+  const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
+  const [dashLayouts, setDashLayouts] = useState(() => readLayouts(orgId));
+
   useEffect(() => {
     setOrgInfo(readOrgInfo(orgId));
     const onChange = (e) => {
@@ -269,25 +328,6 @@ export default function Overview() {
     return () => window.removeEventListener("bf:org_settings_changed", onChange);
   }, [orgId]);
 
-  const [loading, setLoading] = useState(false);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  const [err, setErr] = useState("");
-
-  const [counts, setCounts] = useState({});
-  const [people, setPeople] = useState([]);
-  const [inventory, setInventory] = useState([]);
-  const [needs, setNeeds] = useState([]);
-  const [meetings, setMeetings] = useState([]);
-  const [subs, setSubs] = useState([]);
-  const [pledges, setPledges] = useState([]);
-  const [publicInbox, setPublicInbox] = useState([]);
-
-  const [rsvpMsg, setRsvpMsg] = useState("");
-
-  const [isNarrow, setIsNarrow] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.matchMedia && window.matchMedia("(max-width: 820px)").matches;
-  });
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(max-width: 820px)");
@@ -302,9 +342,9 @@ export default function Overview() {
     }
   }, []);
 
-  const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   useEffect(() => {
     setTickerDeltas({});
+    setDashLayouts(readLayouts(orgId));
   }, [orgId]);
 
   function countsNormalizedRef(c) {
@@ -327,7 +367,6 @@ export default function Overview() {
     setRsvpMsg("");
     try {
       const d = await api(`/api/orgs/${encodeURIComponent(orgId)}/dashboard`);
-
       const rawCounts = d?.counts || {};
       setCounts(rawCounts);
 
@@ -636,6 +675,12 @@ export default function Overview() {
     }
   }
 
+  function handleLayoutChange(currentLayout, allLayouts) {
+    if (!orgId || isNarrow) return;
+    setDashLayouts(allLayouts);
+    writeLayouts(orgId, allLayouts);
+  }
+
   const cardBtnStyle = {
     width: "100%",
     textAlign: "left",
@@ -644,6 +689,218 @@ export default function Overview() {
     padding: 0,
     cursor: "pointer",
   };
+
+  const inboxPanel = (
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
+      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
+        <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
+          Manage
+        </button>
+      </div>
+
+      {publicInboxSorted.length ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {publicInboxSorted.map((item) => {
+            const kind = String(item?.kind || item?.type || "").toLowerCase();
+            const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+            const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+            const who = safeStr(item?.name || "anonymous");
+            const contact = safeStr(item?.contact || item?.email || item?.phone || "");
+            const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
+            const created = item?.created_at || item?.submitted_at;
+            return (
+              <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    {pill(title, tone)}
+                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                  </div>
+                  {created ? <div className="helper">{fmtDT(created)}</div> : null}
+                  {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
+                  {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+      )}
+    </div>
+  );
+
+  const meetingsPanel = (
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
+      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
+        <button className="btn" type="button" onClick={() => go("meetings")}>
+          View all
+        </button>
+      </div>
+      {meetingsSorted.length ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {meetingsSorted.map((m) => (
+            <div key={m.id} className="card" style={{ padding: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                  {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                </div>
+                <button className="btn-red" type="button" onClick={() => rsvp(m)}>
+                  RSVP
+                </button>
+              </div>
+              <div className="helper" style={{ marginTop: 6 }}>
+                {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
+      )}
+    </div>
+  );
+
+  const inventoryPanel = (
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
+      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
+        <button className="btn" type="button" onClick={() => go("inventory")}>
+          Manage
+        </button>
+      </div>
+
+      {invCatStats.length ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {invCatStats.map((x) => {
+            const pct = x.par > 0 ? x.pctClamped : 0;
+            const label = x.category;
+            return (
+              <div key={label} style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                  <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                    {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                  </div>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${pct * 100}%`,
+                      background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a",
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+            <div className="helper">
+              {invLowItems.length ? (
+                <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                  {invLowItems.map((item) => (
+                    <div key={item.id}>
+                      <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                      <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
+                            background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
+                            height: "100%",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span>No low items below par.</span>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
+      )}
+    </div>
+  );
+
+  const needsPanel = (
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
+      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
+        <button className="btn" type="button" onClick={() => go("needs")}>
+          View all
+        </button>
+      </div>
+
+      {needsOpen.length ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {needsOpen.map((n) => {
+            const pr = Number(n?.priority || 0);
+            const urgency = String(n?.urgency || "").toLowerCase();
+            const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
+            const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
+            return (
+              <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {pill(tone.toUpperCase(), tone)}
+                  <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
+                </div>
+                <div className="helper" style={{ marginTop: 6 }}>
+                  {urgency ? `${urgency}` : "open"} · priority {pr}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
+      )}
+    </div>
+  );
+
+  const pledgesPanel = (
+    <div className="card bfDashPanel" style={{ padding: 16 }}>
+      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
+        <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
+          View all
+        </button>
+      </div>
+
+      {pledgesSorted.length ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {pledgesSorted.map((p) => {
+            const status = String(p?.status || "").toLowerCase();
+            const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
+            const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
+            const type = safeStr(p?.type || "").trim();
+            const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
+            const unit = safeStr(p?.unit || "").trim();
+            const when = fmtDT(p?.created_at);
+            return (
+              <div key={p.id} style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {pill(status || "pledge", tone)}
+                  <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                    {who}{type ? ` · ${type}` : ""}
+                  </div>
+                </div>
+                <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ padding: 16 }}>
@@ -656,14 +913,7 @@ export default function Overview() {
 
       <OrgKeyBackupNudge orgId={orgId} />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isNarrow ? "repeat(2, minmax(0, 1fr))" : "repeat(7, minmax(140px, 1fr))",
-          gap: isNarrow ? 10 : 12,
-          marginBottom: 12,
-        }}
-      >
+      <div className="bfTopMetricsRow">
         {!hasLoadedOnce && loading ? (
           <>
             {["👥", "📦", "🧾", "📅", "🤝", "📨", "📰"].map((ic, i) => (
@@ -675,7 +925,7 @@ export default function Overview() {
         ) : (
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
-              <div className="card" style={{ padding: 14, position: "relative", minHeight: 118, overflow: "hidden" }}>
+              <div className="card bfDashCard" style={{ padding: 14, position: "relative", minHeight: 118, overflow: "hidden" }}>
                 {c.badge ? (
                   <div style={{ position: "absolute", top: 12, right: 12 }}>
                     <span style={c.badge.style}>{c.badge.txt}</span>
@@ -693,229 +943,40 @@ export default function Overview() {
           ))
         )}
       </div>
-    {showSkeleton ? (
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
-        <SectionCardSkeleton rows={2} />
-        <SectionCardSkeleton rows={3} />
-        <SectionCardSkeleton rows={3} />
-        <SectionCardSkeleton rows={3} />
-        <SectionCardSkeleton rows={3} />
-      </div>
-    ) : (
-      <Masonry
-        breakpointCols={masonryBreakpoints}
-        className="bfDashMasonry"
-        columnClassName="bfDashMasonryCol"
-      >
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
-            <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
-              Manage
-            </button>
-          </div>
 
-          {publicInboxSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {publicInboxSorted.map((item) => {
-                const kind = String(item?.kind || item?.type || "").toLowerCase();
-                const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
-                const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
-                const who = safeStr(item?.name || "anonymous");
-                const contact = safeStr(item?.contact || item?.email || item?.phone || "");
-                const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
-                const created = item?.created_at || item?.submitted_at;
-                return (
-                  <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        {pill(title, tone)}
-                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
-                      </div>
-                      {created ? <div className="helper">{fmtDT(created)}</div> : null}
-                      {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
-                      {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
-          )}
+      {showSkeleton ? (
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
+          <SectionCardSkeleton rows={2} />
+          <SectionCardSkeleton rows={3} />
+          <SectionCardSkeleton rows={3} />
+          <SectionCardSkeleton rows={3} />
+          <SectionCardSkeleton rows={3} />
         </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
-            <button className="btn" type="button" onClick={() => go("meetings")}>
-              View all
-            </button>
-          </div>
-          {meetingsSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {meetingsSorted.map((m) => (
-                <div key={m.id} className="card" style={{ padding: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                      {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
-                    </div>
-                    <button className="btn-red" type="button" onClick={() => rsvp(m)}>
-                      RSVP
-                    </button>
-                  </div>
-                  <div className="helper" style={{ marginTop: 6 }}>
-                    {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
-            <button className="btn" type="button" onClick={() => go("inventory")}>
-              Manage
-            </button>
-          </div>
-
-          {invCatStats.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {invCatStats.map((x) => {
-                const pct = x.par > 0 ? x.pctClamped : 0;
-                const label = x.category;
-                return (
-                  <div key={label} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                      <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                        {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
-                      </div>
-                    </div>
-                    <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                      <div
-                        style={{
-                          height: "100%",
-                          width: `${pct * 100}%`,
-                          background:
-                            pct <= 0.25
-                              ? "#ff4d4d"
-                              : pct <= 0.5
-                              ? "#ff9a3c"
-                              : "#39d98a",
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
-                <div className="helper">
-                  {invLowItems.length ? (
-                    <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                      {invLowItems.map((item) => (
-                        <div key={item.id}>
-                          <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
-                          <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
-                            <div
-                              style={{
-                                width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                                background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
-                                height: "100%",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span>No low items below par.</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-            <button className="btn" type="button" onClick={() => go("needs")}>
-              View all
-            </button>
-          </div>
-
-          {needsOpen.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {needsOpen.map((n) => {
-                const pr = Number(n?.priority || 0);
-                const urgency = String(n?.urgency || "").toLowerCase();
-                const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
-                const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
-                return (
-                  <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      {pill(tone.toUpperCase(), tone)}
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-                    </div>
-                    <div className="helper" style={{ marginTop: 6 }}>
-                      {urgency ? `${urgency}` : "open"} · priority {pr}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
-          )}
-        </div>
-
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-            <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
-              View all
-            </button>
-          </div>
-
-          {pledgesSorted.length ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {pledgesSorted.map((p) => {
-                const status = String(p?.status || "").toLowerCase();
-                const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
-                const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
-                const type = safeStr(p?.type || "").trim();
-                const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
-                const unit = safeStr(p?.unit || "").trim();
-                const when = fmtDT(p?.created_at);
-                return (
-                  <div key={p.id} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      {pill(status || "pledge", tone)}
-                      <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                        {who}{type ? ` · ${type}` : ""}
-                      </div>
-                    </div>
-                    <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
-          )}
-        </div>
-      </Masonry>
-    )}
-
+      ) : (
+        <ResponsiveGridLayout
+          className="layout"
+          layouts={dashLayouts}
+          breakpoints={{ lg: 1200, md: 996, sm: 0 }}
+          cols={{ lg: 14, md: 12, sm: 1 }}
+          rowHeight={34}
+          margin={[12, 12]}
+          containerPadding={[0, 0]}
+          isDraggable={!isNarrow}
+          isResizable={!isNarrow}
+          draggableHandle=".bfDashGrab"
+          onLayoutChange={handleLayoutChange}
+          compactType="vertical"
+          preventCollision={false}
+          measureBeforeMount={false}
+          useCSSTransforms={true}
+        >
+          <div key="inbox">{inboxPanel}</div>
+          <div key="meetings">{meetingsPanel}</div>
+          <div key="inventory">{inventoryPanel}</div>
+          <div key="needs">{needsPanel}</div>
+          <div key="pledges">{pledgesPanel}</div>
+        </ResponsiveGridLayout>
+      )}
     </div>
   );
 }
