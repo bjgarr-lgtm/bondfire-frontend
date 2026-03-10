@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as ReactGridLayout from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
@@ -262,11 +264,11 @@ function defaultLayouts() {
       { i: "pledges", x: 6, y: 12, w: 6, h: 6, minW: 4, minH: 5 },
     ],
     sm: [
-      { i: "inbox", x: 0, y: 0, w: 1, h: 10, minH: 6 },
-      { i: "meetings", x: 0, y: 10, w: 1, h: 6, minH: 5 },
-      { i: "inventory", x: 0, y: 16, w: 1, h: 6, minH: 5 },
-      { i: "needs", x: 0, y: 22, w: 1, h: 6, minH: 5 },
-      { i: "pledges", x: 0, y: 28, w: 1, h: 6, minH: 5 },
+      { i: "inbox", x: 0, y: 0, w: 1, h: 12, minH: 6, static: True },
+      { i: "meetings", x: 0, y: 12, w: 1, h: 8, minH: 5, static: True },
+      { i: "inventory", x: 0, y: 20, w: 1, h: 8, minH: 5, static: True },
+      { i: "needs", x: 0, y: 28, w: 1, h: 8, minH: 5, static: True },
+      { i: "pledges", x: 0, y: 36, w: 1, h: 8, minH: 5, static: True },
     ],
   };
 }
@@ -378,7 +380,6 @@ export default function Overview() {
       }
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
-
       let needsRawFinal = needsRaw;
       const needsLooksScrubbed =
         Array.isArray(needsRaw) &&
@@ -574,11 +575,9 @@ export default function Overview() {
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const catRaw = it?.category ?? it?.cat ?? it?.Category ?? it?.CATEGORY ?? "";
       const cat = safeStr(catRaw).trim().toLowerCase() || "uncategorized";
-
       const id = it?.id != null ? String(it.id) : "";
       const parV = Number(parMap?.[id]);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
-
       const cur = map.get(cat) || { category: cat, qty: 0, par: 0, items: 0 };
       cur.qty += qty;
       cur.par += par;
@@ -605,7 +604,6 @@ export default function Overview() {
     const arr = Array.isArray(inventory) ? inventory : [];
     const parMap = invPar || {};
     const lows = [];
-
     for (const it of arr) {
       const id = it?.id != null ? String(it.id) : "";
       const raw = parMap?.[id];
@@ -613,13 +611,11 @@ export default function Overview() {
       const parV = Number(raw);
       const par = Number.isFinite(parV) && parV > 0 ? parV : 0;
       if (!par) continue;
-
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const pct = qty / par;
       if (pct < 1) lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
     }
-
     lows.sort((a, b) => a.pct - b.pct);
     return lows.slice(0, 4);
   }, [inventory, invPar]);
@@ -642,14 +638,7 @@ export default function Overview() {
     writeLayouts(orgId, allLayouts);
   }
 
-  const cardBtnStyle = {
-    width: "100%",
-    textAlign: "left",
-    border: "none",
-    background: "transparent",
-    padding: 0,
-    cursor: "pointer",
-  };
+  const cardBtnStyle = { width: "100%", textAlign: "left", border: "none", background: "transparent", padding: 0, cursor: "pointer" };
 
   const panelWrap = (title, button, content) => (
     <div className="card bfDashPanel" style={{ padding: 16 }}>
@@ -675,11 +664,7 @@ export default function Overview() {
       <div className="bfTopMetricsRow">
         {!hasLoadedOnce && loading ? (
           <>
-            {["👥", "📦", "🧾", "📅", "🤝", "📨", "📰"].map((ic, i) => (
-              <div key={i}>
-                <MetricCardSkeleton icon={ic} />
-              </div>
-            ))}
+            {["👥", "📦", "🧾", "📅", "🤝", "📨", "📰"].map((ic, i) => <div key={i}><MetricCardSkeleton icon={ic} /></div>)}
           </>
         ) : (
           topCards.map((c) => (
@@ -763,9 +748,7 @@ export default function Overview() {
                   {meetingsSorted.map((m) => (
                     <div key={m.id} className="card" style={{ padding: 12 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                          {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
-                        </div>
+                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}</div>
                         <button className="btn-red" type="button" onClick={() => rsvp(m)}>RSVP</button>
                       </div>
                       <div className="helper" style={{ marginTop: 6 }}>
@@ -789,9 +772,7 @@ export default function Overview() {
                       <div key={label} style={{ display: "grid", gap: 6 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                          <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                            {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
-                          </div>
+                          <div className="helper" style={{ whiteSpace: "nowrap" }}>{Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}</div>
                         </div>
                         <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
                           <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a" }} />
@@ -836,9 +817,7 @@ export default function Overview() {
                           {pill(tone.toUpperCase(), tone)}
                           <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
                         </div>
-                        <div className="helper" style={{ marginTop: 6 }}>
-                          {urgency ? `${urgency}` : "open"} · priority {pr}
-                        </div>
+                        <div className="helper" style={{ marginTop: 6 }}>{urgency ? `${urgency}` : "open"} · priority {pr}</div>
                       </button>
                     );
                   })}

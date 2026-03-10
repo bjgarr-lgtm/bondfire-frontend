@@ -57,15 +57,32 @@
 }
 
 .layout {
-  min-height: 260px;
+  min-height: 320px;
 }
 
-.layout > div {
-  overflow: hidden;
+.react-grid-layout {
+  position: relative;
+}
+
+.react-grid-item {
+  box-sizing: border-box;
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 0.45;
+}
+
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 0.9;
+}
+
+.react-grid-item > .card {
+  width: 100%;
 }
 
 .bfDashPanel {
   height: 100%;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -76,14 +93,6 @@
 
 .bfDashGrab:active {
   cursor: grabbing;
-}
-
-.react-grid-item > .react-resizable-handle {
-  opacity: 0.45;
-}
-
-.react-grid-item:hover > .react-resizable-handle {
-  opacity: 0.9;
 }
 
 .react-grid-placeholder {
