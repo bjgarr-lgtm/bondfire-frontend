@@ -82,9 +82,9 @@
 }
 
 .bfDashPanel {
-  height: 100%;
+  height: auto;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
 }
 
 .bfDashGrab {
@@ -111,4 +111,8 @@
   .bfDashPanel {
     overflow: visible;
   }
+}
+
+.react-grid-item {
+  height: auto !important;
 }
