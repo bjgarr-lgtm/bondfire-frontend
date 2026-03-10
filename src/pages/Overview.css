@@ -1,4 +1,4 @@
-/* Dashboard polish: responsive top metrics row + hover glow + skeletons */
+/* Dashboard polish */
 
 .bfTopMetricsRow {
   display: grid;
@@ -56,11 +56,12 @@
   100% { transform: translateX(120%); }
 }
 
-.layout {
+.bfDashGridWrap {
+  width: 100%;
   min-height: 320px;
 }
 
-.react-grid-layout {
+.layout {
   position: relative;
 }
 

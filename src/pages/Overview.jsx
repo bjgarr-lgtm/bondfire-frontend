@@ -1,16 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import * as ReactGridLayout from "react-grid-layout";
+import { Responsive } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
 import "./Overview.css";
-
-const Responsive = ReactGridLayout.Responsive;
-const WidthProvider = ReactGridLayout.WidthProvider || ((Comp) => Comp);
-const ResponsiveGridLayout = WidthProvider(Responsive);
 
 function readOrgInfo(orgId) {
   try {
@@ -159,7 +155,6 @@ function Sparkline({ values, width = 120, height = 32 }) {
   const min = Math.min(...v);
   const max = Math.max(...v);
   const range = max - min || 1;
-
   const pad = 2;
   const w = Math.max(10, width);
   const h = Math.max(10, height);
@@ -174,10 +169,7 @@ function Sparkline({ values, width = 120, height = 32 }) {
 
   const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ");
   const areaD = `${d} L${(pad + innerW).toFixed(2)},${(pad + innerH).toFixed(2)} L${pad.toFixed(2)},${(pad + innerH).toFixed(2)} Z`;
-
-  const last = v[v.length - 1];
-  const first = v[0];
-  const trendUp = last >= first;
+  const trendUp = v[v.length - 1] >= v[0];
 
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
@@ -297,6 +289,7 @@ function writeLayouts(orgId, layouts) {
 export default function Overview() {
   const nav = useNavigate();
   const { orgId } = useParams();
+  const gridWrapRef = useRef(null);
 
   const [orgInfo, setOrgInfo] = useState(() => readOrgInfo(orgId));
   const [loading, setLoading] = useState(false);
@@ -317,6 +310,7 @@ export default function Overview() {
   });
   const [tickerDeltas, setTickerDeltas] = useState(() => ({}));
   const [dashLayouts, setDashLayouts] = useState(() => readLayouts(orgId));
+  const [gridWidth, setGridWidth] = useState(0);
 
   useEffect(() => {
     setOrgInfo(readOrgInfo(orgId));
@@ -343,6 +337,23 @@ export default function Overview() {
   }, []);
 
   useEffect(() => {
+    if (!gridWrapRef.current || typeof ResizeObserver === "undefined") return;
+    const el = gridWrapRef.current;
+    const update = () => {
+      const next = Math.max(0, Math.floor(el.getBoundingClientRect().width));
+      setGridWidth(next);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  useEffect(() => {
     setTickerDeltas({});
     setDashLayouts(readLayouts(orgId));
   }, [orgId]);
@@ -359,8 +370,8 @@ export default function Overview() {
 
       const pplRaw = Array.isArray(d?.people) ? d.people : (await api(`/api/orgs/${encodeURIComponent(orgId)}/people`))?.people;
       const invRaw = Array.isArray(d?.inventory) ? d.inventory : (await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`))?.items;
-
       let invRawFinal = invRaw;
+
       const invLooksScrubbed =
         Array.isArray(invRaw) &&
         invRaw.length > 0 &&
@@ -370,6 +381,7 @@ export default function Overview() {
           const nm = String(it && (it.name || it.title || "")).toLowerCase();
           return !blob && (!cat || cat === "" || cat === "__encrypted__" || cat === "_encrypted_") && (nm.includes("encrypted") || nm === "");
         });
+
       if (invLooksScrubbed) {
         try {
           const invFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/inventory`);
@@ -381,6 +393,7 @@ export default function Overview() {
 
       const needsRaw = Array.isArray(d?.needs) ? d.needs : (await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`))?.needs;
       let needsRawFinal = needsRaw;
+
       const needsLooksScrubbed =
         Array.isArray(needsRaw) &&
         needsRaw.length > 0 &&
@@ -390,6 +403,7 @@ export default function Overview() {
           const title = String(n && (n.title || "")).toLowerCase();
           return !hasPriority || (!blob && (title.includes("encrypted") || title === "__encrypted__" || title === "_encrypted_"));
         });
+
       if (needsLooksScrubbed) {
         try {
           const needsFull = await api(`/api/orgs/${encodeURIComponent(orgId)}/needs`);
@@ -460,7 +474,7 @@ export default function Overview() {
   }, [orgId]);
 
   if (!orgId) {
-    return <div style={{ padding: 16 }}><style>{`@keyframes bfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -40% 0; } }`}</style>No org selected.</div>;
+    return <div style={{ padding: 16 }}>No org selected.</div>;
   }
 
   const go = (tab) => nav(`/org/${encodeURIComponent(orgId)}/${tab}`);
@@ -509,39 +523,6 @@ export default function Overview() {
       subsTotal: mk("subsTotal", countsNormalized.subsTotal),
     };
   }, [orgId, countsNormalized]);
-
-  const showSkeleton = loading && !hasLoadedOnce;
-
-  const topCards = useMemo(() => {
-    const mk = (key, title, icon, value, sub, to) => {
-      const db = deltaBadge(deltas[key]);
-      return {
-        key,
-        title,
-        icon,
-        value,
-        sub,
-        to,
-        badge: db,
-        extra: (
-          <div style={{ marginTop: 8, borderRadius: 8, padding: "4px 6px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", width: "100%", boxSizing: "border-box" }} title={`${title.toLowerCase()} trend`}>
-            <div style={{ width: "100%", height: 18, overflow: "hidden" }}>
-              <Sparkline values={historySeries[key]} width={96} height={18} />
-            </div>
-          </div>
-        ),
-      };
-    };
-    return [
-      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
-      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
-      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
-      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
-      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
-      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
-    ];
-  }, [countsNormalized, deltas, historySeries]);
 
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
@@ -632,7 +613,7 @@ export default function Overview() {
     }
   }
 
-  function handleLayoutChange(currentLayout, allLayouts) {
+  function handleLayoutChange(_currentLayout, allLayouts) {
     if (!orgId || isNarrow) return;
     setDashLayouts(allLayouts);
     writeLayouts(orgId, allLayouts);
@@ -649,6 +630,37 @@ export default function Overview() {
       {content}
     </div>
   );
+
+  const topCards = useMemo(() => {
+    const mk = (key, title, icon, value, sub, to) => {
+      const db = deltaBadge(deltas[key]);
+      return {
+        key,
+        title,
+        icon,
+        value,
+        sub,
+        to,
+        badge: db,
+        extra: (
+          <div style={{ marginTop: 8, borderRadius: 8, padding: "4px 6px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", width: "100%", boxSizing: "border-box" }} title={`${title.toLowerCase()} trend`}>
+            <div style={{ width: "100%", height: 18, overflow: "hidden" }}>
+              <Sparkline values={historySeries[key]} width={96} height={18} />
+            </div>
+          </div>
+        ),
+      };
+    };
+    return [
+      mk("people", "People", "👥", countsNormalized.people, "members", "people"),
+      mk("inventory", "Inventory", "📦", countsNormalized.inventory, "items", "inventory"),
+      mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
+      mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
+      mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
+      mk("publicInbox", "Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
+      mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
+    ];
+  }, [countsNormalized, deltas, historySeries]);
 
   return (
     <div style={{ padding: 16 }}>
@@ -684,7 +696,7 @@ export default function Overview() {
         )}
       </div>
 
-      {showSkeleton ? (
+      {loading && !hasLoadedOnce ? (
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
           <SectionCardSkeleton rows={2} />
           <SectionCardSkeleton rows={3} />
@@ -693,166 +705,34 @@ export default function Overview() {
           <SectionCardSkeleton rows={3} />
         </div>
       ) : (
-        <ResponsiveGridLayout
-          className="layout"
-          layouts={dashLayouts}
-          breakpoints={{ lg: 1200, md: 996, sm: 0 }}
-          cols={{ lg: 14, md: 12, sm: 1 }}
-          rowHeight={34}
-          margin={[12, 12]}
-          containerPadding={[0, 0]}
-          isDraggable={!isNarrow}
-          isResizable={!isNarrow}
-          draggableHandle=".bfDashGrab"
-          onLayoutChange={handleLayoutChange}
-          compactType="vertical"
-          preventCollision={false}
-          measureBeforeMount={false}
-          useCSSTransforms={true}
-        >
-          <div key="inbox">
-            {panelWrap("Inbox", <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>Manage</button>,
-              publicInboxSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {publicInboxSorted.map((item) => {
-                    const kind = String(item?.kind || item?.type || "").toLowerCase();
-                    const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
-                    const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
-                    const who = safeStr(item?.name || "anonymous");
-                    const contact = safeStr(item?.contact || item?.email || item?.phone || "");
-                    const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
-                    const created = item?.created_at || item?.submitted_at;
-                    return (
-                      <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            {pill(title, tone)}
-                            <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
-                          </div>
-                          {created ? <div className="helper">{fmtDT(created)}</div> : null}
-                          {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
-                          {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
-            )}
-          </div>
-
-          <div key="meetings">
-            {panelWrap("Next Meetings", <button className="btn" type="button" onClick={() => go("meetings")}>View all</button>,
-              meetingsSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {meetingsSorted.map((m) => (
-                    <div key={m.id} className="card" style={{ padding: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}</div>
-                        <button className="btn-red" type="button" onClick={() => rsvp(m)}>RSVP</button>
-                      </div>
-                      <div className="helper" style={{ marginTop: 6 }}>
-                        {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
-            )}
-          </div>
-
-          <div key="inventory">
-            {panelWrap("Inventory at a Glance", <button className="btn" type="button" onClick={() => go("inventory")}>Manage</button>,
-              invCatStats.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {invCatStats.map((x) => {
-                    const pct = x.par > 0 ? x.pctClamped : 0;
-                    const label = x.category;
-                    return (
-                      <div key={label} style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                          <div className="helper" style={{ whiteSpace: "nowrap" }}>{Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}</div>
-                        </div>
-                        <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a" }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
-                    <div className="helper">
-                      {invLowItems.length ? (
-                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                          {invLowItems.map((item) => (
-                            <div key={item.id}>
-                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
-                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
-                                <div style={{ width: `${Math.min(100, (item.qty / item.par) * 100)}%`, background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e", height: "100%" }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : <span>No low items below par.</span>}
-                    </div>
-                  </div>
-                </div>
-              ) : <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
-            )}
-          </div>
-
-          <div key="needs">
-            {panelWrap("Open Needs", <button className="btn" type="button" onClick={() => go("needs")}>View all</button>,
-              needsOpen.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {needsOpen.map((n) => {
-                    const pr = Number(n?.priority || 0);
-                    const urgency = String(n?.urgency || "").toLowerCase();
-                    const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
-                    const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
-                    return (
-                      <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          {pill(tone.toUpperCase(), tone)}
-                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-                        </div>
-                        <div className="helper" style={{ marginTop: 6 }}>{urgency ? `${urgency}` : "open"} · priority {pr}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
-            )}
-          </div>
-
-          <div key="pledges">
-            {panelWrap("Recent Pledges", <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>View all</button>,
-              pledgesSorted.length ? (
-                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  {pledgesSorted.map((p) => {
-                    const status = String(p?.status || "").toLowerCase();
-                    const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
-                    const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
-                    const type = safeStr(p?.type || "").trim();
-                    const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
-                    const unit = safeStr(p?.unit || "").trim();
-                    const when = fmtDT(p?.created_at);
-                    return (
-                      <div key={p.id} style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          {pill(status || "pledge", tone)}
-                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}{type ? ` · ${type}` : ""}</div>
-                        </div>
-                        <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
-            )}
-          </div>
-        </ResponsiveGridLayout>
+        <div ref={gridWrapRef} className="bfDashGridWrap">
+          {gridWidth > 0 ? (
+            <Responsive
+              className="layout"
+              width={gridWidth}
+              layouts={dashLayouts}
+              breakpoints={{ lg: 1200, md: 996, sm: 0 }}
+              cols={{ lg: 14, md: 12, sm: 1 }}
+              rowHeight={34}
+              margin={[12, 12]}
+              containerPadding={[0, 0]}
+              isDraggable={!isNarrow}
+              isResizable={!isNarrow}
+              draggableHandle=".bfDashGrab"
+              onLayoutChange={handleLayoutChange}
+              compactType="vertical"
+              preventCollision={false}
+              measureBeforeMount={false}
+              useCSSTransforms={true}
+            >
+              <div key="inbox">{panelWrap("Inbox", <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>Manage</button>, publicInboxSorted.length ? <div style={{ marginTop: 12, display: "grid", gap: 10 }}>{publicInboxSorted.map((item) => { const kind = String(item?.kind || item?.type || "").toLowerCase(); const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered"; const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help"; const who = safeStr(item?.name || "anonymous"); const contact = safeStr(item?.contact || item?.email || item?.phone || ""); const details = safeStr(item?.details || item?.message || item?.notes || "").trim(); const created = item?.created_at || item?.submitted_at; return <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}><div style={{ display: "grid", gap: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>{pill(title, tone)}<div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div></div>{created ? <div className="helper">{fmtDT(created)}</div> : null}{contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}{details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}</div></div>; })}</div> : <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>)}</div>
+              <div key="meetings">{panelWrap("Next Meetings", <button className="btn" type="button" onClick={() => go("meetings")}>View all</button>, meetingsSorted.length ? <div style={{ marginTop: 12, display: "grid", gap: 10 }}>{meetingsSorted.map((m) => <div key={m.id} className="card" style={{ padding: 12 }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}</div><button className="btn-red" type="button" onClick={() => rsvp(m)}>RSVP</button></div><div className="helper" style={{ marginTop: 6 }}>{fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}</div></div>)}</div> : <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>)}</div>
+              <div key="inventory">{panelWrap("Inventory at a Glance", <button className="btn" type="button" onClick={() => go("inventory")}>Manage</button>, invCatStats.length ? <div style={{ marginTop: 12, display: "grid", gap: 10 }}>{invCatStats.map((x) => { const pct = x.par > 0 ? x.pctClamped : 0; const label = x.category; return <div key={label} style={{ display: "grid", gap: 6 }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div><div className="helper" style={{ whiteSpace: "nowrap" }}>{Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}</div></div><div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}><div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a" }} /></div></div>; })}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}><div className="helper">{invLowItems.length ? <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>{invLowItems.map((item) => <div key={item.id}><div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div><div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div><div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}><div style={{ width: `${Math.min(100, (item.qty / item.par) * 100)}%`, background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e", height: "100%" }} /></div></div>)}</div> : <span>No low items below par.</span>}</div></div></div> : <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>)}</div>
+              <div key="needs">{panelWrap("Open Needs", <button className="btn" type="button" onClick={() => go("needs")}>View all</button>, needsOpen.length ? <div style={{ marginTop: 12, display: "grid", gap: 10 }}>{needsOpen.map((n) => { const pr = Number(n?.priority || 0); const urgency = String(n?.urgency || "").toLowerCase(); const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low"; const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need"); return <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}><div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>{pill(tone.toUpperCase(), tone)}<div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div></div><div className="helper" style={{ marginTop: 6 }}>{urgency ? `${urgency}` : "open"} · priority {pr}</div></button>; })}</div> : <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>)}</div>
+              <div key="pledges">{panelWrap("Recent Pledges", <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>View all</button>, pledgesSorted.length ? <div style={{ marginTop: 12, display: "grid", gap: 10 }}>{pledgesSorted.map((p) => { const status = String(p?.status || "").toLowerCase(); const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low"; const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone"); const type = safeStr(p?.type || "").trim(); const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : ""; const unit = safeStr(p?.unit || "").trim(); const when = fmtDT(p?.created_at); return <div key={p.id} style={{ display: "grid", gap: 6 }}><div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>{pill(status || "pledge", tone)}<div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}{type ? ` · ${type}` : ""}</div></div><div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div></div>; })}</div> : <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>)}</div>
+            </Responsive>
+          ) : null}
+        </div>
       )}
     </div>
   );
