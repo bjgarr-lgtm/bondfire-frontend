@@ -1,14 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Responsive } from "react-grid-layout";
-import WidthProvider from "react-grid-layout/build/WidthProvider";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
+import * as ReactGridLayout from "react-grid-layout";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import OrgKeyBackupNudge from "../components/OrgKeyBackupNudge.jsx";
 import "./Overview.css";
 
+const Responsive = ReactGridLayout.Responsive;
+const WidthProvider = ReactGridLayout.WidthProvider || ((Comp) => Comp);
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 function readOrgInfo(orgId) {
@@ -72,9 +71,7 @@ async function tryDecryptList(orgId, rows, blobField = "encrypted_blob") {
           category: dec?.category ?? dec?.cat ?? r?.category ?? r?.cat ?? r?.Category ?? r?.CATEGORY,
         });
         continue;
-      } catch {
-        // fall through
-      }
+      } catch {}
     }
     out.push(r);
   }
@@ -348,19 +345,6 @@ export default function Overview() {
     setDashLayouts(readLayouts(orgId));
   }, [orgId]);
 
-  function countsNormalizedRef(c) {
-    const cc = c || {};
-    return {
-      people: Number(cc.people || 0),
-      inventory: Number(cc.inventory || 0),
-      needsOpen: Number(cc.needsOpen || cc.needs || 0),
-      meetingsUpcoming: Number(cc.meetingsUpcoming || 0),
-      pledgesActive: Number(cc.pledgesActive || cc.pledges || 0),
-      publicInbox: Number(cc.publicInbox || cc.public_inbox || cc.publicInboxOpen || 0),
-      subsTotal: Number(cc.subscribers || cc.subs || cc.subsTotal || 0),
-    };
-  }
-
   async function refresh() {
     if (!orgId) return;
     setLoading(true);
@@ -435,7 +419,15 @@ export default function Overview() {
       setPublicInbox(Array.isArray(publicInboxResp?.items) ? publicInboxResp.items : Array.isArray(publicInboxResp?.submissions) ? publicInboxResp.submissions : []);
 
       try {
-        const cn = countsNormalizedRef(rawCounts);
+        const cn = {
+          people: Number(rawCounts.people || 0),
+          inventory: Number(rawCounts.inventory || 0),
+          needsOpen: Number(rawCounts.needsOpen || rawCounts.needs || 0),
+          meetingsUpcoming: Number(rawCounts.meetingsUpcoming || 0),
+          pledgesActive: Number(rawCounts.pledgesActive || rawCounts.pledges || 0),
+          publicInbox: Number(rawCounts.publicInbox || rawCounts.public_inbox || rawCounts.publicInboxOpen || 0),
+          subsTotal: Number(rawCounts.subscribers || rawCounts.subs || rawCounts.subsTotal || 0),
+        };
         const base = readRefreshBaseline(orgId);
         const hasBase = base && Object.keys(base).length > 0;
         const nextDeltas = {
@@ -464,7 +456,6 @@ export default function Overview() {
 
   useEffect(() => {
     refresh().catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
   if (!orgId) {
@@ -532,19 +523,7 @@ export default function Overview() {
         to,
         badge: db,
         extra: (
-          <div
-            style={{
-              marginTop: 8,
-              borderRadius: 8,
-              padding: "4px 6px",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              overflow: "hidden",
-              width: "100%",
-              boxSizing: "border-box",
-            }}
-            title={`${title.toLowerCase()} trend`}
-          >
+          <div style={{ marginTop: 8, borderRadius: 8, padding: "4px 6px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden", width: "100%", boxSizing: "border-box" }} title={`${title.toLowerCase()} trend`}>
             <div style={{ width: "100%", height: 18, overflow: "hidden" }}>
               <Sparkline values={historySeries[key]} width={96} height={18} />
             </div>
@@ -565,34 +544,22 @@ export default function Overview() {
 
   const meetingsSorted = useMemo(() => {
     const arr = Array.isArray(meetings) ? meetings : [];
-    return arr
-      .filter((m) => Number(m?.starts_at) > 0)
-      .sort((a, b) => Number(a.starts_at) - Number(b.starts_at))
-      .slice(0, 3);
+    return arr.filter((m) => Number(m?.starts_at) > 0).sort((a, b) => Number(a.starts_at) - Number(b.starts_at)).slice(0, 3);
   }, [meetings]);
 
   const needsOpen = useMemo(() => {
     const arr = Array.isArray(needs) ? needs : [];
-    return arr
-      .filter((n) => String(n?.status || "").toLowerCase() === "open")
-      .sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0))
-      .slice(0, 6);
+    return arr.filter((n) => String(n?.status || "").toLowerCase() === "open").sort((a, b) => Number(b?.priority || 0) - Number(a?.priority || 0)).slice(0, 6);
   }, [needs]);
 
   const pledgesSorted = useMemo(() => {
     const arr = Array.isArray(pledges) ? pledges : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0))
-      .slice(0, 6);
+    return arr.slice().sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0)).slice(0, 6);
   }, [pledges]);
 
   const publicInboxSorted = useMemo(() => {
     const arr = Array.isArray(publicInbox) ? publicInbox : [];
-    return arr
-      .slice()
-      .sort((a, b) => Number(b?.created_at || b?.submitted_at || 0) - Number(a?.created_at || a?.submitted_at || 0))
-      .slice(0, 6);
+    return arr.slice().sort((a, b) => Number(b?.created_at || b?.submitted_at || 0) - Number(a?.created_at || a?.submitted_at || 0)).slice(0, 6);
   }, [publicInbox]);
 
   const invPar = useMemo(() => readInvPar(orgId), [orgId]);
@@ -621,11 +588,7 @@ export default function Overview() {
 
     const out = Array.from(map.values()).map((x) => {
       const pct = x.par > 0 ? x.qty / x.par : null;
-      return {
-        ...x,
-        pct,
-        pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0,
-      };
+      return { ...x, pct, pctClamped: x.par > 0 ? Math.max(0, Math.min(1, pct)) : 0 };
     });
 
     out.sort((a, b) => {
@@ -654,9 +617,7 @@ export default function Overview() {
       const qtyV = Number(it?.qty);
       const qty = Number.isFinite(qtyV) ? qtyV : 0;
       const pct = qty / par;
-      if (pct < 1) {
-        lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
-      }
+      if (pct < 1) lows.push({ id, name: it?.name, category: it?.category, qty, par, pct });
     }
 
     lows.sort((a, b) => a.pct - b.pct);
@@ -666,7 +627,6 @@ export default function Overview() {
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
-
     try {
       await api(`/api/orgs/${encodeURIComponent(orgId)}/meetings/${encodeURIComponent(meeting.id)}/rsvp`, { method: "POST" });
       setMeetings((prev) => prev.map((m) => (m.id === meeting.id ? { ...m, my_rsvp: "going" } : m)));
@@ -691,215 +651,13 @@ export default function Overview() {
     cursor: "pointer",
   };
 
-  const inboxPanel = (
+  const panelWrap = (title, button, content) => (
     <div className="card bfDashPanel" style={{ padding: 16 }}>
       <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Inbox</h2>
-        <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>
-          Manage
-        </button>
+        <h2 style={{ margin: 0, flex: 1 }}>{title}</h2>
+        {button}
       </div>
-
-      {publicInboxSorted.length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {publicInboxSorted.map((item) => {
-            const kind = String(item?.kind || item?.type || "").toLowerCase();
-            const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
-            const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
-            const who = safeStr(item?.name || "anonymous");
-            const contact = safeStr(item?.contact || item?.email || item?.phone || "");
-            const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
-            const created = item?.created_at || item?.submitted_at;
-            return (
-              <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    {pill(title, tone)}
-                    <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
-                  </div>
-                  {created ? <div className="helper">{fmtDT(created)}</div> : null}
-                  {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
-                  {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
-      )}
-    </div>
-  );
-
-  const meetingsPanel = (
-    <div className="card bfDashPanel" style={{ padding: 16 }}>
-      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Next Meetings</h2>
-        <button className="btn" type="button" onClick={() => go("meetings")}>
-          View all
-        </button>
-      </div>
-      {meetingsSorted.length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {meetingsSorted.map((m) => (
-            <div key={m.id} className="card" style={{ padding: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                  {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
-                </div>
-                <button className="btn-red" type="button" onClick={() => rsvp(m)}>
-                  RSVP
-                </button>
-              </div>
-              <div className="helper" style={{ marginTop: 6 }}>
-                {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
-      )}
-    </div>
-  );
-
-  const inventoryPanel = (
-    <div className="card bfDashPanel" style={{ padding: 16 }}>
-      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Inventory at a Glance</h2>
-        <button className="btn" type="button" onClick={() => go("inventory")}>
-          Manage
-        </button>
-      </div>
-
-      {invCatStats.length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {invCatStats.map((x) => {
-            const pct = x.par > 0 ? x.pctClamped : 0;
-            const label = x.category;
-            return (
-              <div key={label} style={{ display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
-                  <div className="helper" style={{ whiteSpace: "nowrap" }}>
-                    {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
-                  </div>
-                </div>
-                <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${pct * 100}%`,
-                      background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a",
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
-            <div className="helper">
-              {invLowItems.length ? (
-                <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  {invLowItems.map((item) => (
-                    <div key={item.id}>
-                      <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
-                      <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
-                      <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
-                        <div
-                          style={{
-                            width: `${Math.min(100, (item.qty / item.par) * 100)}%`,
-                            background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e",
-                            height: "100%",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span>No low items below par.</span>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
-      )}
-    </div>
-  );
-
-  const needsPanel = (
-    <div className="card bfDashPanel" style={{ padding: 16 }}>
-      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Open Needs</h2>
-        <button className="btn" type="button" onClick={() => go("needs")}>
-          View all
-        </button>
-      </div>
-
-      {needsOpen.length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {needsOpen.map((n) => {
-            const pr = Number(n?.priority || 0);
-            const urgency = String(n?.urgency || "").toLowerCase();
-            const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
-            const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
-            return (
-              <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  {pill(tone.toUpperCase(), tone)}
-                  <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
-                </div>
-                <div className="helper" style={{ marginTop: 6 }}>
-                  {urgency ? `${urgency}` : "open"} · priority {pr}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
-      )}
-    </div>
-  );
-
-  const pledgesPanel = (
-    <div className="card bfDashPanel" style={{ padding: 16 }}>
-      <div className="bfDashGrab" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Recent Pledges</h2>
-        <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>
-          View all
-        </button>
-      </div>
-
-      {pledgesSorted.length ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-          {pledgesSorted.map((p) => {
-            const status = String(p?.status || "").toLowerCase();
-            const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
-            const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
-            const type = safeStr(p?.type || "").trim();
-            const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
-            const unit = safeStr(p?.unit || "").trim();
-            const when = fmtDT(p?.created_at);
-            return (
-              <div key={p.id} style={{ display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  {pill(status || "pledge", tone)}
-                  <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
-                    {who}{type ? ` · ${type}` : ""}
-                  </div>
-                </div>
-                <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
-      )}
+      {content}
     </div>
   );
 
@@ -927,11 +685,7 @@ export default function Overview() {
           topCards.map((c) => (
             <button key={c.key} type="button" style={cardBtnStyle} onClick={() => go(c.to)}>
               <div className="card bfDashCard" style={{ padding: 14, position: "relative", minHeight: 118, overflow: "hidden" }}>
-                {c.badge ? (
-                  <div style={{ position: "absolute", top: 12, right: 12 }}>
-                    <span style={c.badge.style}>{c.badge.txt}</span>
-                  </div>
-                ) : null}
+                {c.badge ? <div style={{ position: "absolute", top: 12, right: 12 }}><span style={c.badge.style}>{c.badge.txt}</span></div> : null}
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ fontSize: 18 }}>{c.icon}</div>
                   <div style={{ fontWeight: 900 }}>{c.title}</div>
@@ -971,11 +725,154 @@ export default function Overview() {
           measureBeforeMount={false}
           useCSSTransforms={true}
         >
-          <div key="inbox">{inboxPanel}</div>
-          <div key="meetings">{meetingsPanel}</div>
-          <div key="inventory">{inventoryPanel}</div>
-          <div key="needs">{needsPanel}</div>
-          <div key="pledges">{pledgesPanel}</div>
+          <div key="inbox">
+            {panelWrap("Inbox", <button className="btn" type="button" onClick={() => go("settings?tab=public-inbox")}>Manage</button>,
+              publicInboxSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {publicInboxSorted.map((item) => {
+                    const kind = String(item?.kind || item?.type || "").toLowerCase();
+                    const tone = String(item?.status || "new").toLowerCase() === "closed" ? "low" : kind === "get_help" ? "urgent" : kind === "volunteer" ? "medium" : "offered";
+                    const title = kind === "offer_resources" ? "Offer Resources" : kind === "volunteer" ? "Volunteer" : "Get Help";
+                    const who = safeStr(item?.name || "anonymous");
+                    const contact = safeStr(item?.contact || item?.email || item?.phone || "");
+                    const details = safeStr(item?.details || item?.message || item?.notes || "").trim();
+                    const created = item?.created_at || item?.submitted_at;
+                    return (
+                      <div key={item.id || `${title}-${who}-${created}`} className="card" style={{ padding: 12 }}>
+                        <div style={{ display: "grid", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            {pill(title, tone)}
+                            <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}</div>
+                          </div>
+                          {created ? <div className="helper">{fmtDT(created)}</div> : null}
+                          {contact ? <div style={{ wordBreak: "break-word" }}>{contact}</div> : null}
+                          {details ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div> : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div className="helper" style={{ marginTop: 12 }}>No public inbox items yet.</div>
+            )}
+          </div>
+
+          <div key="meetings">
+            {panelWrap("Next Meetings", <button className="btn" type="button" onClick={() => go("meetings")}>View all</button>,
+              meetingsSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {meetingsSorted.map((m) => (
+                    <div key={m.id} className="card" style={{ padding: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>
+                          {isEncryptedNameLike(m?.title) ? "(encrypted)" : safeStr(m?.title || "meeting")}
+                        </div>
+                        <button className="btn-red" type="button" onClick={() => rsvp(m)}>RSVP</button>
+                      </div>
+                      <div className="helper" style={{ marginTop: 6 }}>
+                        {fmtDT(m?.starts_at)}{m?.location ? ` · ${safeStr(m.location)}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <div className="helper" style={{ marginTop: 12 }}>No upcoming meetings.</div>
+            )}
+          </div>
+
+          <div key="inventory">
+            {panelWrap("Inventory at a Glance", <button className="btn" type="button" onClick={() => go("inventory")}>Manage</button>,
+              invCatStats.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {invCatStats.map((x) => {
+                    const pct = x.par > 0 ? x.pctClamped : 0;
+                    const label = x.category;
+                    return (
+                      <div key={label} style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ fontWeight: 800, flex: 1, minWidth: 0 }}>{label}</div>
+                          <div className="helper" style={{ whiteSpace: "nowrap" }}>
+                            {Math.round(x.qty)}{x.par ? ` / ${Math.round(x.par)}` : ""}
+                          </div>
+                        </div>
+                        <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct * 100}%`, background: pct <= 0.25 ? "#ff4d4d" : pct <= 0.5 ? "#ff9a3c" : "#39d98a" }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 10, flexWrap: "wrap" }}>
+                    <div className="helper">
+                      {invLowItems.length ? (
+                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                          {invLowItems.map((item) => (
+                            <div key={item.id}>
+                              <div style={{ fontWeight: 600 }}>{item.name} {item.qty} / {item.par}</div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>{item.category}</div>
+                              <div style={{ height: 6, background: "#2a2a2a", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+                                <div style={{ width: `${Math.min(100, (item.qty / item.par) * 100)}%`, background: item.qty <= item.par * 0.25 ? "#e11d48" : item.qty <= item.par * 0.5 ? "#f97316" : "#22c55e", height: "100%" }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <span>No low items below par.</span>}
+                    </div>
+                  </div>
+                </div>
+              ) : <div className="helper" style={{ marginTop: 12 }}>No inventory yet.</div>
+            )}
+          </div>
+
+          <div key="needs">
+            {panelWrap("Open Needs", <button className="btn" type="button" onClick={() => go("needs")}>View all</button>,
+              needsOpen.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {needsOpen.map((n) => {
+                    const pr = Number(n?.priority || 0);
+                    const urgency = String(n?.urgency || "").toLowerCase();
+                    const tone = urgency === "urgent" ? "urgent" : pr >= 8 ? "high" : pr >= 4 ? "medium" : "low";
+                    const title = isEncryptedNameLike(n?.title) ? "(encrypted)" : safeStr(n?.title || "need");
+                    return (
+                      <button key={n.id} type="button" className="card" style={{ padding: 12, textAlign: "left", border: "none", cursor: "pointer" }} onClick={() => go("needs")}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          {pill(tone.toUpperCase(), tone)}
+                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{title}</div>
+                        </div>
+                        <div className="helper" style={{ marginTop: 6 }}>
+                          {urgency ? `${urgency}` : "open"} · priority {pr}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <div className="helper" style={{ marginTop: 12 }}>No open needs.</div>
+            )}
+          </div>
+
+          <div key="pledges">
+            {panelWrap("Recent Pledges", <button className="btn" type="button" onClick={() => go("settings?tab=pledges")}>View all</button>,
+              pledgesSorted.length ? (
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {pledgesSorted.map((p) => {
+                    const status = String(p?.status || "").toLowerCase();
+                    const tone = status === "accepted" ? "accepted" : status === "offered" ? "offered" : "low";
+                    const who = isEncryptedNameLike(p?.pledger_name) ? "someone" : safeStr(p?.pledger_name || "someone");
+                    const type = safeStr(p?.type || "").trim();
+                    const amt = p?.amount != null && p?.amount !== "" ? `${p.amount}` : "";
+                    const unit = safeStr(p?.unit || "").trim();
+                    const when = fmtDT(p?.created_at);
+                    return (
+                      <div key={p.id} style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          {pill(status || "pledge", tone)}
+                          <div style={{ fontWeight: 900, flex: 1, minWidth: 0 }}>{who}{type ? ` · ${type}` : ""}</div>
+                        </div>
+                        <div className="helper">{amt ? `${amt}${unit ? ` ${unit}` : ""} · ` : ""}{when}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div className="helper" style={{ marginTop: 12 }}>No pledges yet.</div>
+            )}
+          </div>
         </ResponsiveGridLayout>
       )}
     </div>
