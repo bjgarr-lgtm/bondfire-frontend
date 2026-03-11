@@ -1,4 +1,3 @@
-// src/pages/Meetings.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api.js";
 import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
@@ -380,7 +379,7 @@ async function saveEdit() {
 				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search meetings" style={{ marginTop: 10 }} />
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
-				<div style={{ marginTop: 12, overflowX: "auto" }}>
+				<div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto" }}>
 					<table className="table" style={{ width: "100%" }}>
 						<thead>
 							<tr>
@@ -405,6 +404,60 @@ async function saveEdit() {
 							))}
 						</tbody>
 					</table>
+				</div>
+
+				<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+					{filtered.length ? (
+						filtered.map((m) => (
+							<div key={m.id} className="bf-rowcard">
+								<div className="bf-rowcard-top">
+									<div
+										className="bf-rowcard-title"
+										style={{
+											whiteSpace: "normal",
+											overflow: "visible",
+											textOverflow: "unset",
+											wordBreak: "break-word",
+										}}
+									>
+										{m.title || "(untitled)"}
+									</div>
+									<button className="btn" type="button" onClick={() => openItem(m)}>Details</button>
+								</div>
+
+								<div className="bf-two">
+									<div className="bf-field" style={{ marginTop: 0 }}>
+										<div className="bf-field-label">Starts</div>
+										<div style={{ overflowWrap: "anywhere" }}>{formatDT(m.starts_at) || "—"}</div>
+									</div>
+									<div className="bf-field" style={{ marginTop: 0 }}>
+										<div className="bf-field-label">Ends</div>
+										<div style={{ overflowWrap: "anywhere" }}>{formatDT(m.ends_at) || "—"}</div>
+									</div>
+								</div>
+
+								<div className="bf-two">
+									<div className="bf-field">
+										<div className="bf-field-label">Location</div>
+										<div style={{ overflowWrap: "anywhere" }}>{m.location || "—"}</div>
+									</div>
+									<div className="bf-field">
+										<div className="bf-field-label">Public</div>
+										<div>{m.is_public ? "Yes" : "No"}</div>
+									</div>
+								</div>
+
+								{safeStr(m.agenda).trim() ? (
+									<div className="bf-field">
+										<div className="bf-field-label">Agenda</div>
+										<div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{m.agenda}</div>
+									</div>
+								) : null}
+							</div>
+						))
+					) : (
+						<div className="helper">No meetings found.</div>
+					)}
 				</div>
 			</div>
 

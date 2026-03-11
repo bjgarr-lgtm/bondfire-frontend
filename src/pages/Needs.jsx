@@ -1,4 +1,3 @@
-// src/pages/Needs.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
@@ -231,7 +230,7 @@ export default function Needs() {
 				<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search needs" style={{ marginTop: 12 }} />
 				{err ? <div className="helper" style={{ color: "tomato", marginTop: 10 }}>{err}</div> : null}
 
-				<div style={{ marginTop: 12, overflowX: "auto" }}>
+				<div className="bf-table-desktop" style={{ marginTop: 12, overflowX: "auto" }}>
 					<table className="table" style={{ width: "100%" }}>
 						<thead>
 							<tr>
@@ -256,6 +255,60 @@ export default function Needs() {
 							))}
 						</tbody>
 					</table>
+				</div>
+
+				<div className="bf-cards-mobile" style={{ marginTop: 12 }}>
+					{filtered.length ? (
+						filtered.map((n) => (
+							<div key={n.id} className="bf-rowcard">
+								<div className="bf-rowcard-top">
+									<div
+										className="bf-rowcard-title"
+										style={{
+											whiteSpace: "normal",
+											overflow: "visible",
+											textOverflow: "unset",
+											wordBreak: "break-word",
+										}}
+									>
+										{n.title || "(untitled)"}
+									</div>
+									<button className="btn" type="button" onClick={() => openItem(n)}>Details</button>
+								</div>
+
+								<div className="bf-two">
+									<div className="bf-field" style={{ marginTop: 0 }}>
+										<div className="bf-field-label">Status</div>
+										<div>{n.status || "open"}</div>
+									</div>
+									<div className="bf-field" style={{ marginTop: 0 }}>
+										<div className="bf-field-label">Priority</div>
+										<div>{n.priority ?? 0}</div>
+									</div>
+								</div>
+
+								<div className="bf-two">
+									<div className="bf-field">
+										<div className="bf-field-label">Public</div>
+										<div>{n.is_public ? "Yes" : "No"}</div>
+									</div>
+									<div className="bf-field">
+										<div className="bf-field-label">Urgency</div>
+										<div>{n.urgency || "—"}</div>
+									</div>
+								</div>
+
+								{safeStr(n.description).trim() ? (
+									<div className="bf-field">
+										<div className="bf-field-label">Description</div>
+										<div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{n.description}</div>
+									</div>
+								) : null}
+							</div>
+						))
+					) : (
+						<div className="helper">No needs found.</div>
+					)}
 				</div>
 			</div>
 
