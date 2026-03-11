@@ -242,25 +242,25 @@ function layoutKey(orgId) {
 function defaultLayouts() {
   return {
     lg: [
-      { i: "inbox", x: 0, y: 0, w: 5, h: 12, minW: 3, minH: 6 },
-      { i: "meetings", x: 5, y: 0, w: 5, h: 7, minW: 3, minH: 5 },
-      { i: "inventory", x: 10, y: 0, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "needs", x: 5, y: 7, w: 5, h: 7, minW: 3, minH: 5 },
-      { i: "pledges", x: 10, y: 7, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "inbox", x: 0, y: 0, w: 5, h: 15, minW: 3, minH: 8 },
+      { i: "meetings", x: 5, y: 0, w: 5, h: 9, minW: 3, minH: 7 },
+      { i: "inventory", x: 10, y: 0, w: 4, h: 10, minW: 3, minH: 8 },
+      { i: "needs", x: 5, y: 9, w: 5, h: 10, minW: 3, minH: 8 },
+      { i: "pledges", x: 10, y: 10, w: 4, h: 9, minW: 3, minH: 7 },
     ],
     md: [
-      { i: "inbox", x: 0, y: 0, w: 6, h: 10, minW: 4, minH: 6 },
-      { i: "meetings", x: 6, y: 0, w: 6, h: 6, minW: 4, minH: 5 },
-      { i: "inventory", x: 6, y: 6, w: 6, h: 6, minW: 4, minH: 5 },
-      { i: "needs", x: 0, y: 10, w: 6, h: 6, minW: 4, minH: 5 },
-      { i: "pledges", x: 6, y: 12, w: 6, h: 6, minW: 4, minH: 5 },
+      { i: "inbox", x: 0, y: 0, w: 6, h: 14, minW: 4, minH: 8 },
+      { i: "meetings", x: 6, y: 0, w: 6, h: 8, minW: 4, minH: 7 },
+      { i: "inventory", x: 6, y: 8, w: 6, h: 9, minW: 4, minH: 8 },
+      { i: "needs", x: 0, y: 14, w: 6, h: 9, minW: 4, minH: 8 },
+      { i: "pledges", x: 6, y: 17, w: 6, h: 8, minW: 4, minH: 7 },
     ],
     sm: [
-      { i: "inbox", x: 0, y: 0, w: 1, h: 12, minH: 6, static: true },
-      { i: "meetings", x: 0, y: 12, w: 1, h: 8, minH: 5, static: true },
-      { i: "inventory", x: 0, y: 20, w: 1, h: 8, minH: 5, static: true },
-      { i: "needs", x: 0, y: 28, w: 1, h: 8, minH: 5, static: true },
-      { i: "pledges", x: 0, y: 36, w: 1, h: 8, minH: 5, static: true },
+      { i: "inbox", x: 0, y: 0, w: 1, h: 15, minH: 8, static: true },
+      { i: "meetings", x: 0, y: 15, w: 1, h: 9, minH: 7, static: true },
+      { i: "inventory", x: 0, y: 24, w: 1, h: 10, minH: 8, static: true },
+      { i: "needs", x: 0, y: 34, w: 1, h: 10, minH: 8, static: true },
+      { i: "pledges", x: 0, y: 44, w: 1, h: 9, minH: 7, static: true },
     ],
   };
 }
@@ -284,6 +284,28 @@ function writeLayouts(orgId, layouts) {
   try {
     localStorage.setItem(layoutKey(orgId), JSON.stringify(layouts || defaultLayouts()));
   } catch {}
+}
+
+function normalizeLayouts(layouts, minimums) {
+  const defs = defaultLayouts();
+  const normalizeBreakpoint = (items, fallbackItems) => {
+    const current = Array.isArray(items) ? items : fallbackItems;
+    return current.map((item) => {
+      const minH = Math.max(Number(item?.minH || 0), Number(minimums?.[item.i] || 0), Number(fallbackItems.find((f) => f.i === item.i)?.minH || 0));
+      const fallbackH = Number(fallbackItems.find((f) => f.i === item.i)?.h || minH || 1);
+      return {
+        ...item,
+        minH,
+        h: Math.max(Number(item?.h || 0), minH, fallbackH),
+      };
+    });
+  };
+
+  return {
+    lg: normalizeBreakpoint(layouts?.lg, defs.lg),
+    md: normalizeBreakpoint(layouts?.md, defs.md),
+    sm: normalizeBreakpoint(layouts?.sm, defs.sm),
+  };
 }
 
 export default function Overview() {
@@ -601,6 +623,31 @@ export default function Overview() {
     return lows.slice(0, 4);
   }, [inventory, invPar]);
 
+  const contentMinimums = useMemo(() => {
+    const inboxRows = Math.max(1, publicInboxSorted.length);
+    const meetingRows = Math.max(1, meetingsSorted.length);
+    const inventoryRows = Math.max(1, invCatStats.length) + (invLowItems.length ? 2 : 1);
+    const needRows = Math.max(1, needsOpen.length);
+    const pledgeRows = Math.max(1, pledgesSorted.length);
+
+    return {
+      inbox: Math.max(8, 4 + inboxRows * 2),
+      meetings: Math.max(7, 3 + meetingRows * 2),
+      inventory: Math.max(8, 4 + inventoryRows * 2),
+      needs: Math.max(8, 4 + needRows * 2),
+      pledges: Math.max(7, 3 + pledgeRows * 2),
+    };
+  }, [publicInboxSorted.length, meetingsSorted.length, invCatStats.length, invLowItems.length, needsOpen.length, pledgesSorted.length]);
+
+  useEffect(() => {
+    if (!orgId || isNarrow) return;
+    setDashLayouts((prev) => {
+      const next = normalizeLayouts(prev, contentMinimums);
+      writeLayouts(orgId, next);
+      return next;
+    });
+  }, [orgId, isNarrow, contentMinimums]);
+
   async function rsvp(meeting) {
     if (!orgId || !meeting?.id) return;
     setRsvpMsg("");
@@ -615,8 +662,9 @@ export default function Overview() {
 
   function handleLayoutChange(_currentLayout, allLayouts) {
     if (!orgId || isNarrow) return;
-    setDashLayouts(allLayouts);
-    writeLayouts(orgId, allLayouts);
+    const next = normalizeLayouts(allLayouts, contentMinimums);
+    setDashLayouts(next);
+    writeLayouts(orgId, next);
   }
 
   const cardBtnStyle = { width: "100%", textAlign: "left", border: "none", background: "transparent", padding: 0, cursor: "pointer" };
