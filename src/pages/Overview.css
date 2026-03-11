@@ -9,18 +9,9 @@
 
 @media (max-width: 760px) {
   .bfTopMetricsRow {
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(160px, 1fr);
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 8px;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory;
-  }
-
-  .bfTopMetricsRow > * {
-    scroll-snap-align: start;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    padding-bottom: 0;
   }
 }
 
@@ -67,6 +58,7 @@
 
 .react-grid-item {
   box-sizing: border-box;
+  min-height: 0;
 }
 
 .react-grid-item > .react-resizable-handle {
@@ -79,43 +71,23 @@
 
 .react-grid-item > .card {
   width: 100%;
+}
+
+.react-grid-item > .bfDashPanel {
   height: 100%;
+  min-height: 100%;
+  overflow: hidden;
 }
 
 .bfDashPanel {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.bfDashPanelBody {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  margin-top: 12px;
-  padding-right: 2px;
-}
-
-.bfDashPanelBody::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.bfDashPanelBody::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.14);
-  border-radius: 999px;
-}
-
-.bfDashPanelBody::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .bfDashGrab {
   cursor: grab;
   user-select: none;
-  flex: 0 0 auto;
 }
 
 .bfDashGrab:active {
@@ -128,6 +100,15 @@
   border-radius: 16px;
 }
 
+.bfDashMobileStack {
+  display: grid;
+  gap: 12px;
+}
+
+.bfDashMobileRowCard {
+  width: 100%;
+}
+
 @media (max-width: 820px) {
   .bfDashGrab,
   .bfDashGrab:active {
@@ -136,10 +117,25 @@
 
   .bfDashPanel {
     overflow: visible;
+    height: auto;
+    min-height: 0;
   }
 
-  .bfDashPanelBody {
-    overflow: visible;
-    padding-right: 0;
+  .bfDashMeetingsPanel .btn,
+  .bfDashNeedsPanel .btn {
+    min-width: 0;
+  }
+
+  .bfDashMobileRowHead {
+    align-items: flex-start !important;
+    flex-direction: column;
+  }
+
+  .bfDashMobileAction {
+    align-self: flex-start;
+  }
+
+  .bfDashMobileList {
+    gap: 12px;
   }
 }
