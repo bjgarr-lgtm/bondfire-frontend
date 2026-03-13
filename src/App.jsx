@@ -26,6 +26,7 @@ import Security from "./pages/Security.jsx";
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
+import HelpWidget from "./help/HelpWidget.jsx";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -259,6 +260,8 @@ function Shell() {
 
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
+
+			<HelpWidget />
 		</AuthCtx.Provider>
 	);
 }
