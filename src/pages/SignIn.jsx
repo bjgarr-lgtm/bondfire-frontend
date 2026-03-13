@@ -2,6 +2,18 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { enableDemoMode } from "../demo/demoMode";
+
+function startDemo(navigate){
+  try{
+    enableDemoMode(</>);
+    localStorage.setItem("bf-demo-user", JSON.stringify({id:"demo",name:"Demo User"}));
+  }catch(e){}
+  try{ window.dispatchEvent(new Event("bf-auth-changed")); }catch{}
+  navigate("/orgs");
+}
+
+
 function fireAuthChanged() {
 	try {
 		window.dispatchEvent(new Event("bf-auth-changed"));
@@ -164,6 +176,7 @@ export default function SignIn() {
 	}
 
 	return (
+<>
 		<div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
 			<h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
 			<p className="helper" style={{ marginTop: 0 }}>
@@ -240,6 +253,12 @@ export default function SignIn() {
 						Back
 					</button>
 				</form>
+      <div style={{marginTop:20}}>
+        <button className="linkbtn" onClick={()=>startDemo(navigate)}>
+          Try Demo (no account required)
+        </button>
+      </div>
+
 			) : (
 				<form onSubmit={handleSubmit} className="grid" style={{ gap: 10, marginTop: 12 }}>
 					{mode === "register" && (
@@ -291,6 +310,12 @@ export default function SignIn() {
 						{busy ? "Working…" : mode === "register" ? "Create account" : "Sign in"}
 					</button>
 				</form>
+      <div style={{marginTop:20}}>
+        <button className="linkbtn" onClick={()=>startDemo(navigate)}>
+          Try Demo (no account required)
+        </button>
+      </div>
+
 			)}
 		</div>
 	);
