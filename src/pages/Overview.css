@@ -13,6 +13,10 @@
     overflow: visible;
     padding-bottom: 0;
   }
+
+  .bfTopMetricsRow > *:last-child {
+    grid-column: 1 / -1;
+  }
 }
 
 .bfDashCard {

@@ -657,8 +657,8 @@ export default function Overview() {
       mk("needsOpen", "Needs", "🧾", countsNormalized.needsOpen, "open", "needs"),
       mk("meetingsUpcoming", "Meetings", "📅", countsNormalized.meetingsUpcoming, "upcoming", "meetings"),
       mk("pledgesActive", "Pledges", "🤝", countsNormalized.pledgesActive, "active", "settings?tab=pledges"),
-      mk("publicInbox", "Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
       mk("subsTotal", "New Subs", "📰", countsNormalized.subsTotal, "total", "settings?tab=newsletter"),
+      mk("publicInbox", "Inbox", "📨", countsNormalized.publicInbox, "open items", "settings?tab=public-inbox"),
     ];
   }, [countsNormalized, deltas, historySeries]);
 
