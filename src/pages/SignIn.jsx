@@ -1,18 +1,7 @@
 // src/pages/SignIn.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-import { enableDemoMode } from "../demo/demoMode";
-
-function startDemo(navigate){
-  try{
-    enableDemoMode(</>);
-    localStorage.setItem("bf-demo-user", JSON.stringify({id:"demo",name:"Demo User"}));
-  }catch(e){}
-  try{ window.dispatchEvent(new Event("bf-auth-changed")); }catch{}
-  navigate("/orgs");
-}
-
+import { enableDemoMode } from "../demo/demoMode.js";
 
 function fireAuthChanged() {
 	try {
@@ -23,6 +12,17 @@ function fireAuthChanged() {
 async function safeJson(res) {
 	return res.json().catch(() => ({}));
 }
+
+function startDemo(navigate) {
+	try {
+		enableDemoMode("signin");
+		localStorage.setItem("bf-demo-user", JSON.stringify({ id: "demo", name: "Demo User" }));
+		localStorage.setItem("bf_orgs", JSON.stringify([{ id: "demo", name: "Bondfire Demo Org" }]));
+		window.dispatchEvent(new Event("bf-auth-changed"));
+	} catch {}
+	navigate("/orgs", { replace: true });
+}
+
 
 export default function SignIn() {
 	const navigate = useNavigate();
@@ -176,7 +176,6 @@ export default function SignIn() {
 	}
 
 	return (
-<>
 		<div style={{ maxWidth: 520, margin: "8vh auto", padding: 16 }}>
 			<h1 style={{ marginBottom: 6 }}>Welcome to Bondfire</h1>
 			<p className="helper" style={{ marginTop: 0 }}>
@@ -205,6 +204,17 @@ export default function SignIn() {
 					disabled={busy}
 				>
 					Create account
+				</button>
+			</div>
+
+			<div style={{ marginTop: 12 }}>
+				<button
+					type="button"
+					className="btn"
+					onClick={() => startDemo(navigate)}
+					disabled={busy}
+				>
+					Try Demo (no account required)
 				</button>
 			</div>
 
@@ -253,12 +263,6 @@ export default function SignIn() {
 						Back
 					</button>
 				</form>
-      <div style={{marginTop:20}}>
-        <button className="linkbtn" onClick={()=>startDemo(navigate)}>
-          Try Demo (no account required)
-        </button>
-      </div>
-
 			) : (
 				<form onSubmit={handleSubmit} className="grid" style={{ gap: 10, marginTop: 12 }}>
 					{mode === "register" && (
@@ -310,12 +314,6 @@ export default function SignIn() {
 						{busy ? "Working…" : mode === "register" ? "Create account" : "Sign in"}
 					</button>
 				</form>
-      <div style={{marginTop:20}}>
-        <button className="linkbtn" onClick={()=>startDemo(navigate)}>
-          Try Demo (no account required)
-        </button>
-      </div>
-
 			)}
 		</div>
 	);
