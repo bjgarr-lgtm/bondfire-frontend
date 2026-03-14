@@ -28,7 +28,7 @@ import AppHeader from "./components/AppHeader.jsx";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 import HelpWidget from "./help/HelpWidget.jsx";
 import DemoBanner from "./demo/DemoBanner.jsx";
-import DemoGuideOverlay from "./demo/DemoGuideOverlay.jsx";
+import DemoSpotlightTour from "./demo/DemoSpotlightTour.jsx";
 import DemoBoot from "./pages/DemoBoot.jsx";
 import { isDemoMode, disableDemoMode } from "./demo/demoMode.js";
 
@@ -272,7 +272,7 @@ function Shell() {
 			</Routes>
 			<HelpWidget />
 			<DemoBanner />
-			<DemoGuideOverlay />
+			<DemoSpotlightTour />
 		</AuthCtx.Provider>
 	);
 }

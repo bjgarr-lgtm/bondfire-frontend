@@ -306,6 +306,7 @@ export default function OrgDash() {
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <button
                     className="btn-red"
+                    data-tour="demo-org-open"
                     style={{ whiteSpace: "nowrap" }}
                     onClick={() => nav(`/org/${encodeURIComponent(o.id)}`)}
                     disabled={busy}

@@ -1252,7 +1252,7 @@ React.useEffect(() => {
             </div>
             <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {enabled && slug ? (
-                <a className="btn" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
+                <a className="btn" data-tour="settings-live-preview" href={`/#/p/${encodeURIComponent(slug)}`} target="_blank" rel="noreferrer">Open live preview</a>
               ) : null}
               <button className="btn-red" type="submit" form="public-page-settings-form">Save</button>
             </div>

@@ -150,13 +150,13 @@ function OrgNav({ variant = "desktop" }) {
   const base = orgId ? `/org/${orgId}` : null;
   const items = base
     ? [
-        ["Dashboard", `${base}/overview`],
-        ["People", `${base}/people`],
-        ["Inventory", `${base}/inventory`],
-        ["Needs", `${base}/needs`],
-        ["Meetings", `${base}/meetings`],
-        ["Settings", `${base}/settings`],
-        ["Chat", `${base}/chat`],
+        ["Dashboard", `${base}/overview`, "nav-overview"],
+        ["People", `${base}/people`, "nav-people"],
+        ["Inventory", `${base}/inventory`, "nav-inventory"],
+        ["Needs", `${base}/needs`, "nav-needs"],
+        ["Meetings", `${base}/meetings`, "nav-meetings"],
+        ["Settings", `${base}/settings`, "nav-settings"],
+        ["Chat", `${base}/chat`, "nav-chat"],
       ]
     : [];
 
@@ -184,7 +184,7 @@ function OrgNav({ variant = "desktop" }) {
         All Orgs
       </NavLink>
 
-      {items.map(([label, to]) => (
+      {items.map(([label, to, tourId]) => (
         <NavLink
           key={to}
           to={to}
@@ -198,6 +198,7 @@ function OrgNav({ variant = "desktop" }) {
               : undefined
           }
           className={({ isActive }) => `bf-appnav-link${isActive ? " is-active" : ""}`}
+          data-tour={tourId}
         >
           {label}
         </NavLink>

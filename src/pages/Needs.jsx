@@ -360,7 +360,7 @@ export default function Needs() {
 			) : null}
 
 
-			<div className="card" style={{ margin: 16, padding: 16 }}>
+			<div className="card" data-tour="needs-add-form" style={{ margin: 16, padding: 16 }}>
 				<h3 style={{ marginTop: 0 }}>Add Need</h3>
 				<form onSubmit={onAdd} style={{ display: "grid", gap: 10 }}>
 					<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>

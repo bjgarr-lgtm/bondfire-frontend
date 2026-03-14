@@ -49,6 +49,7 @@ export default function HelpWidget() {
       <button
         type="button"
         className="bf-help-fab"
+        data-tour="help-fab"
         onClick={onOpen}
         aria-label="Need help"
         title="Need help?"

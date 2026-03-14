@@ -14,7 +14,7 @@ export default function DemoBanner() {
         <span>Changes are saved only in this browser.</span>
       </div>
       <div className="bf-demo-banner-actions">
-        <button className="btn" type="button" onClick={() => { resetDemo(); resetDemoState(); ensureDemoOrgList(); try { window.dispatchEvent(new Event("bf-auth-changed")); window.dispatchEvent(new Event("bf-demo-tour-open")); } catch {} }}>
+        <button className="btn" type="button" onClick={() => { resetDemo(); resetDemoState(); ensureDemoOrgList(); try { window.dispatchEvent(new Event("bf-auth-changed")); } catch {} window.location.reload(); }}>
           Reset Demo
         </button>
         <button className="btn" type="button" onClick={() => { try { window.dispatchEvent(new Event("bf-demo-tour-open")); } catch {} }}>
