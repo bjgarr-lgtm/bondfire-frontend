@@ -1,8 +1,6 @@
 // src/pages/SignIn.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { enableDemoMode } from "../demo/demoMode.js";
-import { ensureDemoOrgList, resetDemoState } from "../demo/demoStore.js";
 
 function fireAuthChanged() {
 	try {
@@ -15,20 +13,8 @@ async function safeJson(res) {
 }
 
 function startDemo(navigate) {
-	try {
-		enableDemoMode();
-		resetDemoState();
-		const demoOrg = ensureDemoOrgList();
-		localStorage.setItem("bf-demo-user", JSON.stringify({ id: "demo", name: "Demo User", demo: true }));
-		try {
-			window.dispatchEvent(new Event("bf-auth-changed"));
-		} catch {}
-		navigate(`/org/${encodeURIComponent(demoOrg.id)}`, { replace: true });
-	} catch (e) {
-		console.error("demo start failed", e);
-	}
+	navigate("/demo");
 }
-
 
 export default function SignIn() {
 	const navigate = useNavigate();

@@ -25,9 +25,12 @@ import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
-import HelpWidget from "./help/HelpWidget.jsx";
-import { isDemoMode } from "./demo/demoMode.js";
 import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
+import HelpWidget from "./help/HelpWidget.jsx";
+import DemoBanner from "./demo/DemoBanner.jsx";
+import DemoGuideOverlay from "./demo/DemoGuideOverlay.jsx";
+import DemoBoot from "./pages/DemoBoot.jsx";
+import { isDemoMode, disableDemoMode } from "./demo/demoMode.js";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -69,7 +72,6 @@ async function fetchMe() {
 	if (isDemoMode()) {
 		return { ok: true, user: { id: "demo", name: "Demo User", email: "demo@bondfire.local", demo: true } };
 	}
-
 	// Try /me first. If access cookie expired but refresh cookie is still valid,
 	// attempt a silent refresh and retry once before declaring the session dead.
 	const doMe = async () => {
@@ -156,7 +158,7 @@ function Shell() {
 		try {
 			localStorage.removeItem("demo_user");
 			localStorage.removeItem("bf-demo-user");
-			localStorage.removeItem("bf_demo_mode_v1");
+			disableDemoMode();
 		} catch {}
 		setState({ authed: false, loading: false, user: null });
 		window.location.hash = "#/signin";
@@ -203,7 +205,7 @@ function Shell() {
 		state.authed ? <Navigate to="/orgs" replace /> : <Navigate to="/signin" replace />;
 
 	// Hide the header on public routes
-	const hideHeader = path === "/" || path.startsWith("/p/") || path === "/signin";
+	const hideHeader = path === "/" || path.startsWith("/p/") || path === "/signin" || path === "/demo";
 
 	return (
 		<AuthCtx.Provider value={ctxValue}>
@@ -219,6 +221,7 @@ function Shell() {
 				<Route path="/p/:slug" element={<PublicPage />} />
 				<Route path="/p/*" element={<PublicPage />} />
 				<Route path="/signin" element={<SignIn />} />
+				<Route path="/demo" element={<DemoBoot />} />
 
 				{/* Landing */}
 				<Route path="/" element={<HomeRoute />} />
@@ -268,6 +271,8 @@ function Shell() {
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
 			<HelpWidget />
+			<DemoBanner />
+			<DemoGuideOverlay />
 		</AuthCtx.Provider>
 	);
 }

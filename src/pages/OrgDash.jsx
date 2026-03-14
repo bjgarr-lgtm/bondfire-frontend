@@ -99,8 +99,8 @@ async function authFetch(path, opts = {}) {
 }
 
 export default function OrgDash() {
-  const demoMode = isDemoMode();
   const nav = useNavigate();
+  const demoMode = isDemoMode();
   const isMobile = useIsMobile(720);
 
   const [orgs, setOrgs] = React.useState([]);
@@ -134,8 +134,8 @@ export default function OrgDash() {
     setMsg("");
     try {
       if (demoMode) {
-        const org = ensureDemoOrgList();
-        setOrgs([org]);
+        const demoOrg = ensureDemoOrgList();
+        setOrgs([demoOrg]);
         return;
       }
       const r = await authFetch("/api/orgs", { method: "GET" });
@@ -157,7 +157,7 @@ export default function OrgDash() {
     setMsg("");
     try {
       if (demoMode) {
-        setMsg("Demo mode uses a preloaded org. Use Reset Demo if you want a clean copy.");
+        setMsg("Demo mode uses a seeded org. Use Reset Demo to start fresh.");
         return;
       }
       const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
@@ -213,7 +213,9 @@ export default function OrgDash() {
         <div className="card" style={{ padding: 12, marginBottom: 16, background: "rgba(255,255,255,0.03)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ fontWeight: 800, flex: 1 }}>Demo Mode is active. Changes are saved only in this browser.</div>
-            <button className="btn" type="button" onClick={() => { resetDemoState(); ensureDemoOrgList(); load(); setMsg("Demo reset."); }}>Reset Demo</button>
+            <button className="btn" type="button" onClick={() => { resetDemoState(); ensureDemoOrgList(); load(); setMsg("Demo reset."); try { window.dispatchEvent(new Event("bf-demo-tour-open")); } catch {} }}>
+              Reset Demo
+            </button>
           </div>
         </div>
       ) : null}

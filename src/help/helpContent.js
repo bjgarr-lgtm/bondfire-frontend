@@ -20,11 +20,34 @@ export function guessTopicIdFromPath(pathname) {
 
   if (p.includes("newsletter")) return "newsletter";
   if (p.includes("public")) return "newsletter";
+  if (p.includes("orgs")) return "demo-mode";
 
   return "getting-started";
 }
 
 export const HELP_TOPICS = [
+  {
+    "id": "demo-mode",
+    "title": "Demo Mode",
+    "blurb": "Explore Bondfire without an account, reset the sandbox, and use the guided tour.",
+    "keywords": ["demo", "tour", "sandbox", "reset", "guide"],
+    "sections": [
+      {
+        "h": "What demo mode is",
+        "p": [
+          "Demo mode opens a seeded mutual aid workspace without making you create an account.",
+          "Changes are saved only in this browser, so you can click around and test real flows without touching production data."
+        ]
+      },
+      {
+        "h": "How to learn fast",
+        "p": [
+          "Start on the dashboard, then open Needs, Meetings, Inventory, and Settings.",
+          "Use the Demo banner to reset the sandbox or restart the guided tour at any time."
+        ]
+      }
+    ]
+  },
   {
     "id": "getting-started",
     "title": "Getting Started",

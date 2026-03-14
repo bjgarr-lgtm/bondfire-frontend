@@ -3,7 +3,6 @@
 // - Bearer token support (multiple key names for back-compat)
 // - Cookie/session support
 // - Optional silent refresh on 401
-
 import { isDemoMode } from "../demo/demoMode.js";
 import { demoHandle, ensureDemoOrgList } from "../demo/demoStore.js";
 

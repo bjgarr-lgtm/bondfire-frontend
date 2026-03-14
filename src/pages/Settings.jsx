@@ -4,7 +4,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { decryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import Security from "./Security.jsx";
 import { isDemoMode } from "../demo/demoMode.js";
-import { demoHandle, ensureDemoOrgList, buildDemoSubscribersCsv } from "../demo/demoStore.js";
+import { demoHandle, getDemoSubscribersCsv, ensureDemoOrgList } from "../demo/demoStore.js";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -27,16 +27,17 @@ function humanizeError(msg) {
 
 async function authFetch(path, opts = {}) {
   const relative = path.startsWith("/") ? path : `/${path}`;
+
   if (isDemoMode()) {
     ensureDemoOrgList();
     const handled = demoHandle(relative, opts);
     if (handled) return handled;
   }
-
   const remote = path.startsWith("http")
     ? path
     : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
 
+  // These endpoints often live on same origin Pages Functions while API_BASE points elsewhere.
   const isSpecialEndpoint =
     /^\/api\/(orgs\/[^/]+\/(invites|members|newsletter|pledges|public(?:\/|$))|invites\/redeem)\b/.test(
       relative
@@ -715,8 +716,7 @@ React.useEffect(() => {
 
     try {
       if (isDemoMode()) {
-        const csv = buildDemoSubscribersCsv();
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const blob = new Blob([getDemoSubscribersCsv()], { type: "text/csv;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -736,12 +736,14 @@ React.useEffect(() => {
       const headers = {};
       if (token) headers.Authorization = `Bearer ${token}`;
 
+      // Same origin first (Pages Functions), then API_BASE
       let res = await fetch(path, { method: "GET", headers });
       if (!res.ok && API_BASE) {
         res = await fetch(`${API_BASE}${path}`, { method: "GET", headers });
       }
 
       if (!res.ok) {
+        // backend might return JSON errors sometimes
         const ct = res.headers.get("content-type") || "";
         if (ct.includes("application/json")) {
           const j = await res.json().catch(() => ({}));
@@ -752,6 +754,8 @@ React.useEffect(() => {
       }
 
       const blob = await res.blob();
+
+      // Try to use server filename if present
       const dispo = res.headers.get("content-disposition") || "";
       const m = dispo.match(/filename="([^"]+)"/i);
       const filename = m?.[1] || `subscribers-${orgId}.csv`;

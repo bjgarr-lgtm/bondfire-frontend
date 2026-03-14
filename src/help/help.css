@@ -165,3 +165,5 @@
   .bf-help-body{ grid-template-columns: 1fr; }
   .bf-help-nav{ border-right: none; border-bottom: 1px solid rgba(255,255,255,0.10); }
 }
+
+.bf-help-tour{ border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--text); border-radius: 12px; padding: 8px 10px; cursor: pointer; }

@@ -1,6 +1,7 @@
 // src/help/HelpPanel.jsx
 import React from "react";
 import { HELP_TOPICS } from "./helpContent.js";
+import { isDemoMode } from "../demo/demoMode.js";
 import "./help.css";
 
 export default function HelpPanel({ open, activeId, setActiveId, onClose }) {
@@ -37,6 +38,11 @@ export default function HelpPanel({ open, activeId, setActiveId, onClose }) {
       <div className="bf-help-panel" role="dialog" aria-modal="true" aria-label="Help panel">
         <div className="bf-help-top">
           <h3>Need help?</h3>
+          {isDemoMode() ? (
+            <button type="button" className="bf-help-tour" onClick={() => { try { window.dispatchEvent(new Event("bf-demo-tour-open")); } catch {} }}>
+              Start tour
+            </button>
+          ) : null}
           <button type="button" className="bf-help-close" onClick={() => onClose?.()}>
             Close
           </button>
