@@ -25,8 +25,9 @@ import Security from "./pages/Security.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
-import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 import HelpWidget from "./help/HelpWidget.jsx";
+import { isDemoMode } from "./demo/demoMode.js";
+import OrgSecretGuard from "./components/OrgSecretGuard.jsx";
 
 /* -------------------------------- Error Boundary ------------------------------- */
 class ErrorBoundary extends React.Component {
@@ -65,6 +66,10 @@ const AuthCtx = React.createContext({
 });
 
 async function fetchMe() {
+	if (isDemoMode()) {
+		return { ok: true, user: { id: "demo", name: "Demo User", email: "demo@bondfire.local", demo: true } };
+	}
+
 	// Try /me first. If access cookie expired but refresh cookie is still valid,
 	// attempt a silent refresh and retry once before declaring the session dead.
 	const doMe = async () => {
@@ -150,6 +155,8 @@ function Shell() {
 		} catch {}
 		try {
 			localStorage.removeItem("demo_user");
+			localStorage.removeItem("bf-demo-user");
+			localStorage.removeItem("bf_demo_mode_v1");
 		} catch {}
 		setState({ authed: false, loading: false, user: null });
 		window.location.hash = "#/signin";
@@ -260,7 +267,6 @@ function Shell() {
 
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
-
 			<HelpWidget />
 		</AuthCtx.Provider>
 	);

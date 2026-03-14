@@ -1,6 +1,8 @@
 // src/pages/OrgDash.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { isDemoMode } from "../demo/demoMode.js";
+import { ensureDemoOrgList, resetDemoState } from "../demo/demoStore.js";
 
 /* ---------- API helper ---------- */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -97,6 +99,7 @@ async function authFetch(path, opts = {}) {
 }
 
 export default function OrgDash() {
+  const demoMode = isDemoMode();
   const nav = useNavigate();
   const isMobile = useIsMobile(720);
 
@@ -130,12 +133,17 @@ export default function OrgDash() {
   const load = React.useCallback(async () => {
     setMsg("");
     try {
+      if (demoMode) {
+        const org = ensureDemoOrgList();
+        setOrgs([org]);
+        return;
+      }
       const r = await authFetch("/api/orgs", { method: "GET" });
       setOrgs(Array.isArray(r.orgs) ? r.orgs : []);
     } catch (e) {
       setMsg(e.message || "Failed to load orgs");
     }
-  }, []);
+  }, [demoMode]);
 
   React.useEffect(() => {
     load();
@@ -148,6 +156,10 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
+      if (demoMode) {
+        setMsg("Demo mode uses a preloaded org. Use Reset Demo if you want a clean copy.");
+        return;
+      }
       const r = await authFetch("/api/orgs/create", { method: "POST", body: { name } });
       setNewOrgName("");
       // Update list immediately. Do NOT auto-enter the org.
@@ -176,6 +188,10 @@ export default function OrgDash() {
     setBusy(true);
     setMsg("");
     try {
+      if (demoMode) {
+        setMsg("Invite join is disabled in demo mode.");
+        return;
+      }
       const r = await authFetch("/api/invites/redeem", { method: "POST", body: { code } });
       setInviteCode("");
       await load();
@@ -192,6 +208,15 @@ export default function OrgDash() {
     <div style={{ padding: 16 }}>
       <h1 style={{ marginTop: 0 }}>Org Dashboard</h1>
       <p className="helper">Choose an organization to enter its workspace, or create or join one.</p>
+
+      {demoMode ? (
+        <div className="card" style={{ padding: 12, marginBottom: 16, background: "rgba(255,255,255,0.03)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 800, flex: 1 }}>Demo Mode is active. Changes are saved only in this browser.</div>
+            <button className="btn" type="button" onClick={() => { resetDemoState(); ensureDemoOrgList(); load(); setMsg("Demo reset."); }}>Reset Demo</button>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="grid"

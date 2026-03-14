@@ -4,6 +4,9 @@
 // - Cookie/session support
 // - Optional silent refresh on 401
 
+import { isDemoMode } from "../demo/demoMode.js";
+import { demoHandle, ensureDemoOrgList } from "../demo/demoStore.js";
+
 const API_BASE = (import.meta?.env?.VITE_API_BASE || "").replace(/\/$/, "");
 
 function pickToken() {
@@ -47,7 +50,7 @@ async function tryRefresh() {
   // If your backend doesn't support refresh, this just fails quietly.
   const rel = `/api/auth/refresh`;
   const url = API_BASE ? `${API_BASE}${rel}` : rel;
-  const res = await fetch(chosenUrl, {
+  const res = await fetch(url, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -67,6 +70,12 @@ async function tryRefresh() {
 
 export async function api(path, opts = {}) {
   const rel = path.startsWith("/") ? path : `/${path}`;
+
+  if (isDemoMode()) {
+    ensureDemoOrgList();
+    const handled = demoHandle(rel, opts);
+    if (handled) return handled;
+  }
   const candidates = (() => {
     if (path.startsWith("http")) return [path];
     if (!API_BASE) return [rel];

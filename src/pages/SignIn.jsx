@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { enableDemoMode } from "../demo/demoMode.js";
+import { ensureDemoOrgList, resetDemoState } from "../demo/demoStore.js";
 
 function fireAuthChanged() {
 	try {
@@ -15,12 +16,17 @@ async function safeJson(res) {
 
 function startDemo(navigate) {
 	try {
-		enableDemoMode("signin");
-		localStorage.setItem("bf-demo-user", JSON.stringify({ id: "demo", name: "Demo User" }));
-		localStorage.setItem("bf_orgs", JSON.stringify([{ id: "demo", name: "Bondfire Demo Org" }]));
-		window.dispatchEvent(new Event("bf-auth-changed"));
-	} catch {}
-	navigate("/orgs", { replace: true });
+		enableDemoMode();
+		resetDemoState();
+		const demoOrg = ensureDemoOrgList();
+		localStorage.setItem("bf-demo-user", JSON.stringify({ id: "demo", name: "Demo User", demo: true }));
+		try {
+			window.dispatchEvent(new Event("bf-auth-changed"));
+		} catch {}
+		navigate(`/org/${encodeURIComponent(demoOrg.id)}`, { replace: true });
+	} catch (e) {
+		console.error("demo start failed", e);
+	}
 }
 
 
@@ -208,12 +214,7 @@ export default function SignIn() {
 			</div>
 
 			<div style={{ marginTop: 12 }}>
-				<button
-					type="button"
-					className="btn"
-					onClick={() => startDemo(navigate)}
-					disabled={busy}
-				>
+				<button type="button" className="btn" onClick={() => startDemo(navigate)} disabled={busy}>
 					Try Demo (no account required)
 				</button>
 			</div>
