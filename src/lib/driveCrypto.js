@@ -1,7 +1,7 @@
 export async function encryptBlob(data) {
-  return btoa(JSON.stringify(data));
+  return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
 }
 
 export async function decryptBlob(data) {
-  return JSON.parse(atob(data));
+  return JSON.parse(decodeURIComponent(escape(atob(data))));
 }

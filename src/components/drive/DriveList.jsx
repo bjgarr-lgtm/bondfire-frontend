@@ -1,27 +1,47 @@
 import React from "react";
 
-export default function DriveList({ notes, onSelect, onMove, onDelete }) {
-  const getTitle = (blob) => {
-    try {
-      return JSON.parse(atob(blob)).title || "untitled";
-    } catch {
-      return "untitled";
-    }
-  };
+export default function DriveList({ notes, folders, onSelect, onMove, onDelete, selectedId }) {
+  const folderOptions = [{ id: "", name: "Root" }, ...folders];
 
   return (
-    <div>
-      {notes.map((n) => (
-        <div key={n.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: 8, borderBottom: "1px solid #222" }}>
-          <span onClick={() => onSelect(n)} style={{ cursor: "pointer", minWidth: 0, flex: 1 }} title={getTitle(n.blob)}>
-            {getTitle(n.blob)}
-          </span>
-          <span style={{ display: "flex", gap: 4 }}>
-            <button className="btn" type="button" onClick={() => onMove(n.id)}>move</button>
-            <button className="btn" type="button" onClick={() => onDelete(n.id)}>x</button>
-          </span>
+    <div style={{ overflow: "auto", height: "100%" }}>
+      {notes.map((note) => (
+        <div
+          key={note.id}
+          style={{
+            padding: 8,
+            borderBottom: "1px solid #222",
+            background: selectedId === note.id ? "rgba(255,255,255,0.05)" : "transparent",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => onSelect(note.id)}
+              style={{ flex: 1, justifyContent: "flex-start", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={note.title}
+            >
+              📝 {note.title || "untitled"}
+            </button>
+            <button className="btn" type="button" onClick={() => onDelete(note.id)}>x</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+            <span className="helper">Move</span>
+            <select
+              className="input"
+              value={note.parentId || ""}
+              onChange={(e) => onMove(note.id, e.target.value || null)}
+              style={{ padding: 6 }}
+            >
+              {folderOptions.map((folder) => (
+                <option key={folder.id || "root"} value={folder.id || ""}>{folder.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       ))}
+      {!notes.length ? <div className="helper" style={{ padding: 12 }}>No notes in this folder yet.</div> : null}
     </div>
   );
 }
