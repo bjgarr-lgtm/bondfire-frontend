@@ -15,10 +15,10 @@ export default function DriveSidebar({
     folders
       .filter((f) => f.parentId === parentId)
       .map((f) => (
-        <div key={f.id} style={{ paddingLeft: depth * 12, marginTop: 6 }}>
+        <div key={f.id} style={{ paddingLeft: depth * 12, marginTop: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
             <span
-              style={{ cursor: "pointer", fontWeight: currentFolder === f.id ? "bold" : "normal", minWidth: 0, flex: 1 }}
+              style={{ cursor: "pointer", fontWeight: currentFolder === f.id ? 800 : 500, minWidth: 0, flex: 1 }}
               onClick={() => setCurrentFolder(f.id)}
               title={f.name}
             >
@@ -34,20 +34,18 @@ export default function DriveSidebar({
       ));
 
   return (
-    <div style={{ padding: 12 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+    <div style={{ padding: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn" type="button" onClick={() => setCurrentFolder(null)}>Root</button>
         <button className="btn" type="button" onClick={onNewFolder}>+ Folder</button>
       </div>
 
       {render()}
 
-      <div style={{ marginTop: 18 }}>
+      <div style={{ marginTop: 20 }}>
         <h3 style={{ marginBottom: 8 }}>Tags</h3>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn" type="button" onClick={() => setSelectedTag("")} style={{ fontWeight: !selectedTag ? 800 : 400 }}>
-            all
-          </button>
+          <button className="btn" type="button" onClick={() => setSelectedTag("")} style={{ fontWeight: !selectedTag ? 800 : 400 }}>all</button>
           {tags.map((tag) => (
             <button key={tag} className="btn" type="button" onClick={() => setSelectedTag(tag)} style={{ fontWeight: selectedTag === tag ? 800 : 400 }}>
               #{tag}

@@ -1,26 +1,34 @@
 import React from "react";
 
-export default function NoteEditor({ value, onChange }) {
+export default function NoteEditor({ value, onChange, focusMode }) {
   return (
-    <textarea
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      spellCheck={false}
+    <div
       style={{
-        width: "100%",
-        minHeight: "75vh",
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 16,
-        lineHeight: 1.8,
-        background: "transparent",
-        border: "none",
-        outline: "none",
-        resize: "none",
-        padding: "24px 32px",
-        maxWidth: "800px",
+        maxWidth: 900,
         margin: "0 auto",
-        display: "block"
+        background: "rgba(255,255,255,0.02)",
+        border: "1px solid #222",
+        borderRadius: 16,
+        padding: focusMode ? 20 : 16,
       }}
-    />
+    >
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        style={{
+          width: "100%",
+          minHeight: focusMode ? "82vh" : "72vh",
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          color: "#f5f5f5",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 16,
+          lineHeight: 1.8,
+          resize: "none",
+        }}
+      />
+    </div>
   );
 }

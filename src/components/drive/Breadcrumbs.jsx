@@ -1,22 +1,17 @@
 import React from "react";
 
 export default function Breadcrumbs({ folders, currentFolder, setCurrentFolder }) {
-  const buildPath = () => {
-    const path = [];
-    let current = currentFolder;
-    while (current) {
-      const f = folders.find((x) => x.id === current);
-      if (!f) break;
-      path.unshift(f);
-      current = f.parentId;
-    }
-    return path;
-  };
-
-  const path = buildPath();
+  const path = [];
+  let current = currentFolder;
+  while (current) {
+    const found = folders.find((f) => f.id === current);
+    if (!found) break;
+    path.unshift(found);
+    current = found.parentId;
+  }
 
   return (
-    <div style={{ marginBottom: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+    <div style={{ marginBottom: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
       <span style={{ cursor: "pointer" }} onClick={() => setCurrentFolder(null)}>Root</span>
       {path.map((f) => (
         <span key={f.id}>

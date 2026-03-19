@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function DriveList({ notes, onSelect, onMove, onDelete, onRename, selectedId }) {
+export default function DriveList({ notes, onSelect, onRename, onMove, onDelete, selectedId }) {
   return (
     <div>
       {notes.map((n) => (
@@ -12,11 +12,11 @@ export default function DriveList({ notes, onSelect, onMove, onDelete, onRename,
             gap: 8,
             padding: 8,
             borderBottom: "1px solid #222",
-            background: selectedId === n.id ? "rgba(255,255,255,0.05)" : "transparent",
+            background: selectedId === n.id ? "rgba(255,255,255,0.06)" : "transparent",
           }}
         >
           <div>
-            <div onClick={() => onSelect(n.id)} style={{ cursor: "pointer", minWidth: 0 }} title={n.title}>
+            <div onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }} title={n.title}>
               {n.title || "untitled"}
             </div>
             {n.tags?.length ? <div className="helper" style={{ marginTop: 4 }}>{n.tags.map((tag) => `#${tag}`).join(" ")}</div> : null}

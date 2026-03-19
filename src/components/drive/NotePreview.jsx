@@ -4,40 +4,144 @@ function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function md(text) {
-  let html = escapeHtml(text);
-
-  html = html.replace(/^# (.*)$/gm, "<h1>$1</h1>");
-  html = html.replace(/^## (.*)$/gm, "<h2>$1</h2>");
-  html = html.replace(/^### (.*)$/gm, "<h3>$1</h3>");
-
-  html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
-
-  html = html.replace(/^\> (.*)$/gm, "<blockquote>$1</blockquote>");
-
-  html = html.replace(/^\- (.*)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>.*<\/li>)/gms, "<ul>$1</ul>");
-
-  html = html.replace(/\n\n/g, "</p><p>");
-  html = "<p>" + html + "</p>";
-
+function applyInlineMarkdown(text) {
+  let html = escapeHtml(text || "");
+  html = html.replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>");
+  html = html.replace(/\*(.*?)\*/gim, "<em>$1</em>");
+  html = html.replace(/`([^`]+)`/gim, "<code>$1</code>");
+  html = html.replace(/\[\[(.*?)(\|(.*?))?\]\]/gim, (_, title, _x, label) => {
+    const safeTitle = escapeHtml(String(title || "").trim());
+    const safeLabel = escapeHtml(String(label || title || "").trim());
+    return `<a href="#" data-note-title="${safeTitle}">${safeLabel}</a>`;
+  });
   return html;
 }
 
-export default function NotePreview({ content }) {
+function markdownToHtml(md) {
+  const lines = String(md || "").split("\n");
+  let html = "";
+  let inUL = false;
+  let inOL = false;
+  let inQuote = false;
+
+  const closeBlocks = () => {
+    if (inUL) {
+      html += "</ul>";
+      inUL = false;
+    }
+    if (inOL) {
+      html += "</ol>";
+      inOL = false;
+    }
+    if (inQuote) {
+      html += "</blockquote>";
+      inQuote = false;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      closeBlocks();
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      if (!inQuote) {
+        closeBlocks();
+        html += "<blockquote>";
+        inQuote = true;
+      }
+      html += `<div>${applyInlineMarkdown(trimmed.replace(/^>\s?/, ""))}</div>`;
+      continue;
+    }
+
+    if (/^-\s+/.test(trimmed)) {
+      if (!inUL) {
+        closeBlocks();
+        html += "<ul>";
+        inUL = true;
+      }
+      html += `<li>${applyInlineMarkdown(trimmed.replace(/^-\s+/, ""))}</li>`;
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      if (!inOL) {
+        closeBlocks();
+        html += "<ol>";
+        inOL = true;
+      }
+      html += `<li>${applyInlineMarkdown(trimmed.replace(/^\d+\.\s+/, ""))}</li>`;
+      continue;
+    }
+
+    closeBlocks();
+
+    if (/^###\s+/.test(trimmed)) {
+      html += `<h3>${applyInlineMarkdown(trimmed.replace(/^###\s+/, ""))}</h3>`;
+      continue;
+    }
+    if (/^##\s+/.test(trimmed)) {
+      html += `<h2>${applyInlineMarkdown(trimmed.replace(/^##\s+/, ""))}</h2>`;
+      continue;
+    }
+    if (/^#\s+/.test(trimmed)) {
+      html += `<h1>${applyInlineMarkdown(trimmed.replace(/^#\s+/, ""))}</h1>`;
+      continue;
+    }
+
+    html += `<p>${applyInlineMarkdown(trimmed)}</p>`;
+  }
+
+  closeBlocks();
+  return html;
+}
+
+export default function NotePreview({ content, onOpenLink, focusMode }) {
   return (
-    <div style={{
-      maxWidth: "800px",
-      margin: "0 auto",
-      padding: "32px",
-      lineHeight: 1.8,
-      fontSize: 16
-    }}>
-      <div dangerouslySetInnerHTML={{ __html: md(content) }} />
+    <div
+      onClick={(e) => {
+        const link = e.target.closest("a[data-note-title]");
+        if (!link) return;
+        e.preventDefault();
+        onOpenLink?.(link.dataset.noteTitle || "");
+      }}
+      style={{
+        maxWidth: 900,
+        margin: "0 auto",
+        background: "rgba(255,255,255,0.02)",
+        border: "1px solid #222",
+        borderRadius: 16,
+        padding: focusMode ? 28 : 22,
+        minHeight: focusMode ? "82vh" : "72vh",
+      }}
+    >
+      <style>{`
+        .bf-note-preview {
+          max-width: 74ch;
+          margin: 0 auto;
+          font-size: 17px;
+          line-height: 1.8;
+        }
+        .bf-note-preview h1,
+        .bf-note-preview h2,
+        .bf-note-preview h3 { margin: 0 0 14px 0; }
+        .bf-note-preview p { margin: 0 0 14px 0; }
+        .bf-note-preview ul,
+        .bf-note-preview ol { margin: 0 0 14px 0; padding-left: 24px; }
+        .bf-note-preview li { margin: 0 0 4px 0; }
+        .bf-note-preview blockquote { margin: 0 0 14px 0; padding-left: 12px; border-left: 3px solid #666; color: #bbb; }
+        .bf-note-preview a[data-note-title] { color: #9ed0ff; text-decoration: underline; cursor: pointer; }
+        .bf-note-preview code { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 4px; }
+      `}</style>
+      <div className="bf-note-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }} />
     </div>
   );
 }
