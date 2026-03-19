@@ -1,20 +1,28 @@
 import React from "react";
 
-function escapeHtml(s) {
-  return String(s || "")
+function escapeHtml(str) {
+  return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function applyInlineMarkdown(text) {
-  const safe = escapeHtml(text);
-  return safe
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.*?)\*/g, "<em>$1</em>");
+  let html = escapeHtml(text || "");
+  html = html.replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>");
+  html = html.replace(/\*(.*?)\*/gim, "<em>$1</em>");
+  html = html.replace(/`([^`]+)`/gim, "<code>$1</code>");
+  html = html.replace(/\[\[(.*?)(\|(.*?))?\]\]/gim, (_, title, _x, label) => {
+    const safeTitle = escapeHtml(String(title || "").trim());
+    const safeLabel = escapeHtml(String(label || title || "").trim());
+    return `<a href="#" data-note-title="${safeTitle}">${safeLabel}</a>`;
+  });
+  return html;
 }
 
-function renderMarkdown(md) {
+function markdownToHtml(md) {
   const lines = String(md || "").split("\n");
   let html = "";
   let inUL = false;
@@ -99,15 +107,21 @@ function renderMarkdown(md) {
   return html;
 }
 
-export default function NotePreview({ content }) {
+export default function NotePreview({ content, onOpenLink }) {
   return (
     <div
       style={{
         border: "1px solid #333",
         padding: 12,
-        minHeight: "70vh",
+        minHeight: "72vh",
         overflow: "auto",
         lineHeight: 1.5,
+      }}
+      onClick={(e) => {
+        const link = e.target.closest("a[data-note-title]");
+        if (!link) return;
+        e.preventDefault();
+        onOpenLink?.(link.dataset.noteTitle || "");
       }}
     >
       <style>{`
@@ -133,10 +147,20 @@ export default function NotePreview({ content }) {
           border-left: 3px solid #666;
           color: #bbb;
         }
+        .bf-note-preview a[data-note-title] {
+          color: #9ed0ff;
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        .bf-note-preview code {
+          background: rgba(255,255,255,0.08);
+          padding: 1px 4px;
+          border-radius: 4px;
+        }
       `}</style>
       <div
         className="bf-note-preview"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+        dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }}
       />
     </div>
   );
