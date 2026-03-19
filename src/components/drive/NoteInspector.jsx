@@ -1,13 +1,23 @@
 import React from "react";
 
-export default function NoteInspector({ note, backlinks, onOpenNote, onAddRecordLink, onRemoveRecordLink }) {
+export default function NoteInspector({ note, backlinks, onOpenNote }) {
   return (
-    <div className="card" style={{ padding: 12 }}>
-      <div className="helper" style={{ marginBottom: 8 }}>
-        updated {note?.updatedAt ? new Date(note.updatedAt).toLocaleString() : ""}
+    <div
+      className="card"
+      style={{
+        padding: 14,
+        background: "rgba(11,11,11,0.96)",
+        backdropFilter: "blur(8px)",
+      }}
+    >
+      <div style={{ marginBottom: 14 }}>
+        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Inspector</h3>
+        <div className="helper">
+          updated {note?.updatedAt ? new Date(note.updatedAt).toLocaleString() : ""}
+        </div>
       </div>
 
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 16 }}>
         <h4 style={{ marginBottom: 8 }}>Tags</h4>
         {note?.tags?.length ? (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -17,28 +27,6 @@ export default function NoteInspector({ note, backlinks, onOpenNote, onAddRecord
           </div>
         ) : (
           <div className="helper">No tags yet. Add #tags in the note body.</div>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-          <h4 style={{ margin: 0 }}>Linked records</h4>
-          <button className="btn" type="button" onClick={onAddRecordLink}>+ Link</button>
-        </div>
-        {note?.recordLinks?.length ? (
-          <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
-            {note.recordLinks.map((link) => (
-              <div key={link.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                <div>
-                  <div>{link.label}</div>
-                  <div className="helper">{link.targetType}:{link.targetId}</div>
-                </div>
-                <button className="btn" type="button" onClick={() => onRemoveRecordLink(link.id)}>x</button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="helper" style={{ marginTop: 8 }}>No linked records.</div>
         )}
       </div>
 
