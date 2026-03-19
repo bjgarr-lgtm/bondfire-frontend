@@ -4,10 +4,9 @@ export default function NoteEditor({ value, onChange }) {
   return (
     <textarea
       className="input"
-      style={{ width: "100%", minHeight: "72vh", resize: "vertical" }}
+      style={{ width: "100%", height: "72vh" }}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder="# Untitled\n\nWrite markdown here. Use [[Wiki Links]] to connect notes."
     />
   );
 }

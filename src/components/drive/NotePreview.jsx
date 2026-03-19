@@ -127,41 +127,16 @@ export default function NotePreview({ content, onOpenLink }) {
       <style>{`
         .bf-note-preview h1,
         .bf-note-preview h2,
-        .bf-note-preview h3 {
-          margin: 0 0 12px 0;
-        }
-        .bf-note-preview p {
-          margin: 0 0 12px 0;
-        }
+        .bf-note-preview h3 { margin: 0 0 12px 0; }
+        .bf-note-preview p { margin: 0 0 12px 0; }
         .bf-note-preview ul,
-        .bf-note-preview ol {
-          margin: 0 0 12px 0;
-          padding-left: 24px;
-        }
-        .bf-note-preview li {
-          margin: 0 0 4px 0;
-        }
-        .bf-note-preview blockquote {
-          margin: 0 0 12px 0;
-          padding-left: 12px;
-          border-left: 3px solid #666;
-          color: #bbb;
-        }
-        .bf-note-preview a[data-note-title] {
-          color: #9ed0ff;
-          text-decoration: underline;
-          cursor: pointer;
-        }
-        .bf-note-preview code {
-          background: rgba(255,255,255,0.08);
-          padding: 1px 4px;
-          border-radius: 4px;
-        }
+        .bf-note-preview ol { margin: 0 0 12px 0; padding-left: 24px; }
+        .bf-note-preview li { margin: 0 0 4px 0; }
+        .bf-note-preview blockquote { margin: 0 0 12px 0; padding-left: 12px; border-left: 3px solid #666; color: #bbb; }
+        .bf-note-preview a[data-note-title] { color: #9ed0ff; text-decoration: underline; cursor: pointer; }
+        .bf-note-preview code { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 4px; }
       `}</style>
-      <div
-        className="bf-note-preview"
-        dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }}
-      />
+      <div className="bf-note-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }} />
     </div>
   );
 }

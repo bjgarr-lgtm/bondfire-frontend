@@ -7,45 +7,54 @@ export default function DriveSidebar({
   onNewFolder,
   onRename,
   onDelete,
+  tags,
+  selectedTag,
+  setSelectedTag,
 }) {
-  const renderTree = (parentId = null, depth = 0) => {
-    return folders
-      .filter((folder) => (folder.parentId || null) === parentId)
-      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
-      .map((folder) => (
-        <div key={folder.id} style={{ marginTop: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: depth * 12 }}>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setCurrentFolder(folder.id)}
-              style={{
-                flex: 1,
-                justifyContent: "flex-start",
-                background: currentFolder === folder.id ? "rgba(255,255,255,0.10)" : undefined,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              title={folder.name}
+  const render = (parentId = null, depth = 0) =>
+    folders
+      .filter((f) => f.parentId === parentId)
+      .map((f) => (
+        <div key={f.id} style={{ paddingLeft: depth * 12, marginTop: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+            <span
+              style={{ cursor: "pointer", fontWeight: currentFolder === f.id ? "bold" : "normal", minWidth: 0, flex: 1 }}
+              onClick={() => setCurrentFolder(f.id)}
+              title={f.name}
             >
-              📁 {folder.name}
-            </button>
-            <button className="btn" type="button" onClick={() => onRename(folder.id)}>r</button>
-            <button className="btn" type="button" onClick={() => onDelete(folder.id)}>x</button>
+              📁 {f.name}
+            </span>
+            <span style={{ display: "flex", gap: 4 }}>
+              <button className="btn" type="button" onClick={() => onRename(f.id)}>r</button>
+              <button className="btn" type="button" onClick={() => onDelete(f.id)}>x</button>
+            </span>
           </div>
-          {renderTree(folder.id, depth + 1)}
+          {render(f.id, depth + 1)}
         </div>
       ));
-  };
 
   return (
-    <div style={{ padding: 12, height: "100%", overflow: "auto" }}>
+    <div style={{ padding: 12 }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button className="btn" type="button" onClick={() => setCurrentFolder(null)}>Root</button>
         <button className="btn" type="button" onClick={onNewFolder}>+ Folder</button>
       </div>
-      {renderTree()}
+
+      {render()}
+
+      <div style={{ marginTop: 18 }}>
+        <h3 style={{ marginBottom: 8 }}>Tags</h3>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn" type="button" onClick={() => setSelectedTag("")} style={{ fontWeight: !selectedTag ? 800 : 400 }}>
+            all
+          </button>
+          {tags.map((tag) => (
+            <button key={tag} className="btn" type="button" onClick={() => setSelectedTag(tag)} style={{ fontWeight: selectedTag === tag ? 800 : 400 }}>
+              #{tag}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
