@@ -12,6 +12,10 @@ function storageKey(orgId) {
   return `bf_drive_v2_${orgId || "demo"}`;
 }
 
+function uiKey(orgId) {
+  return `bf_drive_v2_ui_${orgId || "demo"}`;
+}
+
 function newId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -26,8 +30,13 @@ function parseTags(body) {
   return [...new Set(matches.map((m) => String(m[2] || "").trim().toLowerCase()).filter(Boolean))];
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export default function Drive() {
   const { orgId } = useParams();
+
   const [folders, setFolders] = useState([]);
   const [notes, setNotes] = useState([]);
   const [currentFolder, setCurrentFolder] = useState(null);
@@ -38,28 +47,54 @@ export default function Drive() {
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
   const [viewMode, setViewMode] = useState("split");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [listWidth, setListWidth] = useState(360);
+  const [splitRatio, setSplitRatio] = useState(0.52);
+
   const saveTimer = useRef(null);
+  const skipNextAutoSave = useRef(false);
+  const resizeMode = useRef(null);
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey(orgId));
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      setFolders(Array.isArray(parsed.folders) ? parsed.folders : []);
-      setNotes(Array.isArray(parsed.notes) ? parsed.notes : []);
-      setViewMode(["edit", "read", "split"].includes(parsed.viewMode) ? parsed.viewMode : "split");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setFolders(Array.isArray(parsed.folders) ? parsed.folders : []);
+        setNotes(Array.isArray(parsed.notes) ? parsed.notes : []);
+      } else {
+        setFolders([]);
+        setNotes([]);
+      }
     } catch {
       setFolders([]);
       setNotes([]);
-      setViewMode("split");
     }
+
+    try {
+      const uiRaw = localStorage.getItem(uiKey(orgId));
+      if (uiRaw) {
+        const parsed = JSON.parse(uiRaw);
+        setViewMode(["edit", "read", "split"].includes(parsed.viewMode) ? parsed.viewMode : "split");
+        setInspectorOpen(!!parsed.inspectorOpen);
+        setListWidth(Number.isFinite(parsed.listWidth) ? clamp(parsed.listWidth, 280, 520) : 360);
+        setSplitRatio(Number.isFinite(parsed.splitRatio) ? clamp(parsed.splitRatio, 0.25, 0.75) : 0.52);
+      }
+    } catch {}
   }, [orgId]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(orgId), JSON.stringify({ folders, notes, viewMode }));
+      localStorage.setItem(storageKey(orgId), JSON.stringify({ folders, notes }));
     } catch {}
-  }, [orgId, folders, notes, viewMode]);
+  }, [orgId, folders, notes]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(uiKey(orgId), JSON.stringify({ viewMode, inspectorOpen, listWidth, splitRatio }));
+    } catch {}
+  }, [orgId, viewMode, inspectorOpen, listWidth, splitRatio]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -86,7 +121,36 @@ export default function Drive() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizeMode.current) return;
+      if (resizeMode.current === "list") {
+        setListWidth(clamp(e.clientX - 280, 280, 520));
+      }
+      if (resizeMode.current === "split") {
+        const main = document.getElementById("bf-drive-main-work");
+        if (!main) return;
+        const rect = main.getBoundingClientRect();
+        const ratio = (e.clientX - rect.left) / rect.width;
+        setSplitRatio(clamp(ratio, 0.25, 0.75));
+      }
+    };
+
+    const onUp = () => {
+      resizeMode.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   const selectedNote = notes.find((note) => note.id === selectedId) || null;
 
@@ -113,21 +177,29 @@ export default function Drive() {
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   const backlinks = selectedNote
-    ? notes.filter((note) => note.id !== selectedNote.id && parseWikiLinks(note.body).some((link) => link.toLowerCase() === String(selectedNote.title || "").toLowerCase()))
+    ? notes.filter(
+        (note) =>
+          note.id !== selectedNote.id &&
+          parseWikiLinks(note.body).some(
+            (link) => link.toLowerCase() === String(selectedNote.title || "").toLowerCase()
+          )
+      )
     : [];
 
   async function createNote() {
+    const empty = { title: "untitled", body: "" };
     const note = {
       id: newId("note"),
-      title: "untitled",
-      body: "",
-      blob: await encryptBlob({ title: "untitled", body: "" }),
+      title: empty.title,
+      body: empty.body,
+      blob: await encryptBlob(empty),
       parentId: currentFolder,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tags: [],
       recordLinks: [],
     };
+    skipNextAutoSave.current = true;
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setTitle(note.title);
@@ -139,6 +211,7 @@ export default function Drive() {
     const note = notes.find((item) => item.id === noteId);
     if (!note) return;
     const dec = note.blob ? await decryptBlob(note.blob) : { title: note.title, body: note.body };
+    skipNextAutoSave.current = true;
     setSelectedId(note.id);
     setTitle(dec.title || note.title || "untitled");
     setContent(dec.body || note.body || "");
@@ -147,41 +220,63 @@ export default function Drive() {
 
   async function saveNow() {
     if (!selectedId) return;
-    const tags = parseTags(content);
-    const blob = await encryptBlob({ title, body: content });
-    setNotes((prev) =>
-      prev.map((note) =>
-        note.id === selectedId
-          ? { ...note, title, body: content, blob, tags, updatedAt: Date.now() }
-          : note
-      )
-    );
-    setStatus("saved");
+    try {
+      const tags = parseTags(content);
+      const blob = await encryptBlob({ title, body: content });
+      setNotes((prev) =>
+        prev.map((note) =>
+          note.id === selectedId
+            ? { ...note, title, body: content, blob, tags, updatedAt: Date.now() }
+            : note
+        )
+      );
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+    }
   }
 
-  function queueSave() {
+  useEffect(() => {
+    if (!selectedId) return;
+    if (skipNextAutoSave.current) {
+      skipNextAutoSave.current = false;
+      return;
+    }
     setStatus("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveNow();
     }, 700);
-  }
-
-  useEffect(() => {
-    if (!selectedId) return;
-    queueSave();
-  }, [title, content]);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [selectedId, title, content]);
 
   function createFolder() {
     const name = prompt("Folder name?");
     if (!name) return;
-    setFolders((prev) => [...prev, { id: newId("folder"), name: String(name).trim(), parentId: currentFolder, createdAt: Date.now(), updatedAt: Date.now() }]);
+    setFolders((prev) => [
+      ...prev,
+      {
+        id: newId("folder"),
+        name: String(name).trim(),
+        parentId: currentFolder,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
   }
 
   function renameFolder(id) {
     const nextName = prompt("New folder name?");
     if (!nextName) return;
-    setFolders((prev) => prev.map((folder) => folder.id === id ? { ...folder, name: String(nextName).trim(), updatedAt: Date.now() } : folder));
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.id === id
+          ? { ...folder, name: String(nextName).trim(), updatedAt: Date.now() }
+          : folder
+      )
+    );
   }
 
   function deleteFolder(id) {
@@ -197,8 +292,16 @@ export default function Drive() {
     const note = notes.find((n) => n.id === id);
     const nextTitle = prompt("New note title?", note?.title || "");
     if (!nextTitle) return;
-    setNotes((prev) => prev.map((n) => n.id === id ? { ...n, title: String(nextTitle).trim(), updatedAt: Date.now() } : n));
-    if (selectedId === id) setTitle(String(nextTitle).trim());
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === id ? { ...n, title: String(nextTitle).trim(), updatedAt: Date.now() } : n
+      )
+    );
+    if (selectedId === id) {
+      skipNextAutoSave.current = true;
+      setTitle(String(nextTitle).trim());
+      setStatus("saved");
+    }
   }
 
   function deleteNote(id) {
@@ -213,7 +316,9 @@ export default function Drive() {
 
   function moveNote(id) {
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
-    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, parentId: target || null, updatedAt: Date.now() } : n)));
+    setNotes((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, parentId: target || null, updatedAt: Date.now() } : n))
+    );
   }
 
   function openLinkedNoteByTitle(rawTitle) {
@@ -226,17 +331,19 @@ export default function Drive() {
     }
     const shouldCreate = window.confirm(`Create note "${rawTitle}"?`);
     if (!shouldCreate) return;
+    const cleanTitle = String(rawTitle).trim() || "untitled";
     const note = {
       id: newId("note"),
-      title: String(rawTitle).trim() || "untitled",
+      title: cleanTitle,
       body: "",
-      blob: btoa(JSON.stringify({ title: String(rawTitle).trim() || "untitled", body: "" })),
+      blob: btoa(JSON.stringify({ title: cleanTitle, body: "" })),
       parentId: currentFolder,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tags: [],
       recordLinks: [],
     };
+    skipNextAutoSave.current = true;
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setTitle(note.title);
@@ -256,7 +363,10 @@ export default function Drive() {
         note.id === selectedId
           ? {
               ...note,
-              recordLinks: [...(note.recordLinks || []), { id: newId("link"), targetType: String(targetType).trim(), targetId: String(targetId).trim(), label: String(label).trim() }],
+              recordLinks: [
+                ...(note.recordLinks || []),
+                { id: newId("link"), targetType: String(targetType).trim(), targetId: String(targetId).trim(), label: String(label).trim() },
+              ],
               updatedAt: Date.now(),
             }
           : note
@@ -275,93 +385,128 @@ export default function Drive() {
     );
   }
 
+  function beginResize(which) {
+    resizeMode.current = which;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+
   const editorOnly = viewMode === "edit";
   const readOnly = viewMode === "read";
   const splitView = viewMode === "split";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 340px minmax(0,1fr)", height: "calc(100vh - 80px)" }}>
-      <div style={{ borderRight: "1px solid #333", overflow: "auto" }}>
-        <DriveSidebar
-          folders={folders}
-          currentFolder={currentFolder}
-          setCurrentFolder={setCurrentFolder}
-          onNewFolder={createFolder}
-          onRename={renameFolder}
-          onDelete={deleteFolder}
-          tags={allTags}
-          selectedTag={selectedTag}
-          setSelectedTag={setSelectedTag}
-        />
-      </div>
-
-      <div style={{ borderRight: "1px solid #333", padding: 10, overflow: "auto" }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button className="btn" type="button" onClick={createNote}>+ Note</button>
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: `280px ${listWidth}px 8px minmax(0,1fr)`, height: "calc(100vh - 86px)" }}>
+        <div style={{ borderRight: "1px solid #333", overflow: "auto" }}>
+          <DriveSidebar
+            folders={folders}
+            currentFolder={currentFolder}
+            setCurrentFolder={setCurrentFolder}
+            onNewFolder={createFolder}
+            onRename={renameFolder}
+            onDelete={deleteFolder}
+            tags={allTags}
+            selectedTag={selectedTag}
+            setSelectedTag={setSelectedTag}
+          />
         </div>
-        <input
-          className="input"
-          placeholder="search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: "100%", marginBottom: 10 }}
-        />
-        <DriveList
-          notes={visibleNotes}
-          folders={folders}
-          onSelect={selectNote}
-          onMove={moveNote}
-          onDelete={deleteNote}
-          onRename={renameNote}
-          selectedId={selectedId}
-        />
-      </div>
 
-      <div style={{ padding: 12, minWidth: 0, overflow: "auto" }}>
-        <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} />
-        {selectedNote ? (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: 18, width: "min(100%, 520px)" }} />
-              <span className="helper">{status}</span>
-              <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
-                <button className="btn" type="button" onClick={() => setViewMode("edit")} style={{ fontWeight: editorOnly ? 800 : 500 }}>Source</button>
-                <button className="btn" type="button" onClick={() => setViewMode("read")} style={{ fontWeight: readOnly ? 800 : 500 }}>Reading</button>
-                <button className="btn" type="button" onClick={() => setViewMode("split")} style={{ fontWeight: splitView ? 800 : 500 }}>Split</button>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: editorOnly || readOnly ? "minmax(0,1fr) 300px" : "minmax(0,1fr) minmax(0,1fr) 300px", gap: 12, alignItems: "start" }}>
-              {!readOnly ? (
-                <div style={{ minWidth: 0 }}>
-                  <NoteEditor value={content} onChange={setContent} />
-                </div>
-              ) : null}
-
-              {!editorOnly ? (
-                <div style={{ minWidth: 0 }}>
-                  <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} />
-                </div>
-              ) : null}
-
-              <div style={{ minWidth: 0 }}>
-                <NoteInspector
-                  note={selectedNote}
-                  backlinks={backlinks}
-                  onOpenNote={selectNote}
-                  onAddRecordLink={addRecordLink}
-                  onRemoveRecordLink={removeRecordLink}
-                />
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="card" style={{ padding: 18 }}>
-            <h2 style={{ marginTop: 0 }}>Drive</h2>
-            <p className="helper">Pick a note or create one. Source gives you markdown input, Reading gives you rendered output, Split shows both.</p>
+        <div style={{ borderRight: "1px solid #333", padding: 10, overflow: "auto" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button className="btn" type="button" onClick={createNote}>+ Note</button>
           </div>
-        )}
+          <input className="input" placeholder="search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
+          <DriveList notes={visibleNotes} onSelect={selectNote} onMove={moveNote} onDelete={deleteNote} onRename={renameNote} selectedId={selectedId} />
+        </div>
+
+        <div onMouseDown={() => beginResize("list")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.08)" }} title="Drag to resize" />
+
+        <div style={{ padding: 12, minWidth: 0, overflow: "auto" }}>
+          <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} />
+          {selectedId ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: 18, width: "min(100%, 520px)" }} />
+                <span className="helper">{status}</span>
+                <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+                  <button className="btn" type="button" onClick={() => setViewMode("edit")} style={{ fontWeight: editorOnly ? 800 : 500 }}>Source</button>
+                  <button className="btn" type="button" onClick={() => setViewMode("read")} style={{ fontWeight: readOnly ? 800 : 500 }}>Reading</button>
+                  <button className="btn" type="button" onClick={() => setViewMode("split")} style={{ fontWeight: splitView ? 800 : 500 }}>Split</button>
+                  <button className="btn" type="button" onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide Inspector" : "Inspector"}</button>
+                  <button className="btn" type="button" onClick={() => setFocusMode(true)}>Focus</button>
+                </div>
+              </div>
+
+              <div id="bf-drive-main-work" style={{ display: "grid", gridTemplateColumns: editorOnly || readOnly ? "minmax(0,1fr)" : `${Math.round(splitRatio * 100)}% 8px minmax(0,1fr)`, gap: editorOnly || readOnly ? 0 : 12, alignItems: "start" }}>
+                {!readOnly ? (
+                  <div style={{ minWidth: 0 }}>
+                    <NoteEditor value={content} onChange={setContent} />
+                  </div>
+                ) : null}
+
+                {splitView ? (
+                  <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.08)", minHeight: "72vh" }} title="Drag to resize" />
+                ) : null}
+
+                {!editorOnly ? (
+                  <div style={{ minWidth: 0 }}>
+                    <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} />
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="card" style={{ padding: 18 }}>
+              <h2 style={{ marginTop: 0 }}>Drive</h2>
+              <p className="helper">Pick a note or create one. Source gives you markdown input, Reading gives you rendered output, Split shows both.</p>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      {inspectorOpen && selectedNote ? (
+        <div style={{ position: "fixed", top: 86, right: 0, width: 340, height: "calc(100vh - 86px)", padding: 12, background: "#0b0b0b", borderLeft: "1px solid #333", overflow: "auto", zIndex: 40 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>Inspector</h3>
+            <button className="btn" type="button" onClick={() => setInspectorOpen(false)}>Close</button>
+          </div>
+          <NoteInspector note={selectedNote} backlinks={backlinks} onOpenNote={selectNote} onAddRecordLink={addRecordLink} onRemoveRecordLink={removeRecordLink} />
+        </div>
+      ) : null}
+
+      {focusMode && selectedNote ? (
+        <div style={{ position: "fixed", inset: 0, background: "#0b0b0b", zIndex: 60, padding: 18, overflow: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: 22, width: "min(100%, 720px)" }} />
+            <span className="helper">{status}</span>
+            <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+              <button className="btn" type="button" onClick={() => setViewMode("edit")} style={{ fontWeight: editorOnly ? 800 : 500 }}>Source</button>
+              <button className="btn" type="button" onClick={() => setViewMode("read")} style={{ fontWeight: readOnly ? 800 : 500 }}>Reading</button>
+              <button className="btn" type="button" onClick={() => setViewMode("split")} style={{ fontWeight: splitView ? 800 : 500 }}>Split</button>
+              <button className="btn" type="button" onClick={() => setFocusMode(false)}>Exit Focus</button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: editorOnly || readOnly ? "minmax(0,1fr)" : `${Math.round(splitRatio * 100)}% 8px minmax(0,1fr)`, gap: editorOnly || readOnly ? 0 : 12, alignItems: "start" }}>
+            {!readOnly ? (
+              <div style={{ minWidth: 0 }}>
+                <NoteEditor value={content} onChange={setContent} />
+              </div>
+            ) : null}
+
+            {splitView ? (
+              <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.08)", minHeight: "82vh" }} title="Drag to resize" />
+            ) : null}
+
+            {!editorOnly ? (
+              <div style={{ minWidth: 0 }}>
+                <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

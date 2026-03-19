@@ -3,8 +3,6 @@ import React from "react";
 export default function NoteInspector({ note, backlinks, onOpenNote, onAddRecordLink, onRemoveRecordLink }) {
   return (
     <div className="card" style={{ padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Inspector</h3>
-
       <div className="helper" style={{ marginBottom: 8 }}>
         updated {note?.updatedAt ? new Date(note.updatedAt).toLocaleString() : ""}
       </div>
