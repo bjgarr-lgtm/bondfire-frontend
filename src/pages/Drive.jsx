@@ -1,199 +1,80 @@
-import React, { useEffect, useState, useRef } from "react";
-import DriveSidebar from "../components/drive/DriveSidebar";
-import DriveList from "../components/drive/DriveList";
-import NoteEditor from "../components/drive/NoteEditor";
-import NotePreview from "../components/drive/NotePreview";
-import Breadcrumbs from "../components/drive/Breadcrumbs";
-import { encryptBlob, decryptBlob } from "../lib/driveCrypto";
+import React, { useEffect, useState } from "react";
 
-const STORAGE_KEY = "bf_drive_demo";
+const STORAGE_KEY = "bf_drive_v2";
 
-export default function Drive() {
-  const [notes, setNotes] = useState([]);
-  const [folders, setFolders] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState(null);
-  const [selectedId, setSelectedId] = useState(null);
-  const [content, setContent] = useState("");
-  const [title, setTitle] = useState("untitled");
-  const [status, setStatus] = useState("saved");
-  const [search, setSearch] = useState("");
-  const saveTimer = useRef(null);
+function parseLinks(text){
+  return text.replace(/\[\[(.*?)\]\]/g, (_, t) => `<a href="#note:${t}">${t}</a>`);
+}
 
-  useEffect(() => {
+export default function Drive(){
+  const [notes,setNotes]=useState([]);
+  const [current,setCurrent]=useState(null);
+  const [content,setContent]=useState("");
+  const [title,setTitle]=useState("");
+
+  useEffect(()=>{
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        setNotes(Array.isArray(parsed.notes) ? parsed.notes : Array.isArray(parsed) ? parsed : []);
-        setFolders(Array.isArray(parsed.folders) ? parsed.folders : []);
-      } catch {
-        setNotes([]);
-        setFolders([]);
-      }
+    if(raw){
+      setNotes(JSON.parse(raw));
     }
-  }, []);
+  },[]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ notes, folders }));
-  }, [notes, folders]);
+  useEffect(()=>{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  },[notes]);
 
-  useEffect(() => {
-    const handleKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        createNote();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        saveNote();
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  });
-
-  const createFolder = () => {
-    const name = prompt("Folder name?");
-    if (!name) return;
-    setFolders((prev) => [
-      ...prev,
-      { id: Date.now().toString(), name: String(name).trim(), parentId: currentFolder },
-    ]);
-  };
-
-  const renameFolder = (id) => {
-    const nextName = prompt("New name?");
-    if (!nextName) return;
-    setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: String(nextName).trim() } : f)));
-  };
-
-  const deleteFolder = (id) => {
-    const parent = folders.find((f) => f.id === id)?.parentId ?? null;
-    setFolders((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)).filter((f) => f.id !== id));
-    setNotes((prev) => prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n)));
-    if (currentFolder === id) setCurrentFolder(parent);
-  };
-
-  const createNote = async () => {
-    const blob = await encryptBlob({ title: "untitled", body: "" });
-    const note = {
-      id: Date.now().toString(),
-      blob,
-      updatedAt: Date.now(),
-      parentId: currentFolder,
-    };
-    setNotes((prev) => [note, ...prev]);
-    setSelectedId(note.id);
+  const createNote=()=>{
+    const n={id:Date.now(), title:"untitled", body:""};
+    setNotes([n,...notes]);
+    setCurrent(n.id);
     setTitle("untitled");
     setContent("");
   };
 
-  const selectNote = async (note) => {
-    const data = await decryptBlob(note.blob);
-    setSelectedId(note.id);
-    setContent(data.body || "");
-    setTitle(data.title || "untitled");
+  const selectNote=(id)=>{
+    const n = notes.find(x=>x.id===id);
+    if(!n) return;
+    setCurrent(id);
+    setTitle(n.title);
+    setContent(n.body);
   };
 
-  const deleteNote = (id) => {
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-    if (id === selectedId) {
-      setSelectedId(null);
-      setContent("");
-      setTitle("untitled");
-    }
+  const save=()=>{
+    setNotes(prev=>prev.map(n=>{
+      if(n.id!==current) return n;
+      return {...n, title, body:content};
+    }));
   };
 
-  const moveNote = (id) => {
-    const target = prompt("Move to folderId (blank for root)", currentFolder || "");
-    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, parentId: target || null } : n)));
-  };
+  useEffect(()=>{
+    const t=setTimeout(save,500);
+    return ()=>clearTimeout(t);
+  },[content,title]);
 
-  const queueSave = () => {
-    setStatus("saving");
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(saveNote, 800);
-  };
-
-  const saveNote = async () => {
-    if (!selectedId) return;
-    const blob = await encryptBlob({ title, body: content });
-    setNotes((prev) =>
-      prev.map((n) => {
-        if (n.id !== selectedId) return n;
-        return { ...n, updatedAt: Date.now(), blob };
-      })
-    );
-    setStatus("saved");
-  };
-
-  useEffect(() => {
-    if (selectedId) queueSave();
-  }, [content, title]);
-
-  const filtered = notes
-    .slice()
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-    .filter((n) => {
-      if (n.parentId !== currentFolder) return false;
-      try {
-        const data = JSON.parse(atob(n.blob));
-        const q = search.toLowerCase();
-        return data.title.toLowerCase().includes(q) || data.body.toLowerCase().includes(q);
-      } catch {
-        return true;
-      }
-    });
-
-  const currentNote = notes.find((n) => n.id === selectedId);
+  const backlinks = notes.filter(n=>n.body.includes(`[[${title}]]`));
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div style={{ width: 260, borderRight: "1px solid #333" }}>
-        <DriveSidebar
-          folders={folders}
-          currentFolder={currentFolder}
-          setCurrentFolder={setCurrentFolder}
-          onNewFolder={createFolder}
-          onRename={renameFolder}
-          onDelete={deleteFolder}
-        />
+    <div style={{display:"flex",height:"100vh"}}>
+      <div style={{width:250,borderRight:"1px solid #333"}}>
+        <button onClick={createNote}>+ Note</button>
+        {notes.map(n=>(
+          <div key={n.id} onClick={()=>selectNote(n.id)} style={{cursor:"pointer"}}>
+            {n.title}
+          </div>
+        ))}
       </div>
 
-      <div style={{ width: 320, borderRight: "1px solid #333", padding: 8 }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <button className="btn" type="button" onClick={createNote}>+ Note</button>
-        </div>
-        <input
-          className="input"
-          placeholder="search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: "100%", marginBottom: 8 }}
-        />
-        <DriveList notes={filtered} onSelect={selectNote} onMove={moveNote} onDelete={deleteNote} />
-      </div>
-
-      <div style={{ flex: 1, padding: 12, minWidth: 0 }}>
-        <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} />
-
-        {currentNote ? (
+      <div style={{flex:1,padding:12}}>
+        {current && (
           <>
-            <div style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: 18, width: "min(100%, 520px)" }} />
-              <span className="helper">{status}</span>
-            </div>
-            <div style={{ display: "flex", gap: 12, minHeight: 0, alignItems: "stretch" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <NoteEditor value={content} onChange={setContent} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <NotePreview content={content} />
-              </div>
-            </div>
+            <input value={title} onChange={e=>setTitle(e.target.value)} />
+            <textarea value={content} onChange={e=>setContent(e.target.value)} style={{width:"100%",height:200}} />
+
+            <div dangerouslySetInnerHTML={{__html:parseLinks(content)}} />
+
+            <h4>Backlinks</h4>
+            {backlinks.map(b=><div key={b.id}>{b.title}</div>)}
           </>
-        ) : (
-          <p className="helper">No note selected</p>
         )}
       </div>
     </div>
