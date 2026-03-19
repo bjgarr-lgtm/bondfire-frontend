@@ -7,9 +7,7 @@ function simpleMarkdown(md) {
     .replace(/^# (.*$)/gim, "<h1>$1</h1>")
     .replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>")
     .replace(/\*(.*?)\*/gim, "<em>$1</em>")
-    .replace(/
-/gim, "<br />");
-}
+    .replace(/\n/gim, "<br />")}
 
 export default function NotePreview({ content }) {
   return (
