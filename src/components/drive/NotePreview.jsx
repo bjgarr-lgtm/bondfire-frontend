@@ -112,10 +112,10 @@ export default function NotePreview({ content, onOpenLink }) {
     <div
       style={{
         border: "1px solid #333",
-        padding: 12,
+        padding: 14,
         minHeight: "72vh",
         overflow: "auto",
-        lineHeight: 1.5,
+        lineHeight: 1.65,
       }}
       onClick={(e) => {
         const link = e.target.closest("a[data-note-title]");
@@ -125,6 +125,9 @@ export default function NotePreview({ content, onOpenLink }) {
       }}
     >
       <style>{`
+        .bf-note-preview {
+          max-width: 78ch;
+        }
         .bf-note-preview h1,
         .bf-note-preview h2,
         .bf-note-preview h3 { margin: 0 0 12px 0; }

@@ -37,6 +37,7 @@ export default function Drive() {
   const [status, setStatus] = useState("saved");
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
+  const [viewMode, setViewMode] = useState("split");
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -46,17 +47,19 @@ export default function Drive() {
       const parsed = JSON.parse(raw);
       setFolders(Array.isArray(parsed.folders) ? parsed.folders : []);
       setNotes(Array.isArray(parsed.notes) ? parsed.notes : []);
+      setViewMode(["edit", "read", "split"].includes(parsed.viewMode) ? parsed.viewMode : "split");
     } catch {
       setFolders([]);
       setNotes([]);
+      setViewMode("split");
     }
   }, [orgId]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(orgId), JSON.stringify({ folders, notes }));
+      localStorage.setItem(storageKey(orgId), JSON.stringify({ folders, notes, viewMode }));
     } catch {}
-  }, [orgId, folders, notes]);
+  }, [orgId, folders, notes, viewMode]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -67,6 +70,18 @@ export default function Drive() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         saveNow();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "1") {
+        e.preventDefault();
+        setViewMode("edit");
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "2") {
+        e.preventDefault();
+        setViewMode("read");
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "3") {
+        e.preventDefault();
+        setViewMode("split");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -260,9 +275,13 @@ export default function Drive() {
     );
   }
 
+  const editorOnly = viewMode === "edit";
+  const readOnly = viewMode === "read";
+  const splitView = viewMode === "split";
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div style={{ width: 280, borderRight: "1px solid #333", overflow: "auto" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "280px 340px minmax(0,1fr)", height: "calc(100vh - 80px)" }}>
+      <div style={{ borderRight: "1px solid #333", overflow: "auto" }}>
         <DriveSidebar
           folders={folders}
           currentFolder={currentFolder}
@@ -276,7 +295,7 @@ export default function Drive() {
         />
       </div>
 
-      <div style={{ width: 360, borderRight: "1px solid #333", padding: 10, overflow: "auto" }}>
+      <div style={{ borderRight: "1px solid #333", padding: 10, overflow: "auto" }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button className="btn" type="button" onClick={createNote}>+ Note</button>
         </div>
@@ -298,22 +317,34 @@ export default function Drive() {
         />
       </div>
 
-      <div style={{ flex: 1, padding: 12, minWidth: 0, overflow: "auto" }}>
+      <div style={{ padding: 12, minWidth: 0, overflow: "auto" }}>
         <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} />
         {selectedNote ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
               <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: 18, width: "min(100%, 520px)" }} />
               <span className="helper">{status}</span>
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+                <button className="btn" type="button" onClick={() => setViewMode("edit")} style={{ fontWeight: editorOnly ? 800 : 500 }}>Source</button>
+                <button className="btn" type="button" onClick={() => setViewMode("read")} style={{ fontWeight: readOnly ? 800 : 500 }}>Reading</button>
+                <button className="btn" type="button" onClick={() => setViewMode("split")} style={{ fontWeight: splitView ? 800 : 500 }}>Split</button>
+              </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) 300px", gap: 12 }}>
-              <div>
-                <NoteEditor value={content} onChange={setContent} />
-              </div>
-              <div>
-                <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} />
-              </div>
-              <div>
+
+            <div style={{ display: "grid", gridTemplateColumns: editorOnly || readOnly ? "minmax(0,1fr) 300px" : "minmax(0,1fr) minmax(0,1fr) 300px", gap: 12, alignItems: "start" }}>
+              {!readOnly ? (
+                <div style={{ minWidth: 0 }}>
+                  <NoteEditor value={content} onChange={setContent} />
+                </div>
+              ) : null}
+
+              {!editorOnly ? (
+                <div style={{ minWidth: 0 }}>
+                  <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} />
+                </div>
+              ) : null}
+
+              <div style={{ minWidth: 0 }}>
                 <NoteInspector
                   note={selectedNote}
                   backlinks={backlinks}
@@ -325,7 +356,10 @@ export default function Drive() {
             </div>
           </>
         ) : (
-          <p className="helper">No note selected</p>
+          <div className="card" style={{ padding: 18 }}>
+            <h2 style={{ marginTop: 0 }}>Drive</h2>
+            <p className="helper">Pick a note or create one. Source gives you markdown input, Reading gives you rendered output, Split shows both.</p>
+          </div>
         )}
       </div>
     </div>
