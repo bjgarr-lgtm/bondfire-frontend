@@ -5,11 +5,25 @@ import NoteEditor from "../components/drive/NoteEditor.jsx";
 import NotePreview from "../components/drive/NotePreview.jsx";
 import Breadcrumbs from "../components/drive/Breadcrumbs.jsx";
 import NoteInspector from "../components/drive/NoteInspector.jsx";
+import RichTextToolbar from "../components/drive/RichTextToolbar.jsx";
 
-const STORAGE_KEY = "bf_drive_v5";
+const STORAGE_KEY = "bf_drive_v6";
 
 function newId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function blankProperties() {
+  return {
+    type: "",
+    date: "",
+    status: "",
+    tags: "",
+  };
 }
 
 function parseTags(body) {
@@ -22,10 +36,6 @@ function parseWikiLinks(body) {
   return matches.map((m) => String(m[1] || "").trim()).filter(Boolean);
 }
 
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
-
 export default function Drive() {
   const [folders, setFolders] = useState([]);
   const [notes, setNotes] = useState([]);
@@ -34,32 +44,37 @@ export default function Drive() {
 
   const [title, setTitle] = useState("untitled");
   const [content, setContent] = useState("");
+  const [properties, setProperties] = useState(blankProperties());
+
   const [status, setStatus] = useState("saved");
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
 
   const [viewMode, setViewMode] = useState("split");
   const [focusMode, setFocusMode] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
 
-  const [sidebarWidth, setSidebarWidth] = useState(250);
-  const [listWidth, setListWidth] = useState(320);
-  const [splitRatio, setSplitRatio] = useState(0.50);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [listWidth, setListWidth] = useState(310);
+  const [splitRatio, setSplitRatio] = useState(0.5);
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(false);
   const resizeMode = useRef(null);
+  const editorRef = useRef(null);
 
   useEffect(() => {
     try {
       const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       setFolders(Array.isArray(raw.folders) ? raw.folders : []);
       setNotes(Array.isArray(raw.notes) ? raw.notes : []);
-      setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 180, 420) : 250);
-      setListWidth(Number.isFinite(raw.listWidth) ? clamp(raw.listWidth, 240, 460) : 320);
-      setSplitRatio(Number.isFinite(raw.splitRatio) ? clamp(raw.splitRatio, 0.3, 0.7) : 0.50);
+      setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 170, 380) : 240);
+      setListWidth(Number.isFinite(raw.listWidth) ? clamp(raw.listWidth, 220, 420) : 310);
+      setSplitRatio(Number.isFinite(raw.splitRatio) ? clamp(raw.splitRatio, 0.3, 0.7) : 0.5);
       setViewMode(["edit", "read", "split"].includes(raw.viewMode) ? raw.viewMode : "split");
-      setInspectorOpen(typeof raw.inspectorOpen === "boolean" ? raw.inspectorOpen : true);
+      setInspectorOpen(!!raw.inspectorOpen);
+      setPropertiesOpen(!!raw.propertiesOpen);
     } catch {}
   }, []);
 
@@ -75,29 +90,29 @@ export default function Drive() {
           splitRatio,
           viewMode,
           inspectorOpen,
+          propertiesOpen,
         })
       );
     } catch {}
-  }, [folders, notes, sidebarWidth, listWidth, splitRatio, viewMode, inspectorOpen]);
+  }, [folders, notes, sidebarWidth, listWidth, splitRatio, viewMode, inspectorOpen, propertiesOpen]);
 
   useEffect(() => {
     const onMove = (e) => {
       if (!resizeMode.current) return;
 
       if (resizeMode.current === "sidebar") {
-        setSidebarWidth(clamp(e.clientX, 180, 420));
+        setSidebarWidth(clamp(e.clientX, 170, 380));
       }
 
       if (resizeMode.current === "list") {
-        setListWidth(clamp(e.clientX - sidebarWidth - 8, 240, 460));
+        setListWidth(clamp(e.clientX - sidebarWidth - 8, 220, 420));
       }
 
       if (resizeMode.current === "split") {
         const main = document.getElementById("bf-drive-editor-zone");
         if (!main) return;
         const rect = main.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
-        setSplitRatio(clamp(ratio, 0.3, 0.7));
+        setSplitRatio(clamp((e.clientX - rect.left) / rect.width, 0.3, 0.7));
       }
     };
 
@@ -141,10 +156,17 @@ export default function Drive() {
         e.preventDefault();
         setInspectorOpen((v) => !v);
       }
-      if (e.key === "Escape" && focusMode) {
-        setFocusMode(false);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setPropertiesOpen((v) => !v);
+      }
+      if (e.key === "Escape") {
+        if (focusMode) setFocusMode(false);
+        setInspectorOpen(false);
+        setPropertiesOpen(false);
       }
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
@@ -169,7 +191,9 @@ export default function Drive() {
     ? notes.filter(
         (note) =>
           note.id !== selectedNote.id &&
-          parseWikiLinks(note.body).some((link) => link.toLowerCase() === String(selectedNote.title || "").toLowerCase())
+          parseWikiLinks(note.body).some(
+            (link) => link.toLowerCase() === String(selectedNote.title || "").toLowerCase()
+          )
       )
     : [];
 
@@ -213,9 +237,13 @@ export default function Drive() {
   function deleteFolder(id) {
     const parent = folders.find((f) => f.id === id)?.parentId ?? null;
     setFolders((prev) =>
-      prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)).filter((f) => f.id !== id)
+      prev
+        .map((f) => (f.parentId === id ? { ...f, parentId: parent } : f))
+        .filter((f) => f.id !== id)
     );
-    setNotes((prev) => prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n)));
+    setNotes((prev) =>
+      prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n))
+    );
     if (currentFolder === id) setCurrentFolder(parent);
   }
 
@@ -227,12 +255,14 @@ export default function Drive() {
       parentId: currentFolder,
       updatedAt: Date.now(),
       tags: [],
+      properties: blankProperties(),
     };
     skipNextSave.current = true;
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setTitle(note.title);
     setContent(note.body);
+    setProperties(note.properties);
     setStatus("saved");
   }
 
@@ -243,6 +273,7 @@ export default function Drive() {
     setSelectedId(id);
     setTitle(note.title || "untitled");
     setContent(note.body || "");
+    setProperties(note.properties || blankProperties());
     setStatus("saved");
   }
 
@@ -251,7 +282,9 @@ export default function Drive() {
     const name = prompt("Rename note", note?.title || "");
     if (!name) return;
     setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, title: String(name).trim(), updatedAt: Date.now() } : n))
+      prev.map((n) =>
+        n.id === id ? { ...n, title: String(name).trim(), updatedAt: Date.now() } : n
+      )
     );
     if (selectedId === id) {
       skipNextSave.current = true;
@@ -266,6 +299,7 @@ export default function Drive() {
       setSelectedId(null);
       setTitle("untitled");
       setContent("");
+      setProperties(blankProperties());
       setStatus("saved");
     }
   }
@@ -273,16 +307,36 @@ export default function Drive() {
   function moveNote(id) {
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
     setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, parentId: target || null, updatedAt: Date.now() } : n))
+      prev.map((n) =>
+        n.id === id ? { ...n, parentId: target || null, updatedAt: Date.now() } : n
+      )
     );
   }
 
   function saveNow() {
     if (!selectedId) return;
+    const propertyTags = String(properties.tags || "").trim();
+    const combinedTags = [
+      ...new Set([
+        ...parseTags(content),
+        ...propertyTags
+          .split(",")
+          .map((x) => x.trim().toLowerCase())
+          .filter(Boolean),
+      ]),
+    ];
+
     setNotes((prev) =>
       prev.map((n) =>
         n.id === selectedId
-          ? { ...n, title, body: content, tags: parseTags(content), updatedAt: Date.now() }
+          ? {
+              ...n,
+              title,
+              body: content,
+              tags: combinedTags,
+              properties: { ...properties },
+              updatedAt: Date.now(),
+            }
           : n
       )
     );
@@ -303,7 +357,7 @@ export default function Drive() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [selectedId, title, content]);
+  }, [selectedId, title, content, properties]);
 
   function openLinkedNoteByTitle(rawTitle) {
     const cleanTitle = String(rawTitle || "").trim();
@@ -322,13 +376,64 @@ export default function Drive() {
       parentId: currentFolder,
       updatedAt: Date.now(),
       tags: [],
+      properties: blankProperties(),
     };
     skipNextSave.current = true;
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setTitle(note.title);
     setContent("");
+    setProperties(note.properties);
     setStatus("saved");
+  }
+
+  function wrapSelection(prefix, suffix = prefix) {
+    const el = editorRef.current;
+    if (!el) return;
+    const start = el.selectionStart || 0;
+    const end = el.selectionEnd || 0;
+    const selected = content.slice(start, end);
+    const next =
+      content.slice(0, start) +
+      prefix +
+      selected +
+      suffix +
+      content.slice(end);
+    setContent(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + prefix.length, end + prefix.length);
+    });
+  }
+
+  function prefixLines(prefix) {
+    const el = editorRef.current;
+    if (!el) return;
+    const start = el.selectionStart || 0;
+    const end = el.selectionEnd || 0;
+    const selected = content.slice(start, end) || "";
+    const nextSelected = selected
+      .split("\\n")
+      .map((line) => `${prefix}${line}`)
+      .join("\\n");
+    const next = content.slice(0, start) + nextSelected + content.slice(end);
+    setContent(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start, start + nextSelected.length);
+    });
+  }
+
+  function insertBlock(block) {
+    const el = editorRef.current;
+    if (!el) return;
+    const start = el.selectionStart || 0;
+    const next = content.slice(0, start) + block + content.slice(start);
+    setContent(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + block.length, start + block.length);
+    });
   }
 
   const workspaceHeight = focusMode ? "100vh" : "calc(100vh - 86px)";
@@ -374,7 +479,9 @@ export default function Drive() {
 
         <div style={{ borderRight: "1px solid #222", overflow: "auto", padding: 12 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <button className="btn-red" type="button" onClick={createNote}>+ Note</button>
+            <button className="btn-red" type="button" onClick={createNote}>
+              + Note
+            </button>
           </div>
           <input
             className="input"
@@ -400,7 +507,11 @@ export default function Drive() {
         />
 
         <div style={{ minWidth: 0, overflow: "auto", padding: 18 }}>
-          <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} />
+          <Breadcrumbs
+            folders={folders}
+            currentFolder={currentFolder}
+            setCurrentFolder={setCurrentFolder}
+          />
 
           {selectedNote ? (
             <>
@@ -426,10 +537,42 @@ export default function Drive() {
                   <button className="btn" type="button" onClick={() => setViewMode("edit")} style={{ fontWeight: viewMode === "edit" ? 800 : 500 }}>Source</button>
                   <button className="btn" type="button" onClick={() => setViewMode("read")} style={{ fontWeight: viewMode === "read" ? 800 : 500 }}>Reading</button>
                   <button className="btn" type="button" onClick={() => setViewMode("split")} style={{ fontWeight: viewMode === "split" ? 800 : 500 }}>Split</button>
+                  <button className="btn" type="button" onClick={() => setPropertiesOpen((v) => !v)}>{propertiesOpen ? "Hide Properties" : "Properties"}</button>
                   <button className="btn" type="button" onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide Inspector" : "Inspector"}</button>
                   <button className="btn" type="button" onClick={() => setFocusMode((v) => !v)}>{focusMode ? "Exit Focus" : "Focus"}</button>
                 </div>
               </div>
+
+              {propertiesOpen ? (
+                <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>Properties</h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0,1fr)", gap: 10, alignItems: "center" }}>
+                    <div className="helper">type</div>
+                    <input className="input" value={properties.type || ""} onChange={(e) => setProperties((p) => ({ ...p, type: e.target.value }))} placeholder="bit-log" />
+                    <div className="helper">date</div>
+                    <input className="input" type="date" value={properties.date || ""} onChange={(e) => setProperties((p) => ({ ...p, date: e.target.value }))} />
+                    <div className="helper">status</div>
+                    <input className="input" value={properties.status || ""} onChange={(e) => setProperties((p) => ({ ...p, status: e.target.value }))} placeholder="draft / active / archived" />
+                    <div className="helper">tags</div>
+                    <input className="input" value={properties.tags || ""} onChange={(e) => setProperties((p) => ({ ...p, tags: e.target.value }))} placeholder="comma, separated, tags" />
+                  </div>
+                </div>
+              ) : null}
+
+              {showEditor ? (
+                <RichTextToolbar
+                  onBold={() => wrapSelection("**")}
+                  onItalic={() => wrapSelection("*")}
+                  onH1={() => prefixLines("# ")}
+                  onH2={() => prefixLines("## ")}
+                  onBullet={() => prefixLines("- ")}
+                  onQuote={() => prefixLines("> ")}
+                  onCode={() => wrapSelection("`")}
+                  onRule={() => insertBlock("\n---\n")}
+                  onLink={() => wrapSelection("[", "](https://)")}
+                  onWikiLink={() => wrapSelection("[[", "]]")}
+                />
+              ) : null}
 
               <div
                 id="bf-drive-editor-zone"
@@ -442,7 +585,7 @@ export default function Drive() {
               >
                 {showEditor ? (
                   <div style={{ minWidth: 0 }}>
-                    <NoteEditor value={content} onChange={setContent} focusMode={focusMode} />
+                    <NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} />
                   </div>
                 ) : null}
 
@@ -465,7 +608,7 @@ export default function Drive() {
             <div className="card" style={{ padding: 20 }}>
               <h2 style={{ marginTop: 0 }}>Drive</h2>
               <div className="helper">
-                Create or select a note. Explorer stays visible, the list is resizable, split mode is draggable, and focus mode uses the full screen instead of pretending.
+                Create or select a note. Now you have toggleable properties like Obsidian, a formatting toolbar for people who do not know markdown, inspector that actually closes, and proper focus escape.
               </div>
             </div>
           )}
@@ -484,7 +627,12 @@ export default function Drive() {
             zIndex: 90,
           }}
         >
-          <NoteInspector note={selectedNote} backlinks={backlinks} onOpenNote={selectNote} />
+          <NoteInspector
+            note={selectedNote}
+            backlinks={backlinks}
+            onOpenNote={selectNote}
+            onClose={() => setInspectorOpen(false)}
+          />
         </div>
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function NoteInspector({ note, backlinks, onOpenNote }) {
+export default function NoteInspector({ note, backlinks, onOpenNote, onClose }) {
   return (
     <div
       className="card"
@@ -10,8 +10,12 @@ export default function NoteInspector({ note, backlinks, onOpenNote }) {
         backdropFilter: "blur(8px)",
       }}
     >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0 }}>Inspector</h3>
+        <button className="btn" type="button" onClick={onClose}>Close</button>
+      </div>
+
       <div style={{ marginBottom: 14 }}>
-        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Inspector</h3>
         <div className="helper">
           updated {note?.updatedAt ? new Date(note.updatedAt).toLocaleString() : ""}
         </div>
@@ -26,7 +30,7 @@ export default function NoteInspector({ note, backlinks, onOpenNote }) {
             ))}
           </div>
         ) : (
-          <div className="helper">No tags yet. Add #tags in the note body.</div>
+          <div className="helper">No tags yet.</div>
         )}
       </div>
 

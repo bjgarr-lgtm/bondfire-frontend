@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function NoteEditor({ value, onChange, focusMode }) {
+export default function NoteEditor({ value, onChange, focusMode, editorRef }) {
   return (
     <div
       style={{
@@ -13,6 +13,7 @@ export default function NoteEditor({ value, onChange, focusMode }) {
       }}
     >
       <textarea
+        ref={editorRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
