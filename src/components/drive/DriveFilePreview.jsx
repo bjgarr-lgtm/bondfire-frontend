@@ -108,9 +108,7 @@ function markdownToHtml(md) {
     if (task || bullet || ordered) {
       const tag = ordered ? "ol" : "ul";
       const content = task ? task[2] : bullet ? bullet[1] : ordered[2];
-      while (listStack.length && indent < listStack[listStack.length - 1].indent) {
-        html += `</${listStack.pop().tag}>`;
-      }
+      while (listStack.length && indent < listStack[listStack.length - 1].indent) html += `</${listStack.pop().tag}>`;
       if (!listStack.length || indent > listStack[listStack.length - 1].indent || listStack[listStack.length - 1].tag !== tag) {
         html += `<${tag}>`;
         listStack.push({ indent, tag });
@@ -135,44 +133,18 @@ function markdownToHtml(md) {
   return html;
 }
 
-function getExtension(name) {
-  const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
-  return match ? match[1] : "";
-}
-
-function isMarkdownFile(file) {
-  const ext = getExtension(file?.name);
-  return file?.mime === "text/markdown" || ext === "md" || ext === "markdown";
-}
-
-function isTextFile(file) {
-  const ext = getExtension(file?.name);
-  return (
-    String(file?.mime || "").startsWith("text/") ||
-    ["txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext)
-  );
-}
-
 export default function DriveFilePreview({ file }) {
   if (!file) return null;
 
   if (String(file.mime || "").startsWith("image/")) {
     return <div style={{ display: "flex", justifyContent: "center" }}><img src={file.dataUrl} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
   }
-
   if (file.mime === "application/pdf") {
     return <iframe title={file.name} src={file.dataUrl} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
   }
-
-  if (String(file.mime || "").startsWith("audio/")) {
-    return <audio controls src={file.dataUrl} style={{ width: "100%" }} />;
-  }
-
-  if (String(file.mime || "").startsWith("video/")) {
-    return <video controls src={file.dataUrl} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
-  }
-
-  if (isMarkdownFile(file)) {
+  if (String(file.mime || "").startsWith("audio/")) return <audio controls src={file.dataUrl} style={{ width: "100%" }} />;
+  if (String(file.mime || "").startsWith("video/")) return <video controls src={file.dataUrl} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
+  if (file.textContent) {
     return (
       <div style={{ maxWidth: 920, margin: "0 auto", background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 14, minHeight: "72vh" }}>
         <style>{`.bf-drive-file-markdown{max-width:74ch;margin:0 auto;font-size:14px;line-height:1.62}.bf-drive-file-markdown h1,.bf-drive-file-markdown h2,.bf-drive-file-markdown h3,.bf-drive-file-markdown h4,.bf-drive-file-markdown h5,.bf-drive-file-markdown h6{margin:0 0 10px 0}.bf-drive-file-markdown p{margin:0 0 10px 0}.bf-drive-file-markdown ul,.bf-drive-file-markdown ol{margin:0 0 10px 0;padding-left:24px}.bf-drive-file-markdown li{margin:0 0 4px 0}.bf-drive-file-markdown blockquote{margin:0 0 10px 0;padding-left:12px;border-left:3px solid #666;color:#bbb}.bf-drive-file-markdown a[href]{color:#9ed0ff;text-decoration:underline;cursor:pointer}.bf-drive-file-markdown code{background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:4px}.bf-drive-file-markdown pre{background:rgba(255,255,255,0.05);padding:12px;border-radius:8px;overflow:auto;margin:0 0 10px 0}.bf-drive-file-markdown pre code{background:transparent;padding:0}.bf-drive-file-markdown hr{border:none;border-top:1px solid rgba(255,255,255,0.15);margin:14px 0}.bf-drive-file-markdown .task-list-item{list-style:none;margin-left:-22px}.bf-drive-file-markdown .task-list-item input{margin-right:8px}`}</style>
@@ -180,10 +152,5 @@ export default function DriveFilePreview({ file }) {
       </div>
     );
   }
-
-  if (isTextFile(file)) {
-    return <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(file.textContent || "")}</pre>;
-  }
-
   return <div className="card" style={{ padding: 16 }}>This file type cannot be previewed in app.</div>;
 }

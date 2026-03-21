@@ -1,62 +1,79 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-function RowMenu({ items }) {
+function MenuButton({ label, onClick, danger = false }) {
+  return (
+    <button
+      className="btn"
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: "left",
+        justifyContent: "flex-start",
+        padding: "7px 10px",
+        color: danger ? "#ff8f8f" : undefined,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function PopMenu({ trigger, items }) {
   const [open, setOpen] = useState(false);
-  const boxRef = useRef(null);
+  const ref = useRef(null);
+
   useEffect(() => {
-    const onClick = (e) => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
+    const onDown = (e) => {
+      if (!ref.current?.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
   }, []);
-  return (
-    <div ref={boxRef} style={{ position: "relative" }}>
-      <button className="btn" type="button" onClick={() => setOpen((v) => !v)} style={{ padding: "2px 9px", fontSize: 14 }}>⋯</button>
-      {open ? <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", minWidth: 170, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 6, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 50, display: "grid", gap: 4 }}>
-        {items.map((item, idx) => <button key={`${item.label}-${idx}`} className="btn" type="button" onClick={() => { item.onClick?.(); setOpen(false); }} style={{ textAlign: "left", justifyContent: "flex-start", padding: "7px 10px" }}>{item.label}</button>)}
-      </div> : null}
-    </div>
-  );
-}
 
-function SectionLabel({ children, action, open, onToggle }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "18px 0 8px 0" }}>
-      <button type="button" onClick={onToggle} style={{ background: "none", border: "none", color: "#b8bcc7", padding: 0, cursor: "pointer", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700 }}>
-        {typeof open === "boolean" ? (open ? "▾ " : "▸ ") : ""}{children}
+    <div ref={ref} style={{ position: "relative" }}>
+      <button className="btn" type="button" onClick={() => setOpen((v) => !v)} style={{ padding: "6px 9px", minWidth: 34 }}>
+        {trigger}
       </button>
-      {action || null}
+      {open ? (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 190, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 6, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 60, display: "grid", gap: 4 }}>
+          {items.map((item, idx) => (
+            <MenuButton key={`${item.label}-${idx}`} label={item.label} danger={item.danger} onClick={() => { item.onClick?.(); setOpen(false); }} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function TreeRow({ depth = 0, selected = false, children, onClick, menuItems, helper }) {
+function TreeRow({ depth = 0, active = false, icon, label, hint, onClick, menuItems }) {
   return (
-    <div style={{ marginTop: 4 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "start", paddingLeft: depth * 14 }}>
-        <button
-          type="button"
-          onClick={onClick}
-          title={typeof children === "string" ? children : undefined}
-          style={{
-            width: "100%",
-            textAlign: "left",
-            background: selected ? "rgba(255,255,255,0.08)" : "transparent",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 10,
-            padding: "7px 9px",
-            cursor: "pointer",
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {children}
-        </button>
-        {menuItems?.length ? <RowMenu items={menuItems} /> : null}
-      </div>
-      {helper ? <div className="helper" style={{ paddingLeft: depth * 14 + 10, marginTop: 4 }}>{helper}</div> : null}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={onClick}
+        title={label}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          minWidth: 0,
+          padding: "7px 9px",
+          paddingLeft: 9 + depth * 12,
+          background: active ? "rgba(255,255,255,0.08)" : "transparent",
+          color: "#fff",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 12,
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ opacity: 0.9, width: 14, textAlign: "center", flex: "0 0 14px" }}>{icon}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: active ? 700 : 500 }}>{label}</span>
+        {hint ? <span className="helper" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{hint}</span> : null}
+      </button>
+      {menuItems?.length ? <PopMenu trigger="⋯" items={menuItems} /> : null}
     </div>
   );
 }
@@ -66,13 +83,15 @@ export default function DriveSidebar({
   notes = [],
   files = [],
   currentFolder,
-  setCurrentFolder,
-  onSelectNote,
   selectedId,
   selectedKind,
-  onOpenFile,
-  onNewFolder,
+  search,
+  setSearch,
+  onSelectFolder,
+  onSelectNote,
+  onSelectFile,
   onNewNote,
+  onNewFolder,
   onUploadFile,
   onUploadFolder,
   onRenameFolder,
@@ -84,181 +103,210 @@ export default function DriveSidebar({
   onMoveFile,
   onDeleteFile,
   onDownloadFile,
-  search,
-  setSearch,
-  tags,
-  selectedTag,
-  setSelectedTag,
+  onOpenFileInBrowser,
   templates = [],
   onApplyTemplate,
+  onNewFromTemplate,
   onDeleteTemplate,
   onEditTemplate,
-  onNewFromTemplate,
 }) {
-  const [treeOpen, setTreeOpen] = useState(true);
-  const [templatesOpen, setTemplatesOpen] = useState(true);
-  const [tagsOpen, setTagsOpen] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState({ root: true });
+  const [activePane, setActivePane] = useState("explorer");
+  const [collapsedFolders, setCollapsedFolders] = useState({});
 
-  const query = String(search || "").trim().toLowerCase();
-  const folderChildren = useMemo(() => {
-    const map = new Map();
+  const rootItems = useMemo(() => {
+    const q = String(search || "").trim().toLowerCase();
+    const noteMatches = (note) => !q || String(note.title || "").toLowerCase().includes(q) || String(note.body || "").toLowerCase().includes(q);
+    const fileMatches = (file) => !q || String(file.name || "").toLowerCase().includes(q);
+    const folderMatches = (folder) => !q || String(folder.name || "").toLowerCase().includes(q);
+
+    const folderMap = new Map();
+    folders.forEach((folder) => folderMap.set(folder.id, folder));
+
+    const visibleFolderIds = new Set();
     folders.forEach((folder) => {
-      const parentKey = folder.parentId || "root";
-      if (!map.has(parentKey)) map.set(parentKey, []);
-      map.get(parentKey).push(folder);
+      if (!q || folderMatches(folder)) {
+        let cursor = folder;
+        while (cursor) {
+          visibleFolderIds.add(cursor.id);
+          cursor = cursor.parentId ? folderMap.get(cursor.parentId) : null;
+        }
+      }
     });
-    map.forEach((list) => list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))));
-    return map;
-  }, [folders]);
 
-  function toggleFolder(id) {
-    setExpandedFolders((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
-
-  function itemMatchesFolder(folderId) {
-    const folderNotes = notes.filter((note) => (note.parentId || null) === folderId).filter((note) => {
-      const matchesSearch = !query || String(note.title || "").toLowerCase().includes(query) || String(note.body || "").toLowerCase().includes(query);
-      const matchesTag = !selectedTag || (note.tags || []).includes(selectedTag);
-      return matchesSearch && matchesTag;
+    notes.forEach((note) => {
+      if (!noteMatches(note)) return;
+      let cursor = note.parentId ? folderMap.get(note.parentId) : null;
+      while (cursor) {
+        visibleFolderIds.add(cursor.id);
+        cursor = cursor.parentId ? folderMap.get(cursor.parentId) : null;
+      }
     });
-    const folderFiles = files.filter((file) => (file.parentId || null) === folderId).filter((file) => !query || String(file.name || "").toLowerCase().includes(query));
-    const childFolders = folderChildren.get(folderId || "root") || [];
-    const childMatch = childFolders.some((child) => itemMatchesFolder(child.id));
-    return folderNotes.length > 0 || folderFiles.length > 0 || childMatch || !query;
-  }
 
-  function renderFolderTree(parentId = null, depth = 0) {
-    const folderList = (folderChildren.get(parentId || "root") || []).filter((folder) => itemMatchesFolder(folder.id));
-    const noteList = notes
-      .filter((note) => (note.parentId || null) === parentId)
-      .filter((note) => {
-        const matchesSearch = !query || String(note.title || "").toLowerCase().includes(query) || String(note.body || "").toLowerCase().includes(query);
-        const matchesTag = !selectedTag || (note.tags || []).includes(selectedTag);
-        return matchesSearch && matchesTag;
-      })
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-    const fileList = files
-      .filter((file) => (file.parentId || null) === parentId)
-      .filter((file) => !query || String(file.name || "").toLowerCase().includes(query))
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+    files.forEach((file) => {
+      if (!fileMatches(file)) return;
+      let cursor = file.parentId ? folderMap.get(file.parentId) : null;
+      while (cursor) {
+        visibleFolderIds.add(cursor.id);
+        cursor = cursor.parentId ? folderMap.get(cursor.parentId) : null;
+      }
+    });
 
-    return (
-      <>
-        {folderList.map((folder) => {
-          const expanded = expandedFolders[folder.id] !== false;
-          return (
-            <div key={folder.id}>
-              <TreeRow
-                depth={depth}
-                selected={selectedKind === "folder" && currentFolder === folder.id}
-                onClick={() => { setCurrentFolder(folder.id); toggleFolder(folder.id); }}
-                menuItems={[
-                  { label: "Open", onClick: () => setCurrentFolder(folder.id) },
-                  { label: expanded ? "Collapse" : "Expand", onClick: () => toggleFolder(folder.id) },
-                  { label: "Rename", onClick: () => onRenameFolder?.(folder.id) },
-                  { label: "Delete", onClick: () => onDeleteFolder?.(folder.id) },
-                ]}
-              >
-                {(expanded ? "▾ " : "▸ ") + folder.name}
-              </TreeRow>
-              {expanded ? renderFolderTree(folder.id, depth + 1) : null}
-            </div>
-          );
-        })}
-        {noteList.map((note) => (
+    function renderBranch(parentId = null, depth = 0) {
+      const folderChildren = folders
+        .filter((folder) => (folder.parentId || null) === parentId)
+        .filter((folder) => !q || visibleFolderIds.has(folder.id) || folderMatches(folder))
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+      const noteChildren = notes
+        .filter((note) => (note.parentId || null) === parentId)
+        .filter(noteMatches)
+        .sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+
+      const fileChildren = files
+        .filter((file) => (file.parentId || null) === parentId)
+        .filter(fileMatches)
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+      const rows = [];
+
+      folderChildren.forEach((folder) => {
+        const isCollapsed = !!collapsedFolders[folder.id];
+        rows.push(
+          <TreeRow
+            key={folder.id}
+            depth={depth}
+            active={currentFolder === folder.id}
+            icon={isCollapsed ? "▸" : "▾"}
+            label={folder.name}
+            onClick={() => {
+              onSelectFolder?.(folder.id);
+              setCollapsedFolders((prev) => ({ ...prev, [folder.id]: !prev[folder.id] }));
+            }}
+            menuItems={[
+              { label: "Open", onClick: () => onSelectFolder?.(folder.id) },
+              { label: isCollapsed ? "Expand" : "Collapse", onClick: () => setCollapsedFolders((prev) => ({ ...prev, [folder.id]: !prev[folder.id] })) },
+              { label: "Rename", onClick: () => onRenameFolder?.(folder.id) },
+              { label: "Delete", danger: true, onClick: () => onDeleteFolder?.(folder.id) },
+            ]}
+          />,
+        );
+        if (!isCollapsed) rows.push(...renderBranch(folder.id, depth + 1));
+      });
+
+      noteChildren.forEach((note) => {
+        rows.push(
           <TreeRow
             key={note.id}
             depth={depth}
-            selected={selectedKind === "note" && selectedId === note.id}
+            active={selectedKind === "note" && selectedId === note.id}
+            icon="•"
+            label={note.title || "untitled"}
             onClick={() => onSelectNote?.(note.id)}
-            helper={note.tags?.length ? note.tags.map((tag) => `#${tag}`).join(" ") : ""}
             menuItems={[
               { label: "Open", onClick: () => onSelectNote?.(note.id) },
               { label: "Rename", onClick: () => onRenameNote?.(note.id) },
               { label: "Move", onClick: () => onMoveNote?.(note.id) },
-              { label: "Delete", onClick: () => onDeleteNote?.(note.id) },
+              { label: "Delete", danger: true, onClick: () => onDeleteNote?.(note.id) },
             ]}
-          >
-            📝 {note.title || "untitled"}
-          </TreeRow>
-        ))}
-        {fileList.map((file) => (
+          />,
+        );
+      });
+
+      fileChildren.forEach((file) => {
+        rows.push(
           <TreeRow
             key={file.id}
             depth={depth}
-            selected={selectedKind === "file" && selectedId === file.id}
-            onClick={() => onOpenFile?.(file)}
-            helper={`${file.mime || "file"} · ${Math.round((Number(file.size || 0) / 1024) * 10) / 10} KB`}
+            active={selectedKind === "file" && selectedId === file.id}
+            icon="↗"
+            label={file.name}
+            onClick={() => onSelectFile?.(file)}
             menuItems={[
-              { label: "Open", onClick: () => onOpenFile?.(file) },
+              { label: "Open", onClick: () => onSelectFile?.(file) },
+              { label: "Open in browser", onClick: () => onOpenFileInBrowser?.(file) },
               { label: "Download", onClick: () => onDownloadFile?.(file) },
               { label: "Rename", onClick: () => onRenameFile?.(file.id) },
               { label: "Move", onClick: () => onMoveFile?.(file.id) },
-              { label: "Delete", onClick: () => onDeleteFile?.(file.id) },
+              { label: "Delete", danger: true, onClick: () => onDeleteFile?.(file.id) },
             ]}
-          >
-            📎 {file.name}
-          </TreeRow>
-        ))}
-      </>
-    );
-  }
+          />,
+        );
+      });
+
+      return rows;
+    }
+
+    return renderBranch();
+  }, [folders, notes, files, currentFolder, selectedId, selectedKind, search, collapsedFolders, onSelectFolder, onSelectNote, onSelectFile, onRenameFolder, onDeleteFolder, onRenameNote, onMoveNote, onDeleteNote, onRenameFile, onMoveFile, onDeleteFile, onDownloadFile, onOpenFileInBrowser]);
 
   return (
-    <div style={{ padding: 12, display: "grid", gap: 10 }}>
-      <div style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button className="btn-red" type="button" onClick={onNewNote}>+ Note</button>
-          <button className="btn" type="button" onClick={onNewFolder}>+ Folder</button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button className="btn" type="button" onClick={onUploadFile}>Upload File</button>
-          <button className="btn" type="button" onClick={onUploadFolder}>Upload Folder</button>
-        </div>
-        <input className="input" placeholder="Search notes and files..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%" }} />
+    <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr)", height: "100%" }}>
+      <div style={{ borderRight: "1px solid #1b1b1b", padding: 8, display: "grid", alignContent: "start", gap: 8 }}>
+        <button className="btn" type="button" title="Explorer" onClick={() => setActivePane("explorer")} style={{ padding: "8px 0", fontWeight: activePane === "explorer" ? 800 : 500 }}>⌂</button>
+        <button className="btn" type="button" title="Templates" onClick={() => setActivePane("templates")} style={{ padding: "8px 0", fontWeight: activePane === "templates" ? 800 : 500 }}>T</button>
       </div>
 
-      <SectionLabel open={treeOpen} onToggle={() => setTreeOpen((v) => !v)} action={<button className="btn" type="button" onClick={() => setCurrentFolder(null)} style={{ padding: "4px 8px" }}>Root</button>}>
-        Explorer
-      </SectionLabel>
-      {treeOpen ? <div style={{ display: "grid", gap: 4 }}>
-        <TreeRow
-          depth={0}
-          selected={currentFolder === null}
-          onClick={() => setCurrentFolder(null)}
-          menuItems={[]}
-        >
-          ▾ root
-        </TreeRow>
-        {renderFolderTree(null, 1)}
-        {!folders.length && !notes.length && !files.length ? <div className="helper" style={{ paddingLeft: 10 }}>Nothing here yet.</div> : null}
-      </div> : null}
+      <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          <PopMenu
+            trigger="＋"
+            items={[
+              { label: "New note", onClick: onNewNote },
+              { label: "New folder", onClick: onNewFolder },
+              { label: "Upload file", onClick: onUploadFile },
+              { label: "Upload folder", onClick: onUploadFolder },
+            ]}
+          />
+          {activePane === "templates" ? (
+            <PopMenu
+              trigger="⋯"
+              items={[
+                { label: "New note", onClick: onNewNote },
+                { label: "New folder", onClick: onNewFolder },
+                { label: "Upload file", onClick: onUploadFile },
+                { label: "Upload folder", onClick: onUploadFolder },
+              ]}
+            />
+          ) : null}
+          <input className="input" placeholder={activePane === "explorer" ? "search..." : "search templates..."} value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 0, flex: 1, padding: "9px 10px" }} />
+        </div>
 
-      <SectionLabel open={templatesOpen} onToggle={() => setTemplatesOpen((v) => !v)}>
-        Templates
-      </SectionLabel>
-      {templatesOpen ? <div style={{ display: "grid", gap: 6 }}>
-        {templates.length ? templates.map((tpl) => (
-          <div key={tpl.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center" }}>
-            <button className="btn" type="button" onClick={() => onApplyTemplate?.(tpl)} style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tpl.name}</button>
-            <RowMenu items={[
-              { label: "Insert into current note", onClick: () => onApplyTemplate?.(tpl) },
-              { label: "New note from template", onClick: () => onNewFromTemplate?.(tpl) },
-              { label: "Edit template", onClick: () => onEditTemplate?.(tpl.id) },
-              { label: "Delete template", onClick: () => onDeleteTemplate?.(tpl.id) },
-            ]} />
-          </div>
-        )) : <div className="helper">No templates yet.</div>}
-      </div> : null}
-
-      <SectionLabel open={tagsOpen} onToggle={() => setTagsOpen((v) => !v)}>
-        Tags
-      </SectionLabel>
-      {tagsOpen ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button className="btn" type="button" onClick={() => setSelectedTag("")} style={{ fontWeight: !selectedTag ? 800 : 400 }}>all</button>
-        {tags.map((tag) => <button key={tag} className="btn" type="button" onClick={() => setSelectedTag(tag)} style={{ fontWeight: selectedTag === tag ? 800 : 400 }}>#{tag}</button>)}
-      </div> : null}
+        {activePane === "explorer" ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+              <div className="helper" style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}>Explorer</div>
+              <button className="btn" type="button" onClick={() => onSelectFolder?.(null)} style={{ padding: "5px 8px", fontSize: 12 }}>Root</button>
+            </div>
+            <div style={{ display: "grid", gap: 2 }}>
+              {rootItems.length ? rootItems : <div className="helper" style={{ padding: "8px 4px" }}>Nothing here.</div>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="helper" style={{ letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Templates</div>
+            <div style={{ display: "grid", gap: 4 }}>
+              {templates
+                .filter((tpl) => !String(search || "").trim() || String(tpl.name || "").toLowerCase().includes(String(search || "").trim().toLowerCase()) || String(tpl.body || "").toLowerCase().includes(String(search || "").trim().toLowerCase()))
+                .map((tpl) => (
+                  <TreeRow
+                    key={tpl.id}
+                    icon="✦"
+                    label={tpl.name}
+                    active={false}
+                    onClick={() => onApplyTemplate?.(tpl)}
+                    menuItems={[
+                      { label: "Insert into current note", onClick: () => onApplyTemplate?.(tpl) },
+                      { label: "New note from template", onClick: () => onNewFromTemplate?.(tpl) },
+                      { label: "Edit template", onClick: () => onEditTemplate?.(tpl.id) },
+                      { label: "Delete template", danger: true, onClick: () => onDeleteTemplate?.(tpl.id) },
+                    ]}
+                  />
+                ))}
+              {!templates.length ? <div className="helper" style={{ padding: "8px 4px" }}>No templates yet.</div> : null}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
