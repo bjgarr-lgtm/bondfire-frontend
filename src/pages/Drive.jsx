@@ -716,10 +716,39 @@ export default function Drive() {
               <DriveFilePreview file={selectedFile} />
             </>
           ) : (
-            <div className="card" style={{ padding: 14 }}>
-              <h2 style={{ marginTop: 0 }}>Drive</h2>
-              <div className="helper" style={{ marginBottom: 10 }}>Compact explorer on the left, editor on the right. Humans do love rebuilding the same file browser forever.</div>
-              <div className="helper" style={{ whiteSpace: "pre-wrap" }}>{templateDocs}</div>
+            <div className="card" style={{ padding: 16, display: "grid", gap: 14, maxWidth: 760 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 22 }}>Drive</h2>
+                <div className="helper" style={{ marginTop: 6 }}>Select something from the left or start a new note. No mystery markdown blob required.</div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn-red" type="button" onClick={createNote}>+ Note</button>
+                <button className="btn" type="button" onClick={createFolder}>+ Folder</button>
+                <button className="btn" type="button" onClick={() => fileInputRef.current?.click()}>Upload file</button>
+                <button className="btn" type="button" onClick={() => folderInputRef.current?.click()}>Upload folder</button>
+              </div>
+
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                <div style={{ border: "1px solid #1f1f1f", borderRadius: 14, padding: 14, background: "rgba(255,255,255,0.02)" }}>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>What this area does</div>
+                  <div className="helper" style={{ display: "grid", gap: 6 }}>
+                    <div>Open notes and edit them in app</div>
+                    <div>Preview files the browser can display</div>
+                    <div>Use templates without replacing your whole note</div>
+                  </div>
+                </div>
+
+                <div style={{ border: "1px solid #1f1f1f", borderRadius: 14, padding: 14, background: "rgba(255,255,255,0.02)" }}>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>Template tokens</div>
+                  <div className="helper" style={{ display: "grid", gap: 6 }}>
+                    <div>Date tokens</div>
+                    <div>Time tokens</div>
+                    <div>Weekday and week number</div>
+                    <div>Current note title</div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
