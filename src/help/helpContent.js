@@ -7,20 +7,14 @@
 export function guessTopicIdFromPath(pathname) {
   const p = String(pathname || "").toLowerCase();
 
-  if (p.includes("security")) return "security";
-  if (p.includes("zk")) return "security";
-  if (p.includes("keys")) return "security";
-
-  if (p.includes("chat")) return "chat";
-  if (p.includes("matrix")) return "chat";
-
+  if (p.includes("security") || p.includes("zk") || p.includes("keys") || p.includes("settings")) return "security";
+  if (p.includes("chat") || p.includes("matrix")) return "chat";
   if (p.includes("inventory")) return "inventory";
   if (p.includes("needs")) return "needs";
   if (p.includes("meetings")) return "meetings";
-
-  if (p.includes("newsletter")) return "newsletter";
-  if (p.includes("public")) return "newsletter";
-  if (p.includes("orgs")) return "demo-mode";
+  if (p.includes("newsletter") || p.includes("public")) return "newsletter";
+  if (p.includes("orgs") || p.includes("demo")) return "demo-mode";
+  if (p.includes("drive") || p.includes("overview") || p.includes("people") || p.includes("signin") || p.includes("sign-in")) return "getting-started";
 
   return "getting-started";
 }
