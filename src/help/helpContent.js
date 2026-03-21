@@ -14,7 +14,8 @@ export function guessTopicIdFromPath(pathname) {
   if (p.includes("meetings")) return "meetings";
   if (p.includes("newsletter") || p.includes("public")) return "newsletter";
   if (p.includes("orgs") || p.includes("demo")) return "demo-mode";
-  if (p.includes("drive") || p.includes("overview") || p.includes("people") || p.includes("signin") || p.includes("sign-in")) return "getting-started";
+  if (p.includes("drive")) return "drive";
+  if (p.includes("overview") || p.includes("people") || p.includes("signin") || p.includes("sign-in")) return "getting-started";
 
   return "getting-started";
 }
@@ -74,6 +75,51 @@ export const HELP_TOPICS = [
         "p": [
           "You can drag and drop the top metric cards (People, Inventory, Needs, etc.) to reorder them.",
           "Your layout is saved per organization."
+        ]
+      }
+    ]
+  },
+  {
+    "id": "drive",
+    "title": "Drive",
+    "blurb": "Bondfire Drive is a compact, Obsidian style workspace for notes, folders, files, templates, and markdown editing inside each org.",
+    "keywords": [
+      "drive",
+      "notes",
+      "templates",
+      "markdown",
+      "files",
+      "folders",
+      "frontmatter",
+      "backlinks"
+    ],
+    "sections": [
+      {
+        "h": "What Drive is",
+        "p": [
+          "Drive is your org workspace for notes, uploaded files, and reusable templates. It is built to feel familiar if you already use markdown based tools like Obsidian, just without the usual desktop app drama.",
+          "Explorer and templates live on the left. The editor, preview, and inspector live on the right. Compatible markdown files can be opened, edited, and saved in app."
+        ]
+      },
+      {
+        "h": "Templates",
+        "p": [
+          "Templates can create a brand new note or insert into the current note. Insert keeps your existing note and adds the template content instead of replacing everything.",
+          "Supported tokens include <% tp.date.now("YYYY-MM-DD") %>, <% tp.date.now("HH:mm") %>, <% tp.date.now("dddd") %>, <% tp.date.now("YYYY-[W]WW") %>, <% tp.file.title %>, plus the short forms {{date:YYYY-MM-DD}}, {{date:HH:mm}}, {{date:dddd}}, and {{title}}."
+        ]
+      },
+      {
+        "h": "Files and previews",
+        "p": [
+          "Markdown and other text based uploads open in app so you can edit them directly. PDFs, images, audio, and video preview in app when supported.",
+          "If a format is not previewable, Bondfire falls back to opening it in the browser instead of pretending it knows magic."
+        ]
+      },
+      {
+        "h": "Properties and backlinks",
+        "p": [
+          "Frontmatter properties can be viewed and edited without manually digging through raw yaml every time. Backlinks detect wiki style note references so related notes stay connected.",
+          "Use the inspector for note metadata and backlinks, and use split view when you want source and rendered markdown side by side."
         ]
       }
     ]
