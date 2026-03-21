@@ -11,15 +11,7 @@ function isoWeek(date) {
 }
 function formatDate(date, fmt) {
   const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  return String(fmt || "")
-    .replace(/\[W\]WW/g, `W${isoWeek(date)}`)
-    .replace(/dddd/g, weekdays[date.getDay()])
-    .replace(/YYYY/g, String(date.getFullYear()))
-    .replace(/MM/g, pad(date.getMonth() + 1))
-    .replace(/DD/g, pad(date.getDate()))
-    .replace(/HH/g, pad(date.getHours()))
-    .replace(/mm/g, pad(date.getMinutes()))
-    .replace(/ss/g, pad(date.getSeconds()));
+  return String(fmt || "").replace(/\[W\]WW/g, `W${isoWeek(date)}`).replace(/dddd/g, weekdays[date.getDay()]).replace(/YYYY/g, String(date.getFullYear())).replace(/MM/g, pad(date.getMonth() + 1)).replace(/DD/g, pad(date.getDate())).replace(/HH/g, pad(date.getHours())).replace(/mm/g, pad(date.getMinutes())).replace(/ss/g, pad(date.getSeconds()));
 }
 export function renderTemplate(raw, context = {}) {
   let out = String(raw || "");
@@ -46,4 +38,4 @@ alternate short syntax
 {{date:dddd}}
 {{title}}
 
-you can write full markdown templates with frontmatter, headings, lists, checkboxes, timestamps, and reusable note structures.`;
+write full markdown templates with frontmatter, headings, lists, checkboxes, timestamps, and reusable note structures.`;
