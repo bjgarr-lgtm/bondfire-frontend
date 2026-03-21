@@ -19,7 +19,7 @@ function RowMenu({ items }) {
 }
 function SectionLabel({ children }) { return <div className="helper" style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", margin: "10px 0 6px 0" }}>{children}</div>; }
 
-export default function DriveList({ notes = [], files = [], onSelect, onRename, onMove, onDelete, onOpenFile, onRenameFile, onMoveFile, onDeleteFile, onDownloadFile, selectedId, selectedKind = "note" }) {
+export default function DriveList({ notes = [], files = [], onSelect, onRename, onMove, onDelete, onOpenFile, onOpenFileInBrowser, onRenameFile, onMoveFile, onDeleteFile, onDownloadFile, selectedId, selectedKind = "note" }) {
   return (
     <div>
       <SectionLabel>Notes</SectionLabel>
@@ -31,12 +31,12 @@ export default function DriveList({ notes = [], files = [], onSelect, onRename, 
         <RowMenu items={[{ label: "Open", onClick: () => onSelect(n.id) }, { label: "Rename", onClick: () => onRename(n.id) }, { label: "Move", onClick: () => onMove(n.id) }, { label: "Delete", onClick: () => onDelete(n.id) }]} />
       </div>) : <div className="helper">No notes here.</div>}
       <SectionLabel>Files</SectionLabel>
-      {files.length ? files.map((f) => <div key={f.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: 8, borderBottom: "1px solid #222" }}>
+      {files.length ? files.map((f) => <div key={f.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: 8, borderBottom: "1px solid #222", background: selectedKind === "file" && selectedId === f.id ? "rgba(255,255,255,0.06)" : "transparent" }}>
         <div style={{ minWidth: 0 }}>
           <div onClick={() => onOpenFile(f)} style={{ cursor: "pointer" }} title={f.name}>{f.name}</div>
           <div className="helper" style={{ marginTop: 4 }}>{f.mime || "file"} · {Math.round((Number(f.size || 0) / 1024) * 10) / 10} KB</div>
         </div>
-        <RowMenu items={[{ label: "Open", onClick: () => onOpenFile(f) }, { label: "Download", onClick: () => onDownloadFile(f) }, { label: "Rename", onClick: () => onRenameFile(f.id) }, { label: "Move", onClick: () => onMoveFile(f.id) }, { label: "Delete", onClick: () => onDeleteFile(f.id) }]} />
+        <RowMenu items={[{ label: "Open", onClick: () => onOpenFile(f) }, { label: "Open in browser", onClick: () => onOpenFileInBrowser?.(f) }, { label: "Download", onClick: () => onDownloadFile(f) }, { label: "Rename", onClick: () => onRenameFile(f.id) }, { label: "Move", onClick: () => onMoveFile(f.id) }, { label: "Delete", onClick: () => onDeleteFile(f.id) }]} />
       </div>) : <div className="helper">No files here.</div>}
     </div>
   );

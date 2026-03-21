@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import DriveSidebar from "../components/drive/DriveSidebar.jsx";
+import DriveList from "../components/drive/DriveList.jsx";
 import NoteEditor from "../components/drive/NoteEditor.jsx";
 import NotePreview from "../components/drive/NotePreview.jsx";
+import DriveFilePreview from "../components/drive/DriveFilePreview.jsx";
 import Breadcrumbs from "../components/drive/Breadcrumbs.jsx";
 import NoteInspector from "../components/drive/NoteInspector.jsx";
 import RichTextToolbar from "../components/drive/RichTextToolbar.jsx";
 import HelpFab from "../components/drive/HelpFab.jsx";
 import { renderTemplate, templateDocs } from "../components/drive/templateEngine.js";
 
-const STORAGE_KEY = "bf_drive_v13_1";
+const STORAGE_KEY = "bf_drive_v12";
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const newId = (p) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -124,7 +126,7 @@ export default function Drive() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
   const [listWidth, setListWidth] = useState(280);
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [showHelp, setShowHelp] = useState(false);
@@ -143,7 +145,7 @@ export default function Drive() {
       setNotes(Array.isArray(raw.notes) ? raw.notes : []);
       setFiles(Array.isArray(raw.files) ? raw.files : []);
       setTemplates(Array.isArray(raw.templates) && raw.templates.length ? raw.templates : STARTER_TEMPLATES);
-      setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 260, 360) : 300);
+      setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 150, 340) : 220);
       setListWidth(Number.isFinite(raw.listWidth) ? clamp(raw.listWidth, 190, 420) : 280);
       setSplitRatio(Number.isFinite(raw.splitRatio) ? clamp(raw.splitRatio, 0.3, 0.7) : 0.5);
       setViewMode(["edit", "read", "split"].includes(raw.viewMode) ? raw.viewMode : "split");
@@ -165,7 +167,8 @@ export default function Drive() {
   useEffect(() => {
     const onMove = (e) => {
       if (!resizeMode.current) return;
-      if (resizeMode.current === "sidebar") setSidebarWidth(clamp(e.clientX, 260, 360));
+      if (resizeMode.current === "sidebar") setSidebarWidth(clamp(e.clientX, 150, 340));
+      if (resizeMode.current === "list") setListWidth(clamp(e.clientX - sidebarWidth - 6, 190, 420));
       if (resizeMode.current === "split") {
         const main = document.getElementById("bf-drive-editor-zone");
         if (!main) return;
@@ -201,6 +204,7 @@ export default function Drive() {
   }, [focusMode]);
 
   const selectedNote = selectedKind === "note" ? notes.find((n) => n.id === selectedId) || null : null;
+  const selectedFile = selectedKind === "file" ? files.find((f) => f.id === selectedId) || null : null;
   const noteMap = useMemo(() => {
     const map = new Map();
     notes.forEach((note) => map.set(String(note.title || "").trim().toLowerCase(), note.id));
@@ -212,6 +216,16 @@ export default function Drive() {
     return [...tags].sort();
   }, [notes]);
   const backlinks = selectedNote ? notes.filter((note) => note.id !== selectedNote.id && parseWikiLinks(note.body).some((link) => link.toLowerCase() === String(selectedNote.title || "").toLowerCase())) : [];
+  const visibleNotes = notes.filter((note) => (note.parentId || null) === currentFolder).filter((note) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || String(note.title || "").toLowerCase().includes(q) || String(note.body || "").toLowerCase().includes(q);
+    const matchesTag = !selectedTag || (note.tags || []).includes(selectedTag);
+    return matchesSearch && matchesTag;
+  }).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  const visibleFiles = files.filter((file) => (file.parentId || null) === currentFolder).filter((file) => {
+    const q = search.trim().toLowerCase();
+    return !q || String(file.name || "").toLowerCase().includes(q);
+  }).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
   function beginResize(which) { resizeMode.current = which; document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize"; }
   function createFolder() {
@@ -278,19 +292,39 @@ export default function Drive() {
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, parentId: target || null, updatedAt: Date.now() } : f)));
   }
+  function getFileExtension(name) {
+    const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match ? match[1] : "";
+  }
+  function canPreviewFileInApp(file) {
+    if (!file?.dataUrl) return false;
+    const mime = String(file.mime || "");
+    const ext = getFileExtension(file.name);
+    if (mime.startsWith("image/")) return true;
+    if (mime === "application/pdf") return true;
+    if (mime.startsWith("audio/")) return true;
+    if (mime.startsWith("video/")) return true;
+    if (mime.startsWith("text/")) return true;
+    if (["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext)) return true;
+    return false;
+  }
+  function openFileInBrowser(file) {
+    if (!file?.dataUrl) return;
+    const a = document.createElement("a");
+    a.href = file.dataUrl;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.click();
+  }
   function openFile(file) {
     if (!file?.dataUrl) return;
-    const w = window.open();
-    if (w) {
-      if (String(file.mime || "").startsWith("image/")) {
-        w.document.write(`<title>${file.name}</title><img src="${file.dataUrl}" style="max-width:100%;height:auto;display:block;margin:0 auto;background:#111;" />`);
-      } else if (String(file.mime || "").startsWith("text/") || file.textContent) {
-        const safe = String(file.textContent || "").replace(/[<>&]/g, (m) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]));
-        w.document.write(`<title>${file.name}</title><pre style="white-space:pre-wrap;background:#111;color:#eee;padding:16px;">${safe}</pre>`);
-      } else {
-        w.location.href = file.dataUrl;
-      }
+    if (canPreviewFileInApp(file)) {
+      setSelectedId(file.id);
+      setSelectedKind("file");
+      setStatus("saved");
+      return;
     }
+    openFileInBrowser(file);
   }
   function downloadFile(file) { const a = document.createElement("a"); a.href = file.dataUrl; a.download = file.name || "download"; a.click(); }
   function saveNow() {
@@ -433,36 +467,14 @@ export default function Drive() {
     const renderedTitle = renderTemplate(template.title || template.name || "untitled", { title });
     const renderedBody = renderTemplate(template.body || "", { title: renderedTitle });
     if (!selectedId || selectedKind !== "note") {
-      createNoteFromTemplate(template);
+      const note = { id: newId("note"), title: renderedTitle, body: renderedBody, parentId: currentFolder, updatedAt: Date.now(), tags: [] };
+      skipNextSave.current = true;
+      setNotes((prev) => [note, ...prev]);
+      setSelectedId(note.id); setSelectedKind("note"); setTitle(note.title); setContent(note.body); setStatus("saved");
       return;
     }
-    const el = editorRef.current;
-    if (!el) {
-      setContent((prev) => prev + (prev ? "\n" : "") + renderedBody);
-      return;
-    }
-    const start = el.selectionStart || 0;
-    const end = el.selectionEnd || 0;
-    const spacerBefore = start > 0 && !/[\n\s]$/.test(content.slice(0, start)) ? "\n" : "";
-    const spacerAfter = end < content.length && !/^[\n\s]/.test(content.slice(end)) ? "\n" : "";
-    const inserted = `${spacerBefore}${renderedBody}${spacerAfter}`;
-    setContent(content.slice(0, start) + inserted + content.slice(end));
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + inserted.length;
-      el.setSelectionRange(pos, pos);
-    });
-  }
-  function editTemplate(id) {
-    const template = templates.find((tpl) => tpl.id === id);
-    if (!template) return;
-    const name = prompt("Template name", template.name || "");
-    if (!name) return;
-    const nextTitle = prompt("Template note title", template.title || "");
-    if (nextTitle === null) return;
-    const nextBody = prompt("Template body", template.body || "");
-    if (nextBody === null) return;
-    setTemplates((prev) => prev.map((tpl) => (tpl.id === id ? { ...tpl, name: String(name).trim(), title: nextTitle, body: nextBody } : tpl)));
+    skipNextSave.current = true;
+    setTitle(renderedTitle); setContent(renderedBody); setStatus("saved");
   }
   function deleteTemplate(id) { setTemplates((prev) => prev.filter((tpl) => tpl.id !== id)); }
 
@@ -474,64 +486,46 @@ export default function Drive() {
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
       <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFiles} />
       <input ref={folderInputRef} type="file" multiple webkitdirectory="true" directory="true" style={{ display: "none" }} onChange={onUploadFolder} />
-      <div style={{ display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)`, height: "100%" }}>
-        <div style={{ borderRight: "1px solid #1b1b1b", overflow: "auto", minWidth: 0 }}>
-          <DriveSidebar
-            folders={folders}
-            notes={notes}
-            files={files}
-            currentFolder={currentFolder}
-            setCurrentFolder={setCurrentFolder}
-            onSelectNote={selectNote}
-            selectedId={selectedId}
-            selectedKind={selectedKind}
-            onOpenFile={openFile}
-            onNewFolder={createFolder}
-            onNewNote={createNote}
-            onUploadFile={() => fileInputRef.current?.click()}
-            onUploadFolder={() => folderInputRef.current?.click()}
-            onRenameFolder={renameFolder}
-            onDeleteFolder={deleteFolder}
-            onRenameNote={renameNote}
-            onMoveNote={moveNote}
-            onDeleteNote={deleteNote}
-            onRenameFile={renameFile}
-            onMoveFile={moveFile}
-            onDeleteFile={deleteFile}
-            onDownloadFile={downloadFile}
-            search={search}
-            setSearch={setSearch}
-            tags={allTags}
-            selectedTag={selectedTag}
-            setSelectedTag={setSelectedTag}
-            templates={templates}
-            onApplyTemplate={applyTemplate}
-            onDeleteTemplate={deleteTemplate}
-            onEditTemplate={editTemplate}
-            onNewFromTemplate={createNoteFromTemplate}
-          />
+      <div style={{ display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px ${listWidth}px 6px minmax(0,1fr)`, height: "100%" }}>
+        <div style={{ borderRight: "1px solid #1b1b1b", overflow: "auto" }}>
+          <DriveSidebar folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} onNewFolder={createFolder} onRename={renameFolder} onDelete={deleteFolder} tags={allTags} selectedTag={selectedTag} setSelectedTag={setSelectedTag} templates={templates} onApplyTemplate={applyTemplate} onDeleteTemplate={deleteTemplate} onNewFromTemplate={createNoteFromTemplate} />
         </div>
         <div onMouseDown={() => beginResize("sidebar")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)" }} title="Drag to resize explorer" />
-        <div style={{ minWidth: 0, overflow: "hidden", display: "grid", gridTemplateColumns: inspectorOpen && selectedNote ? "minmax(0,1fr) 270px" : "minmax(0,1fr)" }}>
-          <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
-            <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} compact />
-            {selectedNote ? <>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" style={{ flex: 1, minWidth: 220, fontSize: 20, fontWeight: 800, background: "transparent", border: "none", outline: "none", color: "#fff", padding: "2px 0" }} />
-                <span className="helper">{status}</span>
+        <div style={{ borderRight: "1px solid #1b1b1b", overflow: "auto", padding: 6 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}><button className="btn-red" type="button" onClick={createNote}>+ Note</button><button className="btn" type="button" onClick={() => fileInputRef.current?.click()}>Upload File</button><button className="btn" type="button" onClick={() => folderInputRef.current?.click()}>Upload Folder</button></div>
+          <input className="input" placeholder="search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
+          <DriveList notes={visibleNotes} files={visibleFiles} onSelect={selectNote} onRename={renameNote} onMove={moveNote} onDelete={deleteNote} onOpenFile={openFile} onOpenFileInBrowser={openFileInBrowser} onRenameFile={renameFile} onMoveFile={moveFile} onDeleteFile={deleteFile} onDownloadFile={downloadFile} selectedId={selectedId} selectedKind={selectedKind} />
+        </div>
+        <div onMouseDown={() => beginResize("list")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)" }} title="Drag to resize note list" />
+        <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
+          <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} compact />
+          {selectedNote ? <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" style={{ flex: 1, minWidth: 220, fontSize: 20, fontWeight: 800, background: "transparent", border: "none", outline: "none", color: "#fff", padding: "2px 0" }} />
+              <span className="helper">{status}</span>
+            </div>
+            <RichTextToolbar onBold={showEditor ? () => wrapSelection("**") : undefined} onItalic={showEditor ? () => wrapSelection("*") : undefined} onH1={showEditor ? () => prefixLines("# ") : undefined} onH2={showEditor ? () => prefixLines("## ") : undefined} onBullet={showEditor ? () => prefixLines("- ") : undefined} onQuote={showEditor ? () => prefixLines("> ") : undefined} onCode={showEditor ? () => wrapSelection("`") : undefined} onRule={showEditor ? () => insertBlock("\n---\n") : undefined} onLink={showEditor ? () => wrapSelection("[", "](https://)") : undefined} onWikiLink={showEditor ? () => wrapSelection("[[", "]]") : undefined} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen((v) => !v)} menuItems={[{ label: "Source", onClick: () => { setViewMode("edit"); setMenuOpen(false); } }, { label: "Reading", onClick: () => { setViewMode("read"); setMenuOpen(false); } }, { label: "Split", onClick: () => { setViewMode("split"); setMenuOpen(false); } }, { label: "Props", onClick: () => { insertFrontmatterTemplate(); setMenuOpen(false); } }, { label: inspectorOpen ? "Hide inspector" : "Inspector", onClick: () => { setInspectorOpen((v) => !v); setMenuOpen(false); } }, { label: "Save as template", onClick: () => { saveCurrentAsTemplate(); setMenuOpen(false); } }, { label: focusMode ? "Exit focus" : "Focus", onClick: () => { setFocusMode((v) => !v); setMenuOpen(false); } }]} />
+            <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
+              {showEditor ? <div style={{ minWidth: 0 }}><NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact /></div> : null}
+              {viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
+              {showPreview ? <div style={{ minWidth: 0 }}><NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact /></div> : null}
+            </div>
+          </> : selectedFile ? <>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 20 }}>{selectedFile.name}</h2>
+              <span className="helper">{selectedFile.mime || "file"}</span>
+              <span className="helper">{Math.round((Number(selectedFile.size || 0) / 1024) * 10) / 10} KB</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button className="btn" type="button" onClick={() => openFileInBrowser(selectedFile)}>Open in browser</button>
+                <button className="btn" type="button" onClick={() => downloadFile(selectedFile)}>Download</button>
               </div>
-              <RichTextToolbar onBold={showEditor ? () => wrapSelection("**") : undefined} onItalic={showEditor ? () => wrapSelection("*") : undefined} onH1={showEditor ? () => prefixLines("# ") : undefined} onH2={showEditor ? () => prefixLines("## ") : undefined} onBullet={showEditor ? () => prefixLines("- ") : undefined} onQuote={showEditor ? () => prefixLines("> ") : undefined} onCode={showEditor ? () => wrapSelection("`") : undefined} onRule={showEditor ? () => insertBlock("\n---\n") : undefined} onLink={showEditor ? () => wrapSelection("[", "](https://)") : undefined} onWikiLink={showEditor ? () => wrapSelection("[[", "]]") : undefined} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen((v) => !v)} menuItems={[{ label: "Source", onClick: () => { setViewMode("edit"); setMenuOpen(false); } }, { label: "Reading", onClick: () => { setViewMode("read"); setMenuOpen(false); } }, { label: "Split", onClick: () => { setViewMode("split"); setMenuOpen(false); } }, { label: "Props", onClick: () => { insertFrontmatterTemplate(); setMenuOpen(false); } }, { label: inspectorOpen ? "Hide inspector" : "Inspector", onClick: () => { setInspectorOpen((v) => !v); setMenuOpen(false); } }, { label: "Save as template", onClick: () => { saveCurrentAsTemplate(); setMenuOpen(false); } }, { label: focusMode ? "Exit focus" : "Focus", onClick: () => { setFocusMode((v) => !v); setMenuOpen(false); } }]} />
-              <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
-                {showEditor ? <div style={{ minWidth: 0 }}><NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact /></div> : null}
-                {viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
-                {showPreview ? <div style={{ minWidth: 0 }}><NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact /></div> : null}
-              </div>
-            </> : <div className="card" style={{ padding: 14 }}><h2 style={{ marginTop: 0 }}>Drive</h2><div className="helper" style={{ marginBottom: 10 }}>Create or select a note. Uploads are available now for files and folders.</div><div className="helper" style={{ whiteSpace: "pre-wrap" }}>{templateDocs}</div></div>}
-          </div>
-          {inspectorOpen && selectedNote ? <div style={{ borderLeft: "1px solid #1b1b1b", overflow: "auto", padding: 8 }}><NoteInspector note={selectedNote} backlinks={backlinks} onOpenNote={selectNote} onClose={() => setInspectorOpen(false)} compact /></div> : null}
+            </div>
+            <DriveFilePreview file={selectedFile} />
+          </> : <div className="card" style={{ padding: 14 }}><h2 style={{ marginTop: 0 }}>Drive</h2><div className="helper" style={{ marginBottom: 10 }}>Create or select a note. Uploads are available now for files and folders.</div><div className="helper" style={{ whiteSpace: "pre-wrap" }}>{templateDocs}</div></div>}
         </div>
       </div>
       <HelpFab pulseKey={helpPulseKey} isOpen={showHelp} onToggle={() => setShowHelp((v) => !v)} contentTitle="Drive help"><div className="helper" style={{ marginBottom: 8 }}>Templates support markdown plus live tokens. New note from template is available in the template meatballs menu.</div><div className="helper" style={{ marginBottom: 8 }}>Uploads support files and folder trees, stored locally in this build.</div><div className="helper" style={{ whiteSpace: "pre-wrap" }}>{templateDocs}</div></HelpFab>
+      {inspectorOpen && selectedNote ? <div style={{ position: "fixed", top: focusMode ? 8 : 94, right: 8, width: 250, maxHeight: focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)", overflow: "auto", zIndex: 90 }}><NoteInspector note={selectedNote} backlinks={backlinks} onOpenNote={selectNote} onClose={() => setInspectorOpen(false)} compact /></div> : null}
     </div>
   );
 }
