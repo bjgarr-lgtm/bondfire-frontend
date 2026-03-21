@@ -1,12 +1,8 @@
-
 .help-widget {
   position: fixed;
   right: 18px;
   bottom: 18px;
   z-index: 1000;
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .help-button {
@@ -34,23 +30,27 @@
 }
 
 .help-hover-label {
-  max-width: 0;
-  overflow: hidden;
+  position: absolute;
+  right: 56px;
+  bottom: 2px;
   opacity: 0;
+  transform: translateY(4px);
   white-space: nowrap;
-  padding: 0;
+  padding: 8px 12px;
   border-radius: 999px;
   background: rgba(22, 22, 24, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #d7d7dc;
   font-size: 12px;
-  transition: opacity 120ms ease, max-width 140ms ease, padding 140ms ease;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
 }
 
 .help-hover-label.is-visible {
   opacity: 1;
-  max-width: 220px;
-  padding: 8px 12px;
+  transform: translateY(0);
+  visibility: visible;
 }
 
 .bf-help-backdrop {
@@ -193,6 +193,10 @@
   .help-widget {
     right: 14px;
     bottom: 14px;
+  }
+
+  .help-hover-label {
+    display: none;
   }
 
   .bf-help-panel {
