@@ -18,7 +18,7 @@ function MenuButton({ label, onClick, danger = false }) {
   );
 }
 
-function PopMenu({ trigger, items }) {
+function PopMenu({ trigger, items, align = "right" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -36,7 +36,7 @@ function PopMenu({ trigger, items }) {
         {trigger}
       </button>
       {open ? (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 190, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 6, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 60, display: "grid", gap: 4 }}>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", ...(align === "left" ? { left: 0 } : { right: 0 }), minWidth: 190, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 6, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 120, display: "grid", gap: 4 }}>
           {items.map((item, idx) => (
             <MenuButton key={`${item.label}-${idx}`} label={item.label} danger={item.danger} onClick={() => { item.onClick?.(); setOpen(false); }} />
           ))}
@@ -240,16 +240,17 @@ export default function DriveSidebar({
   }, [folders, notes, files, currentFolder, selectedId, selectedKind, search, collapsedFolders, onSelectFolder, onSelectNote, onSelectFile, onRenameFolder, onDeleteFolder, onRenameNote, onMoveNote, onDeleteNote, onRenameFile, onMoveFile, onDeleteFile, onDownloadFile, onOpenFileInBrowser]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr)", height: "100%" }}>
-      <div style={{ borderRight: "1px solid #1b1b1b", padding: 8, display: "grid", alignContent: "start", gap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr)", height: "100%", position: "relative", zIndex: 0 }}>
+      <div style={{ borderRight: "1px solid #1b1b1b", padding: 8, display: "grid", alignContent: "start", gap: 8, position: "relative", zIndex: 1 }}>
         <button className="btn" type="button" title="Explorer" onClick={() => setActivePane("explorer")} style={{ padding: "8px 0", fontWeight: activePane === "explorer" ? 800 : 500 }}>⌂</button>
         <button className="btn" type="button" title="Templates" onClick={() => setActivePane("templates")} style={{ padding: "8px 0", fontWeight: activePane === "templates" ? 800 : 500 }}>T</button>
       </div>
 
-      <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
+      <div style={{ minWidth: 0, overflow: "auto", padding: 10, position: "relative", zIndex: 2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
           <PopMenu
             trigger="＋"
+            align="left"
             items={[
               { label: "New note", onClick: onNewNote },
               { label: "New folder", onClick: onNewFolder },
@@ -260,6 +261,7 @@ export default function DriveSidebar({
           {activePane === "templates" ? (
             <PopMenu
               trigger="⋯"
+              align="left"
               items={[
                 { label: "New note", onClick: onNewNote },
                 { label: "New folder", onClick: onNewFolder },
