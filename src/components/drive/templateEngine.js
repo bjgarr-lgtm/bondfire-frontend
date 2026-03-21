@@ -38,4 +38,8 @@ alternate short syntax
 {{date:dddd}}
 {{title}}
 
-write full markdown templates with frontmatter, headings, lists, checkboxes, timestamps, and reusable note structures.`;
+templates can now:
+- create a brand new note
+- insert into the current note
+- be edited in app
+- contain full markdown, frontmatter, lists, timestamps, and reusable structures.`;
