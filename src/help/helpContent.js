@@ -105,7 +105,7 @@ export const HELP_TOPICS = [
         "h": "Templates",
         "p": [
           "Templates can create a brand new note or insert into the current note. Insert keeps your existing note and adds the template content instead of replacing everything.",
-          "Supported tokens include <% tp.date.now("YYYY-MM-DD") %>, <% tp.date.now("HH:mm") %>, <% tp.date.now("dddd") %>, <% tp.date.now("YYYY-[W]WW") %>, <% tp.file.title %>, plus the short forms {{date:YYYY-MM-DD}}, {{date:HH:mm}}, {{date:dddd}}, and {{title}}."
+          'Supported tokens include <% tp.date.now("YYYY-MM-DD") %>, <% tp.date.now("HH:mm") %>, <% tp.date.now("dddd") %>, <% tp.date.now("YYYY-[W]WW") %>, <% tp.file.title %>, plus the short forms {{date:YYYY-MM-DD}}, {{date:HH:mm}}, {{date:dddd}}, and {{title}}.'
         ]
       },
       {
