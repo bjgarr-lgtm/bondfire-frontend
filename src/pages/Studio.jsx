@@ -1177,7 +1177,10 @@ export default function Studio() {
 		e.preventDefault();
 		e.stopPropagation();
 		if (el) {
-			selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey);
+			const alreadySelected = selectedIds.includes(el.id) || (el.groupId && (currentDoc?.elements || []).some((item) => item.groupId === el.groupId && selectedIds.includes(item.id)));
+			if (!alreadySelected) {
+				selectElement(el, false);
+			}
 		}
 		const targetIds = el
 			? (el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
