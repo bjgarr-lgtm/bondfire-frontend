@@ -564,28 +564,44 @@ export default function Drive() {
   }, [selectedId, selectedKind, title, content, fileIsEditable]);
 
   async function fileToStoredRecord(file, parentId, relativePath = "") {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
     let textContent = "";
-    if (isEditableTextFile(file) || String(file.type || "").startsWith("text/")) {
+    if (isEditableTextFile({ name: file?.name, mime: file?.type })) {
       try { textContent = await file.text(); } catch {}
     }
-    return { name: file.name, parentId, size: file.size, mime: file.type || "application/octet-stream", dataUrl, textContent, relativePath };
+    return {
+      name: file?.name || "file",
+      parentId,
+      updatedAt: Date.now(),
+      size: Number(file?.size || 0),
+      mime: file?.type || "application/octet-stream",
+      textContent,
+      relativePath,
+    };
   }
+
+  async function uploadFileRecord(rawFile, parentId, relativePath = "") {
+    const record = await fileToStoredRecord(rawFile, parentId, relativePath);
+    const form = new FormData();
+    form.append("file", rawFile, rawFile.name || record.name || "file");
+    form.append("name", record.name || rawFile.name || "file");
+    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+    if (parentId) form.append("parentId", String(parentId));
+    if (relativePath) form.append("relativePath", String(relativePath));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res?.file) return null;
+    const nextFile = withFileUrls(orgId, { ...record, ...res.file });
+    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
+    return nextFile;
+  }
+
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
     for (const rawFile of chosen) {
-      const record = await fileToStoredRecord(rawFile, currentFolder);
-      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        body: JSON.stringify(record),
-      });
-      if (res?.file) setFiles((prev) => [withFileUrls(orgId, { ...record, ...res.file }), ...prev.filter((existing) => existing.id !== res.file.id)]);
+      await uploadFileRecord(rawFile, currentFolder);
     }
     event.target.value = "";
   }
@@ -618,12 +634,7 @@ export default function Drive() {
       const fileName = parts.pop() || file.name;
       const parentId = parts.length ? await ensureFolderChain(parts) : currentFolder;
       const wrapped = new File([file], fileName, { type: file.type });
-      const record = await fileToStoredRecord(wrapped, parentId, rel);
-      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        body: JSON.stringify(record),
-      });
-      if (res?.file) setFiles((prev) => [withFileUrls(orgId, { ...record, ...res.file }), ...prev.filter((existing) => existing.id !== res.file.id)]);
+      await uploadFileRecord(wrapped, parentId, rel);
     }
     event.target.value = "";
   }

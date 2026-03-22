@@ -83,7 +83,11 @@ export async function api(path, opts = {}) {
   })();
 
   const headers = new Headers(opts.headers || {});
-  if (!headers.has("Content-Type") && opts.body != null) {
+  const body = opts.body;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
+  const isArrayBuffer = typeof ArrayBuffer !== "undefined" && (body instanceof ArrayBuffer || ArrayBuffer.isView(body));
+  if (!headers.has("Content-Type") && body != null && !isFormData && !isBlob && !isArrayBuffer) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -132,7 +136,11 @@ export async function api(path, opts = {}) {
 
   const token2 = pickToken();
   const headers2 = new Headers(opts.headers || {});
-  if (!headers2.has("Content-Type") && opts.body != null) {
+  const retryBody = opts.body;
+  const retryIsFormData = typeof FormData !== "undefined" && retryBody instanceof FormData;
+  const retryIsBlob = typeof Blob !== "undefined" && retryBody instanceof Blob;
+  const retryIsArrayBuffer = typeof ArrayBuffer !== "undefined" && (retryBody instanceof ArrayBuffer || ArrayBuffer.isView(retryBody));
+  if (!headers2.has("Content-Type") && retryBody != null && !retryIsFormData && !retryIsBlob && !retryIsArrayBuffer) {
     headers2.set("Content-Type", "application/json");
   }
   if (token2 && !headers2.has("Authorization")) {
