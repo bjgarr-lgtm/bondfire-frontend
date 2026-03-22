@@ -1023,7 +1023,7 @@ export default function Studio() {
 				<hr style={{ margin: "14px 0", opacity: 0.2 }} />
 
 				<div style={{ fontWeight: 700, marginBottom: 8 }}>Bondfire Data</div>
-				<div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>These tokens are live placeholders. Example: {{meeting.title}} resolves to your current Bondfire meeting title when preview is on.</div>
+				<div>These tokens are live placeholders. Example: {"{{meeting.title}}"} resolves...</div>
 				<div style={{ display: "flex", gap: 8, marginBottom: 10 }}><button onClick={() => setShowBoundPreview((v) => !v)}>{showBoundPreview ? "Show Raw Tokens" : "Show Live Preview"}</button></div>
 				<div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
 					{Object.entries(bindings).map(([key, value]) => (
