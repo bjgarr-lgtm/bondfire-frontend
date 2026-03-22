@@ -179,6 +179,8 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
+  const loadSeqRef = useRef(0);
+  const foldersRef = useRef([]);
 
   useEffect(() => {
     try {
@@ -197,8 +199,13 @@ export default function Drive() {
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
 
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
+    const requestSeq = ++loadSeqRef.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -224,9 +231,15 @@ export default function Drive() {
           }
         } catch {}
       }
+      if (requestSeq !== loadSeqRef.current) return;
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
+      const existingPreviewById = new Map(files.map((file) => [file.id, file.previewObjectUrl]).filter(([, value]) => !!value));
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
+        const withUrls = withFileUrls(orgId, file);
+        const previewObjectUrl = existingPreviewById.get(withUrls.id);
+        return previewObjectUrl ? { ...withUrls, previewObjectUrl } : withUrls;
+      });
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -256,6 +269,7 @@ export default function Drive() {
       }
       setLoadState("ready");
     } catch (e) {
+      if (requestSeq !== loadSeqRef.current) return;
       setLoadError(String(e?.message || e || "Failed to load Drive"));
       setLoadState("error");
     }
@@ -364,30 +378,12 @@ export default function Drive() {
     setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
   }
   async function deleteFolder(id) {
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
-    const deletedFolderIds = new Set(Array.isArray(res?.deletedFolderIds) ? res.deletedFolderIds : [id]);
-    setFolders((prev) => prev.filter((f) => !deletedFolderIds.has(f.id)));
-    setNotes((prev) => prev.filter((n) => !deletedFolderIds.has(n.parentId || null)));
-    setFiles((prev) => prev.filter((f) => !deletedFolderIds.has(f.parentId || null)));
-    if (selectedKind === "folder" && deletedFolderIds.has(selectedId)) {
-      setSelectedId(null);
-      setSelectedKind(null);
-    }
-    if (selectedKind === "note") {
-      const selectedNote = notes.find((n) => n.id === selectedId);
-      if (selectedNote && deletedFolderIds.has(selectedNote.parentId || null)) {
-        setSelectedId(null);
-        setSelectedKind(null);
-      }
-    }
-    if (selectedKind === "file") {
-      const selectedFile = files.find((f) => f.id === selectedId);
-      if (selectedFile && deletedFolderIds.has(selectedFile.parentId || null)) {
-        setSelectedId(null);
-        setSelectedKind(null);
-      }
-    }
-    if (currentFolder && deletedFolderIds.has(currentFolder)) setCurrentFolder(null);
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const parent = folders.find((f) => f.id === id)?.parentId ?? null;
+    setFolders((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)).filter((f) => f.id !== id));
+    setNotes((prev) => prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n)));
+    setFiles((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)));
+    if (currentFolder === id) setCurrentFolder(parent);
   }
 
   async function createNoteWithPayload(payload) {
@@ -618,35 +614,63 @@ export default function Drive() {
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const form = new FormData();
-    form.append("file", rawFile, rawFile.name || record.name || "file");
-    form.append("name", record.name || rawFile.name || "file");
-    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-    if (parentId) form.append("parentId", String(parentId));
-    if (relativePath) form.append("relativePath", String(relativePath));
-
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-      method: "POST",
-      body: form,
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticFile = withFileUrls(orgId, {
+      id: tempId,
+      ...record,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      previewObjectUrl: localPreviewUrl || undefined,
+      isPendingUpload: true,
     });
+    setFiles((prev) => [optimisticFile, ...prev]);
 
-    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-    if (!createdFile?.id) {
+    try {
+      const headers = {
+        "x-drive-name": record.name || rawFile.name || "file",
+        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+      };
+      if (parentId) headers["x-drive-parent-id"] = String(parentId);
+      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
+
+      let res;
+      try {
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          headers,
+          body: rawFile,
+        });
+      } catch {
+        const form = new FormData();
+        form.append("file", rawFile, rawFile.name || record.name || "file");
+        form.append("name", record.name || rawFile.name || "file");
+        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+        if (parentId) form.append("parentId", String(parentId));
+        if (relativePath) form.append("relativePath", String(relativePath));
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          body: form,
+        });
+      }
+
+      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+      if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
+
+      const nextFile = withFileUrls(orgId, {
+        ...record,
+        ...createdFile,
+        previewObjectUrl: localPreviewUrl || undefined,
+      });
+      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
+      return nextFile;
+    } catch (error) {
+      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      await loadDrive({ preserveSelection: true });
-      return null;
+      throw error;
     }
-
-    const nextFile = withFileUrls(orgId, {
-      ...record,
-      ...createdFile,
-      previewObjectUrl: localPreviewUrl || undefined,
-    });
-    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
-    return nextFile;
   }
 
   async function onUploadFiles(event) {
@@ -657,11 +681,13 @@ export default function Drive() {
     }
     event.target.value = "";
   }
-  async function ensureFolderChain(segments) {
+  async function ensureFolderChain(segments, folderCache = null) {
     let parentId = currentFolder;
-    let nextFolders = folders;
-    for (const segment of segments) {
-      let existing = nextFolders.find((folder) => (folder.parentId || null) === (parentId || null) && folder.name === segment);
+    const cache = folderCache || [...foldersRef.current];
+    for (const rawSegment of segments) {
+      const segment = String(rawSegment || "").trim();
+      if (!segment) continue;
+      let existing = cache.find((folder) => (folder.parentId || null) === (parentId || null) && folder.name === segment);
       if (!existing) {
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
           method: "POST",
@@ -669,8 +695,9 @@ export default function Drive() {
         });
         existing = res?.folder || null;
         if (existing) {
-          nextFolders = [...nextFolders, existing];
-          setFolders(nextFolders);
+          cache.push(existing);
+          foldersRef.current = cache;
+          setFolders([...cache]);
         }
       }
       parentId = existing?.id || parentId;
@@ -680,15 +707,19 @@ export default function Drive() {
   async function onUploadFolder(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
-    for (const file of chosen) {
-      const rel = String(file.webkitRelativePath || file.name);
-      const parts = rel.split("/").filter(Boolean);
-      const fileName = parts.pop() || file.name;
-      const parentId = parts.length ? await ensureFolderChain(parts) : currentFolder;
-      const wrapped = new File([file], fileName, { type: file.type });
-      await uploadFileRecord(wrapped, parentId, rel);
+    const folderCache = [...foldersRef.current];
+    try {
+      for (const file of chosen) {
+        const rel = String(file.webkitRelativePath || file.name);
+        const parts = rel.split("/").filter(Boolean);
+        const fileName = parts.pop() || file.name;
+        const parentId = parts.length ? await ensureFolderChain(parts, folderCache) : currentFolder;
+        const wrapped = new File([file], fileName, { type: file.type });
+        await uploadFileRecord(wrapped, parentId, rel);
+      }
+    } finally {
+      event.target.value = "";
     }
-    event.target.value = "";
   }
 
   async function openLinkedNoteByTitle(rawTitle) {
