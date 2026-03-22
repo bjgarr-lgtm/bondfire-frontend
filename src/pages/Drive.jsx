@@ -179,7 +179,7 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const loadRequestSeq = useRef(0);
+  const loadSeqRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -200,7 +200,7 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const requestSeq = ++loadRequestSeq.current;
+    const requestSeq = ++loadSeqRef.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -226,25 +226,19 @@ export default function Drive() {
           }
         } catch {}
       }
-      if (requestSeq !== loadRequestSeq.current) return;
+      if (requestSeq !== loadSeqRef.current) return;
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
+      const existingPreviewById = new Map(files.map((file) => [file.id, file.previewObjectUrl]).filter(([, value]) => !!value));
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
+        const withUrls = withFileUrls(orgId, file);
+        const previewObjectUrl = existingPreviewById.get(withUrls.id);
+        return previewObjectUrl ? { ...withUrls, previewObjectUrl } : withUrls;
+      });
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
-      setFiles((prev) => {
-        const prevMap = new Map(prev.map((file) => [file.id, file]));
-        return nextFiles.map((file) => {
-          const existing = prevMap.get(file.id);
-          if (!existing) return file;
-          return {
-            ...existing,
-            ...file,
-            previewObjectUrl: existing.previewObjectUrl || file.previewObjectUrl,
-          };
-        });
-      });
+      setFiles(nextFiles);
       setTemplates(nextTemplates);
       if (preserveSelection && selectedId) {
         if (selectedKind === "note") {
@@ -270,7 +264,7 @@ export default function Drive() {
       }
       setLoadState("ready");
     } catch (e) {
-      if (requestSeq !== loadRequestSeq.current) return;
+      if (requestSeq !== loadSeqRef.current) return;
       setLoadError(String(e?.message || e || "Failed to load Drive"));
       setLoadState("error");
     }
@@ -615,35 +609,63 @@ export default function Drive() {
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const form = new FormData();
-    form.append("file", rawFile, rawFile.name || record.name || "file");
-    form.append("name", record.name || rawFile.name || "file");
-    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-    if (parentId) form.append("parentId", String(parentId));
-    if (relativePath) form.append("relativePath", String(relativePath));
-
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-      method: "POST",
-      body: form,
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticFile = withFileUrls(orgId, {
+      id: tempId,
+      ...record,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      previewObjectUrl: localPreviewUrl || undefined,
+      isPendingUpload: true,
     });
+    setFiles((prev) => [optimisticFile, ...prev]);
 
-    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-    if (!createdFile?.id) {
+    try {
+      const headers = {
+        "x-drive-name": record.name || rawFile.name || "file",
+        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+      };
+      if (parentId) headers["x-drive-parent-id"] = String(parentId);
+      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
+
+      let res;
+      try {
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          headers,
+          body: rawFile,
+        });
+      } catch {
+        const form = new FormData();
+        form.append("file", rawFile, rawFile.name || record.name || "file");
+        form.append("name", record.name || rawFile.name || "file");
+        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+        if (parentId) form.append("parentId", String(parentId));
+        if (relativePath) form.append("relativePath", String(relativePath));
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          body: form,
+        });
+      }
+
+      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+      if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
+
+      const nextFile = withFileUrls(orgId, {
+        ...record,
+        ...createdFile,
+        previewObjectUrl: localPreviewUrl || undefined,
+      });
+      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
+      return nextFile;
+    } catch (error) {
+      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      await loadDrive({ preserveSelection: true });
-      return null;
+      throw error;
     }
-
-    const nextFile = withFileUrls(orgId, {
-      ...record,
-      ...createdFile,
-      previewObjectUrl: localPreviewUrl || undefined,
-    });
-    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
-    return nextFile;
   }
 
   async function onUploadFiles(event) {
