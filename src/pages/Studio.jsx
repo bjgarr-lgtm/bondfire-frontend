@@ -1024,15 +1024,11 @@ export default function Studio() {
 			if (dragState && currentDoc) {
 				const dx = (e.clientX - dragState.pointer.x) / zoom;
 				const dy = (e.clientY - dragState.pointer.y) / zoom;
-				const guideTargetsX = [0, currentDoc.width / 2, currentDoc.width, ...((currentDoc.guides || []).filter((g) => g.orientation === "vertical").map((g) => Number(g.position || 0)))];
-				const guideTargetsY = [0, currentDoc.height / 2, currentDoc.height, ...((currentDoc.guides || []).filter((g) => g.orientation === "horizontal").map((g) => Number(g.position || 0)))];
 				updateElements(dragState.ids, (el) => {
 					const base = dragState.origins[el.id] || { x: 0, y: 0 };
-					const rawX = clamp(base.x + dx, 0, Math.max(0, currentDoc.width - Number(el.width || 0)));
-					const rawY = clamp(base.y + dy, 0, Math.max(0, currentDoc.height - Number(el.height || 0)));
 					return {
-						x: snapValue(rawX, [...guideTargetsX, currentDoc.width - Number(el.width || 0)], 6),
-						y: snapValue(rawY, [...guideTargetsY, currentDoc.height - Number(el.height || 0)], 6),
+						x: base.x + dx,
+						y: base.y + dy,
 					};
 				});
 			}
@@ -1096,6 +1092,26 @@ export default function Studio() {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
 				const ids = currentDoc.elements.filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
+			}
+			if (dragState && currentDoc) {
+				const removeIds = currentDoc.elements
+					.filter((el) => dragState.ids.includes(el.id))
+					.filter((el) => {
+						const left = Number(el.x || 0);
+						const top = Number(el.y || 0);
+						const right = left + Number(el.width || 0);
+						const bottom = top + Number(el.height || 0);
+						return right < 0 || bottom < 0 || left > currentDoc.width || top > currentDoc.height;
+					})
+					.map((el) => el.id);
+				if (removeIds.length) {
+					commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : {
+						...doc,
+						updatedAt: Date.now(),
+						elements: (doc.elements || []).filter((el) => !removeIds.includes(el.id)),
+					}));
+					setSelectedIds((prev) => prev.filter((id) => !removeIds.includes(id)));
+				}
 			}
 			setDragState(null);
 			setResizeState(null);
@@ -1284,7 +1300,7 @@ export default function Studio() {
 			</div>
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
-				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: 12, zIndex: 25, display: "grid", gap: 8 }}>
+				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
 					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
 					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>T</button>
 					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>□</button>
@@ -1294,7 +1310,7 @@ export default function Studio() {
 				</div>
 
 				{leftPanel ? (
-					<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+					<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 56) : 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
 							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Add" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
 							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
@@ -1463,12 +1479,12 @@ export default function Studio() {
 										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= currentDoc.width && Number(el.height || 0) >= currentDoc.height;
 									const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
 										if (el.type === "text") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 										}
 										if (el.type === "shape") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 										}
-										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
 									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 									{selected && !selected.locked ? [
