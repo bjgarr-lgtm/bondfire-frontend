@@ -966,6 +966,11 @@ export default function Studio() {
 
 	const startElementDrag = (e, el) => {
 		if (!currentDoc || el.locked) return;
+		if (e.button === 2) {
+			e.preventDefault();
+			e.stopPropagation();
+			return;
+		}
 		e.preventDefault();
 		e.stopPropagation();
 		const add = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -1030,6 +1035,9 @@ export default function Studio() {
 		setFileMenuOpen(false);
 		setExportMenuOpen(false);
 		setContextMenu(null);
+		if (e.button === 2) {
+			return;
+		}
 		if (spacePan || tool === "hand" || e.button === 1) {
 			setPanState({ startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y });
 			return;
