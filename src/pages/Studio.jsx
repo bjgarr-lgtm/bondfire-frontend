@@ -1171,7 +1171,12 @@ export default function Studio() {
 		if (el) {
 			selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey);
 		}
-		setContextMenu({ x: e.clientX, y: e.clientY });
+		setContextMenu({
+			x: e.clientX,
+			y: e.clientY,
+			elementId: el?.id || null,
+			groupId: el?.groupId || null,
+		});
 	};
 
 	const closeMenus = () => {
@@ -1509,8 +1514,28 @@ export default function Studio() {
 						<div style={{ display: "grid", gap: 6 }}>
 							<button style={panelButtonStyle(false)} onClick={() => { duplicateSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Duplicate</button>
 							<button style={panelButtonStyle(false)} onClick={() => { removeSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Delete</button>
-							<button style={panelButtonStyle(false)} onClick={() => { groupSelection(); setContextMenu(null); }} disabled={selectedIds.length < 2}>Group</button>
-							<button style={panelButtonStyle(false)} onClick={() => { ungroupSelection(); setContextMenu(null); }} disabled={!selectedElements.some((el) => el.groupId)}>Ungroup</button>
+							<button
+								style={panelButtonStyle(false)}
+								onClick={() => {
+									if (contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) {
+										setSelectedIds((prev) => [...new Set([...prev, contextMenu.elementId])]);
+									}
+									setTimeout(() => groupSelection(), 0);
+									setContextMenu(null);
+								}}
+								disabled={((contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) ? (selectedIds.length + 1) : selectedIds.length) < 2}
+							>Group</button>
+							<button
+								style={panelButtonStyle(false)}
+								onClick={() => {
+									if (contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) {
+										setSelectedIds((prev) => [...new Set([...prev, contextMenu.elementId])]);
+									}
+									setTimeout(() => ungroupSelection(), 0);
+									setContextMenu(null);
+								}}
+								disabled={!selectedElements.some((el) => el.groupId) && !contextMenu?.groupId}
+							>Ungroup</button>
 							<button style={panelButtonStyle(false)} onClick={() => { setInspectorOpen(true); setContextMenu(null); }} disabled={!selectedIds.length}>Open Inspector</button>
 						</div>
 					</div>
