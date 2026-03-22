@@ -814,6 +814,26 @@ export default function Studio() {
 		updateElements(ids, { groupId: null, groupName: null });
 	};
 
+	const groupSpecificIds = (ids) => {
+		const clean = [...new Set((ids || []).filter(Boolean))];
+		if (clean.length < 2) return;
+		const groupId = uid();
+		snapshot();
+		updateElements(clean, (el) => ({ groupId, groupName: el.groupName || `Group ${groupId.slice(-4)}` }));
+		setSelectedIds(clean);
+	};
+
+	const ungroupSpecificIds = (ids) => {
+		const clean = [...new Set((ids || []).filter(Boolean))];
+		if (!clean.length) return;
+		snapshot();
+		const groupIds = [...new Set((currentDoc?.elements || []).filter((el) => clean.includes(el.id)).map((el) => el.groupId).filter(Boolean))];
+		if (!groupIds.length) return;
+		const allIds = (currentDoc?.elements || []).filter((el) => groupIds.includes(el.groupId)).map((el) => el.id);
+		updateElements(allIds, { groupId: null, groupName: null });
+		setSelectedIds(allIds);
+	};
+
 	const addGuide = (orientation, position) => {
 		if (!currentDoc) return;
 		snapshot();
@@ -953,7 +973,8 @@ export default function Studio() {
 			selectElement(el, true);
 			return;
 		}
-		if (!selectedIds.includes(el.id) || selectedIds.length !== (el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1)) {
+		const groupSize = el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1;
+		if (!selectedIds.includes(el.id) || selectedIds.length !== groupSize) {
 			selectElement(el, false);
 		}
 		const activeIds = el.groupId
@@ -964,13 +985,18 @@ export default function Studio() {
 			return item && !item.locked;
 		});
 		if (!ids.length) return;
-		const pointer = getCanvasPoint(e.clientX, e.clientY);
+		const point = getCanvasPoint(e.clientX, e.clientY);
 		const origins = Object.fromEntries(ids.map((id) => {
 			const item = currentDoc.elements.find((x) => x.id === id);
 			return [id, { x: Number(item?.x || 0), y: Number(item?.y || 0) }];
 		}));
+		const anchorOrigin = origins[el.id] || { x: Number(el.x || 0), y: Number(el.y || 0) };
+		const grabOffset = {
+			x: point.x - anchorOrigin.x,
+			y: point.y - anchorOrigin.y,
+		};
 		snapshot();
-		setDragState({ ids, pointer, origins });
+		setDragState({ ids, origins, anchorId: el.id, grabOffset });
 	};
 
 	const startResize = (e, handle = "se") => {
@@ -1022,8 +1048,10 @@ export default function Studio() {
 				setPan({ x: panState.panX + (e.clientX - panState.startX), y: panState.panY + (e.clientY - panState.startY) });
 			}
 			if (dragState && currentDoc) {
-				const dx = (e.clientX - dragState.pointer.x) / zoom;
-				const dy = (e.clientY - dragState.pointer.y) / zoom;
+				const point = getCanvasPoint(e.clientX, e.clientY);
+				const anchorOrigin = dragState.origins?.[dragState.anchorId] || { x: 0, y: 0 };
+				const dx = point.x - Number(dragState.grabOffset?.x || 0) - Number(anchorOrigin.x || 0);
+				const dy = point.y - Number(dragState.grabOffset?.y || 0) - Number(anchorOrigin.y || 0);
 				updateElements(dragState.ids, (el) => {
 					const base = dragState.origins[el.id] || { x: 0, y: 0 };
 					return {
@@ -1151,11 +1179,15 @@ export default function Studio() {
 		if (el) {
 			selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey);
 		}
+		const targetIds = el
+			? (el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
+			: [];
 		setContextMenu({
 			x: e.clientX,
 			y: e.clientY,
 			elementId: el?.id || null,
 			groupId: el?.groupId || null,
+			targetIds,
 		});
 	};
 
@@ -1497,21 +1529,21 @@ export default function Studio() {
 							<button
 								style={panelButtonStyle(false)}
 								onClick={() => {
-									if (contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) {
-										setSelectedIds((prev) => [...new Set([...prev, contextMenu.elementId])]);
-									}
-									setTimeout(() => groupSelection(), 0);
+									const ids = contextMenu?.targetIds?.length
+										? [...new Set([...(selectedIds || []), ...(contextMenu.targetIds || [])])]
+										: selectedIds;
+									groupSpecificIds(ids);
 									setContextMenu(null);
 								}}
-								disabled={((contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) ? (selectedIds.length + 1) : selectedIds.length) < 2}
+								disabled={((contextMenu?.targetIds?.length ? [...new Set([...(selectedIds || []), ...(contextMenu.targetIds || [])])] : selectedIds).length) < 2}
 							>Group</button>
 							<button
 								style={panelButtonStyle(false)}
 								onClick={() => {
-									if (contextMenu?.elementId && !selectedIds.includes(contextMenu.elementId)) {
-										setSelectedIds((prev) => [...new Set([...prev, contextMenu.elementId])]);
-									}
-									setTimeout(() => ungroupSelection(), 0);
+									const ids = contextMenu?.targetIds?.length
+										? [...new Set([...(selectedIds || []), ...(contextMenu.targetIds || [])])]
+										: selectedIds;
+									ungroupSpecificIds(ids);
 									setContextMenu(null);
 								}}
 								disabled={!selectedElements.some((el) => el.groupId) && !contextMenu?.groupId}
