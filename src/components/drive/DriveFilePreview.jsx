@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/\"/g, "&quot;");
 }
 
 function applyInlineMarkdown(text) {
@@ -141,61 +141,65 @@ function pickToken() {
   }
 }
 
-function useAuthenticatedObjectUrl(file) {
-  const [objectUrl, setObjectUrl] = useState("");
-  const [error, setError] = useState("");
-  const sourceUrl = file?.previewUrl || file?.url || "";
-  const needsBlobFetch = !!file && !file?.textContent && !file?.dataUrl && !!sourceUrl && (
-    String(file?.mime || "").startsWith("image/") ||
-    String(file?.mime || "").startsWith("audio/") ||
-    String(file?.mime || "").startsWith("video/") ||
-    file?.mime === "application/pdf"
-  );
+function useProtectedPreviewSrc(file) {
+  const [state, setState] = useState({ src: "", error: "", loading: false });
+
+  const effectiveUrl = useMemo(() => file?.previewObjectUrl || file?.dataUrl || "", [file?.previewObjectUrl, file?.dataUrl]);
+  const remoteUrl = useMemo(() => file?.previewUrl || file?.url || "", [file?.previewUrl, file?.url]);
+  const mime = String(file?.mime || "");
+  const needsBlobFetch = !!file && !effectiveUrl && !!remoteUrl && (mime === "application/pdf" || mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/"));
 
   useEffect(() => {
-    let revoked = "";
+    if (!file) {
+      setState({ src: "", error: "", loading: false });
+      return;
+    }
+    if (effectiveUrl) {
+      setState({ src: effectiveUrl, error: "", loading: false });
+      return;
+    }
+    if (!needsBlobFetch) {
+      setState({ src: remoteUrl || "", error: "", loading: false });
+      return;
+    }
+
     let cancelled = false;
-    setObjectUrl("");
-    setError("");
-    if (!needsBlobFetch) return undefined;
+    let objectUrl = "";
+    setState({ src: "", error: "", loading: true });
 
+    const headers = new Headers();
     const token = pickToken();
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    if (token) headers.set("Authorization", `Bearer ${token}`);
 
-    (async () => {
-      try {
-        const res = await fetch(sourceUrl, { credentials: "include", headers });
+    fetch(remoteUrl, { credentials: "include", headers })
+      .then(async (res) => {
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           throw new Error(text || `Preview request failed (${res.status})`);
         }
         const blob = await res.blob();
-        if (cancelled) return;
-        revoked = URL.createObjectURL(blob);
-        setObjectUrl(revoked);
-      } catch (err) {
-        if (!cancelled) setError(String(err?.message || err || "Failed to load preview"));
-      }
-    })();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setState({ src: objectUrl, error: "", loading: false });
+      })
+      .catch((err) => {
+        if (!cancelled) setState({ src: "", error: String(err?.message || err || "Preview failed"), loading: false });
+      });
 
     return () => {
       cancelled = true;
-      if (revoked) URL.revokeObjectURL(revoked);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file?.id, file?.updatedAt, sourceUrl, needsBlobFetch]);
+  }, [file, effectiveUrl, remoteUrl, needsBlobFetch]);
 
-  return { objectUrl, error };
+  return state;
 }
 
 export default function DriveFilePreview({ file }) {
+  const { src, error, loading } = useProtectedPreviewSrc(file);
   if (!file) return null;
-  const directSrc = file?.dataUrl || "";
-  const { objectUrl, error } = useAuthenticatedObjectUrl(file);
-  const src = directSrc || objectUrl || file?.previewUrl || file?.url || "";
 
-  if (error) {
-    return <div className="card" style={{ padding: 16, color: "#ffb4b4", whiteSpace: "pre-wrap" }}>{error}</div>;
-  }
+  if (loading) return <div className="card" style={{ padding: 16 }}>Loading preview…</div>;
+  if (error) return <div className="card" style={{ padding: 16, color: "#ff9a9a", whiteSpace: "pre-wrap" }}>{error}</div>;
 
   if (String(file.mime || "").startsWith("image/") && src) {
     return <div style={{ display: "flex", justifyContent: "center" }}><img src={src} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;

@@ -178,6 +178,7 @@ export default function Drive() {
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+  const objectUrlRegistry = useRef(new Set());
 
   useEffect(() => {
     try {
@@ -265,12 +266,17 @@ export default function Drive() {
   }, [orgId]);
 
   useEffect(() => {
-    const input = folderInputRef.current;
-    if (!input) return;
-    try {
-      input.setAttribute("webkitdirectory", "");
-      input.setAttribute("directory", "");
-    } catch {}
+    const folderInput = folderInputRef.current;
+    if (folderInput) {
+      folderInput.setAttribute("webkitdirectory", "true");
+      folderInput.setAttribute("directory", "true");
+    }
+    return () => {
+      objectUrlRegistry.current.forEach((url) => {
+        try { URL.revokeObjectURL(url); } catch {}
+      });
+      objectUrlRegistry.current.clear();
+    };
   }, []);
 
   useEffect(() => {
@@ -590,32 +596,37 @@ export default function Drive() {
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
-    let res = null;
-    try {
-      res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        headers: {
-          "x-drive-name": record.name || rawFile.name || "file",
-          "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
-          ...(parentId ? { "x-drive-parent-id": String(parentId) } : {}),
-          ...(relativePath ? { "x-drive-relative-path": String(relativePath) } : {}),
-        },
-        body: rawFile,
-      });
-    } catch {
-      const form = new FormData();
-      form.append("file", rawFile, rawFile.name || record.name || "file");
-      form.append("name", record.name || rawFile.name || "file");
-      form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-      if (parentId) form.append("parentId", String(parentId));
-      if (relativePath) form.append("relativePath", String(relativePath));
-      res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        body: form,
-      });
+    const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
+    const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
+    if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
+
+    const form = new FormData();
+    form.append("file", rawFile, rawFile.name || record.name || "file");
+    form.append("name", record.name || rawFile.name || "file");
+    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+    if (parentId) form.append("parentId", String(parentId));
+    if (relativePath) form.append("relativePath", String(relativePath));
+
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: form,
+    });
+
+    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+    if (!createdFile?.id) {
+      if (localPreviewUrl) {
+        try { URL.revokeObjectURL(localPreviewUrl); } catch {}
+        objectUrlRegistry.current.delete(localPreviewUrl);
+      }
+      await loadDrive({ preserveSelection: true });
+      return null;
     }
-    if (!res?.file) return null;
-    const nextFile = withFileUrls(orgId, { ...record, ...res.file });
+
+    const nextFile = withFileUrls(orgId, {
+      ...record,
+      ...createdFile,
+      previewObjectUrl: localPreviewUrl || undefined,
+    });
     setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
     return nextFile;
   }
@@ -796,7 +807,7 @@ export default function Drive() {
   return (
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
       <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFiles} />
-      <input ref={folderInputRef} type="file" multiple webkitdirectory="true" directory="true" style={{ display: "none" }} onChange={onUploadFolder} />
+      <input ref={folderInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFolder} />
 
       <div style={{ display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)`, height: "100%" }}>
         <div style={{ borderRight: "1px solid #1b1b1b", overflow: "hidden" }}>
@@ -814,8 +825,19 @@ export default function Drive() {
             onSelectFile={openFile}
             onNewNote={createNote}
             onNewFolder={createFolder}
-            onUploadFile={() => fileInputRef.current?.click()}
-            onUploadFolder={() => folderInputRef.current?.click()}
+            onUploadFile={() => {
+              if (fileInputRef.current) fileInputRef.current.value = "";
+              fileInputRef.current?.click();
+            }}
+            onUploadFolder={() => {
+              const input = folderInputRef.current;
+              if (input) {
+                input.value = "";
+                input.setAttribute("webkitdirectory", "true");
+                input.setAttribute("directory", "true");
+              }
+              input?.click();
+            }}
             onRenameFolder={renameFolder}
             onDeleteFolder={deleteFolder}
             onRenameNote={renameNote}
