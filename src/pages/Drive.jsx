@@ -53,6 +53,11 @@ function isEditableTextFile(file) {
   const ext = getFileExtension(file?.name);
   return String(file?.mime || "").startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext);
 }
+const INLINE_VIDEO_FALLBACK_MAX_BYTES = 8 * 1024 * 1024;
+
+function isVideoFile(file) {
+  return String(file?.mime || file?.type || "").toLowerCase().startsWith("video/");
+}
 function canPreviewFileInApp(file) {
   const mime = String(file?.mime || "");
   if (mime.startsWith("image/")) return true;
@@ -182,7 +187,7 @@ export default function Drive() {
   const loadRequestSeq = useRef(0);
   const mutationSeq = useRef(0);
   const filesRef = useRef([]);
-  const pendingFileSyncRef = useRef(new Map());
+  const pendingUploadedFilesRef = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -200,7 +205,6 @@ export default function Drive() {
       localStorage.setItem(uiStorageKey, JSON.stringify({ sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed }));
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
-
 
   useEffect(() => {
     filesRef.current = files;
@@ -240,26 +244,22 @@ export default function Drive() {
       }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const existingFiles = filesRef.current || [];
+      const existingFiles = filesRef.current;
       const serverFiles = Array.isArray(data?.files) ? data.files : [];
-      const seenFileIds = new Set();
+      const serverIds = new Set(serverFiles.map((file) => String(file?.id || "")).filter(Boolean));
       const nextFiles = serverFiles.map((file) => {
         const hydrated = withFileUrls(orgId, file);
-        seenFileIds.add(hydrated.id);
-        pendingFileSyncRef.current.delete(hydrated.id);
         const existing = existingFiles.find((entry) => entry.id === hydrated.id);
+        if (serverIds.has(hydrated.id)) pendingUploadedFilesRef.current.delete(hydrated.id);
         return existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated;
       });
-      const now = Date.now();
-      for (const existing of existingFiles) {
-        if (!existing?.id || seenFileIds.has(existing.id)) continue;
-        const pendingSince = pendingFileSyncRef.current.get(existing.id);
-        if (!pendingSince) continue;
-        if (now - pendingSince > 60000) {
-          pendingFileSyncRef.current.delete(existing.id);
+      for (const [pendingId, pendingFile] of pendingUploadedFilesRef.current.entries()) {
+        if (!serverIds.has(pendingId)) {
+          const existing = existingFiles.find((entry) => entry.id === pendingId);
+          nextFiles.unshift(existing || pendingFile);
           continue;
         }
-        nextFiles.push(existing);
+        pendingUploadedFilesRef.current.delete(pendingId);
       }
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
@@ -531,7 +531,6 @@ export default function Drive() {
   }
   async function deleteFile(id) {
     mutationSeq.current += 1;
-    pendingFileSyncRef.current.delete(id);
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, { method: "DELETE" });
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedId === id && selectedKind === "file") {
@@ -673,17 +672,45 @@ export default function Drive() {
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const form = new FormData();
-    form.append("file", rawFile, rawFile.name || record.name || "file");
-    form.append("name", record.name || rawFile.name || "file");
-    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-    if (parentId) form.append("parentId", String(parentId));
-    if (relativePath) form.append("relativePath", String(relativePath));
-
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-      method: "POST",
-      body: form,
-    });
+    let res = null;
+    try {
+      if (isVideoFile(record) && Number(rawFile?.size || 0) <= INLINE_VIDEO_FALLBACK_MAX_BYTES) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(reader.error || new Error("VIDEO_READ_FAILED"));
+          reader.readAsDataURL(rawFile);
+        });
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: record.name || rawFile.name || "file",
+            mime: record.mime || rawFile.type || "application/octet-stream",
+            parentId,
+            size: Number(rawFile?.size || record.size || 0),
+            dataUrl,
+            textContent: "",
+          }),
+        });
+      } else {
+        const form = new FormData();
+        form.append("file", rawFile, rawFile.name || record.name || "file");
+        form.append("name", record.name || rawFile.name || "file");
+        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+        if (parentId) form.append("parentId", String(parentId));
+        if (relativePath) form.append("relativePath", String(relativePath));
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          body: form,
+        });
+      }
+    } catch (error) {
+      if (localPreviewUrl) {
+        try { URL.revokeObjectURL(localPreviewUrl); } catch {}
+        objectUrlRegistry.current.delete(localPreviewUrl);
+      }
+      throw error;
+    }
 
     const createdFile = res?.file || (res?.id ? { id: res.id } : null);
     if (!createdFile?.id) {
@@ -700,7 +727,7 @@ export default function Drive() {
       ...createdFile,
       previewObjectUrl: localPreviewUrl || undefined,
     });
-    pendingFileSyncRef.current.set(nextFile.id, Date.now());
+    if (isVideoFile(nextFile)) pendingUploadedFilesRef.current.set(nextFile.id, nextFile);
     setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
     return nextFile;
   }
