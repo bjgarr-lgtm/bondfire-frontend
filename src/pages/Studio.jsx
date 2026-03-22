@@ -961,163 +961,171 @@ export default function Studio() {
 	const multiSelection = selectedIds.length > 1;
 	const currentGuides = currentDoc?.guides || [];
 
+
 	return (
-		<div style={{ height: "calc(100vh - 92px)", display: "grid", gridTemplateRows: "auto 1fr", gap: 12, padding: 12 }}>
+		<div style={{ padding: 12, display: "grid", gap: 12 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 
-			<div style={{ display: "flex", alignItems: "center", gap: 10, padding: 10, borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", background: "#111827" }}>
-				<button onClick={() => setLeftPanel((v) => v ? null : "create")}>☰</button>
-				<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ flex: 1, minWidth: 180, padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "white" }} />
-				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-					<button onClick={undo} disabled={!history.length}>Undo</button>
-					<button onClick={redo} disabled={!future.length}>Redo</button>
-					<button onClick={() => setTool("select")} style={{ borderColor: tool === "select" ? "#ef4444" : undefined }}>Select</button>
-					<button onClick={() => setTool("hand")} style={{ borderColor: tool === "hand" ? "#ef4444" : undefined }}>Hand</button>
-					<button onClick={() => setZoom((z) => clamp(z * 0.9, 0.1, 3))}>-</button>
-					<button onClick={() => fitCanvas(currentDoc)} disabled={!currentDoc}>Fit</button>
-					<button onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100%</button>
-					<button onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))}>+</button>
-					<div style={{ minWidth: 70, textAlign: "center", opacity: 0.75 }}>{Math.round(zoom * 100)}%</div>
-					<button onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Hide Rulers" : "Show Rulers"}</button>
-					<button onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide Inspector" : "Inspector"}</button>
-					<button onClick={exportPng} disabled={!currentDoc}>PNG</button>
-					<button onClick={exportPdf} disabled={!currentDoc}>PDF</button>
+			<div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 420px" }}>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel((v) => v ? null : "create")}>{leftPanel ? "☰ Hide" : "☰ Tools"}</button>
+					<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ minWidth: 0, flex: 1, padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "#111827", color: "white" }} />
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>Undo</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={redo} disabled={!future.length}>Redo</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 0.9, 0.1, 3))} disabled={!currentDoc}>−</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => fitCanvas(currentDoc)} disabled={!currentDoc}>Fit</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100%</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))} disabled={!currentDoc}>+</button>
+					<div style={{ minWidth: 68, textAlign: "center", opacity: 0.8 }}>{Math.round(zoom * 100)}%</div>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: tool === "hand" ? "1px solid rgba(239,68,68,0.5)" : "1px solid rgba(255,255,255,0.12)", background: tool === "hand" ? "rgba(239,68,68,0.18)" : "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setTool((t) => t === "hand" ? "select" : "hand")}>{tool === "hand" ? "Hand On" : "Hand"}</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Rulers" : "No Rulers"}</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "⋯ Hide" : "⋯ Inspector"}</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={exportPng} disabled={!currentDoc}>PNG</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={exportPdf} disabled={!currentDoc}>PDF</button>
 				</div>
 			</div>
 
-			<div style={{ minHeight: 0, display: "grid", gridTemplateColumns: `${leftPanel ? "340px " : "64px "} minmax(0,1fr) ${inspectorOpen ? "360px" : "0px"}`, gap: 12, transition: "grid-template-columns 160ms ease" }}>
-				<div style={{ minWidth: 0, background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden", display: "grid", gridTemplateColumns: "64px minmax(0,1fr)" }}>
-					<div style={{ borderRight: leftPanel ? "1px solid rgba(255,255,255,0.08)" : "none", padding: 10, display: "grid", alignContent: "start", gap: 8 }}>
-						<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
-						<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>Tpl</button>
-						<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>Txt</button>
-						<button style={iconButtonStyle(leftPanel === "assets")} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>Img</button>
-						<button style={iconButtonStyle(leftPanel === "data")} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>Data</button>
-						<button style={iconButtonStyle(leftPanel === "docs")} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>Docs</button>
-					</div>
-					{leftPanel ? (
-						<div style={{ minWidth: 0, padding: 12, overflow: "auto" }}>
-							{leftPanel === "create" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ fontWeight: 800, marginBottom: 4 }}>Create</div>
-									<button style={panelButtonStyle(false)} onClick={() => createDoc("flyer")}>New Flyer</button>
-									<button style={panelButtonStyle(false)} onClick={() => createDoc("square")}>New Square Post</button>
-									<button style={panelButtonStyle(false)} onClick={() => createDoc("story")}>New Story</button>
-									<button style={panelButtonStyle(false)} onClick={() => createDoc("banner")}>New Banner</button>
-									<hr style={{ opacity: 0.15, margin: "8px 0" }} />
-									<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
-									<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
-									<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
-									<hr style={{ opacity: 0.15, margin: "8px 0" }} />
-									<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
-									<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
-								</div>
-							) : null}
-
-							{leftPanel === "templates" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ fontWeight: 800, marginBottom: 4 }}>Templates</div>
-									{Object.entries(TEMPLATE_LIBRARY).map(([key, item]) => (
-										<button key={key} style={panelButtonStyle(false)} onClick={() => createTemplateDoc(key)}>
-											<div style={{ fontWeight: 700 }}>{item.label}</div>
-											<div style={{ opacity: 0.7, fontSize: 12 }}>{PRESETS[item.preset]?.label || item.preset}</div>
-										</button>
-									))}
-								</div>
-							) : null}
-
-							{leftPanel === "content" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ fontWeight: 800, marginBottom: 4 }}>Content</div>
-									<div style={{ fontSize: 12, opacity: 0.75 }}>Saved blocks and brand swatches live here, because apparently rebuilding the same badge twelve times is a hobby now.</div>
-									<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-										{[brandKit.primary, brandKit.secondary, brandKit.accent, brandKit.text].map((color) => (
-											<button key={color} onClick={() => selected?.type === "text" ? updateElement(selected.id, { color }) : selected?.type === "shape" ? updateElement(selected.id, { fill: color }) : null} style={{ height: 40, background: color, borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)" }} />
-										))}
-									</div>
-									<button style={panelButtonStyle(false)} onClick={saveSelectionAsBlock} disabled={!selected}>Save Selected as Block</button>
-									<div style={{ display: "grid", gap: 8 }}>
-										{savedBlocks.length ? savedBlocks.map((block) => (
-											<div key={block.id} style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-												<div style={{ fontWeight: 700, marginBottom: 6 }}>{block.name}</div>
-												<div style={{ display: "flex", gap: 8 }}>
-													<button onClick={() => addSavedBlock(block)}>Add</button>
-													<button onClick={() => removeSavedBlock(block.id)}>Delete</button>
-												</div>
-											</div>
-										)) : <div style={{ opacity: 0.7 }}>No saved blocks yet.</div>}
-									</div>
-								</div>
-							) : null}
-
-							{leftPanel === "assets" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-										<div style={{ fontWeight: 800 }}>Drive Assets</div>
-										<button onClick={loadDriveAssets}>Refresh</button>
-									</div>
-									<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Search Drive images" style={{ width: "100%" }} />
-									<button style={panelButtonStyle(false)} onClick={addImage}>Upload from device</button>
-									{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
-									{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
-									<div style={{ display: "grid", gap: 8 }}>
-										{filteredAssets.map((file) => (
-											<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-												<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-													<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-												</div>
-												<div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
-												<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
-											</div>
-										))}
-										{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
-									</div>
-								</div>
-							) : null}
-
-							{leftPanel === "data" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ fontWeight: 800 }}>Bondfire Data</div>
-									<div style={{ fontSize: 12, opacity: 0.8 }}>These tokens are live placeholders. Example: {"{{meeting.title}}"} resolves to current Bondfire data when preview is on.</div>
-									<button onClick={() => setShowBoundPreview((v) => !v)}>{showBoundPreview ? "Show Raw Tokens" : "Show Live Preview"}</button>
-									{Object.entries(bindings).map(([key, value]) => (
-										<div key={key} style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-											<div style={{ fontSize: 12, color: "#fca5a5" }}>{`{{${key}}}`}</div>
-											<div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>{String(value || "—")}</div>
-											<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
-												<button onClick={() => addBoundText(key, key)}>Add</button>
-												<button onClick={() => insertBindingToken(key)} disabled={!selected || selected.type !== "text"}>Insert</button>
-											</div>
-										</div>
-									))}
-								</div>
-							) : null}
-
-							{leftPanel === "docs" ? (
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-										<div style={{ fontWeight: 800 }}>Documents</div>
-										<button onClick={saveCurrentDoc} disabled={!currentDoc}>Save</button>
-									</div>
-									{docs.length ? docs.map((doc) => (
-										<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
-											<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
-												<div style={{ fontWeight: 700 }}>{doc.name}</div>
-												<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
-											</button>
-											<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-												<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
-												<button onClick={() => deleteDoc(doc.id)}>Delete</button>
-											</div>
-										</div>
-									)) : <div style={{ opacity: 0.7 }}>No Studio docs yet for this org.</div>}
-								</div>
-							) : null}
-						</div>
-					) : null}
+			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
+				<div style={{ position: "absolute", top: 12, left: 12, zIndex: 25, display: "grid", gap: 8 }}>
+					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
+					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>T</button>
+					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>□</button>
+					<button style={iconButtonStyle(leftPanel === "assets")} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>Img</button>
+					<button style={iconButtonStyle(leftPanel === "data")} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>{"{}"}</button>
+					<button style={iconButtonStyle(leftPanel === "docs")} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☷</button>
 				</div>
 
-				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} style={{ position: "relative", minWidth: 0, minHeight: 0, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+				{leftPanel ? (
+					<div style={{ position: "absolute", top: 12, left: 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
+							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Create" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
+							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
+						</div>
+
+						{leftPanel === "create" ? (
+							<div style={{ display: "grid", gap: 8 }}>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("flyer")}>New Flyer</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("square")}>New Square Post</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("story")}>New Story</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("banner")}>New Banner</button>
+								<button style={panelButtonStyle(false)} onClick={duplicateDoc} disabled={!currentDoc}>Duplicate Document</button>
+								<button style={panelButtonStyle(false)} onClick={saveCurrentDoc} disabled={!currentDoc}>Save Now</button>
+								<button style={panelButtonStyle(false)} onClick={() => currentDoc && deleteDoc(currentDoc.id)} disabled={!currentDoc}>Delete Current Doc</button>
+								<hr style={{ opacity: 0.15, margin: "8px 0" }} />
+								<div style={{ display: "flex", gap: 8 }}>
+									<button style={{ ...panelButtonStyle(false), textAlign: "center" }} onClick={() => setTool("select")}>Select</button>
+									<button style={{ ...panelButtonStyle(tool === "hand"), textAlign: "center" }} onClick={() => setTool("hand")}>Hand</button>
+								</div>
+								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
+								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
+								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
+								<div style={{ fontSize: 12, opacity: 0.65 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
+							</div>
+						) : null}
+
+						{leftPanel === "content" ? (
+							<div style={{ display: "grid", gap: 8 }}>
+								<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+									{[brandKit.primary, brandKit.secondary, brandKit.accent, brandKit.text].map((color) => (
+										<button key={color} onClick={() => selected?.type === "text" ? updateElement(selected.id, { color }) : selected?.type === "shape" ? updateElement(selected.id, { fill: color }) : null} style={{ height: 40, background: color, borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)" }} />
+									))}
+								</div>
+								<button style={panelButtonStyle(false)} onClick={saveSelectionAsBlock} disabled={!selected}>Save Selected as Block</button>
+								<div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
+									{savedBlocks.length ? savedBlocks.map((block) => (
+										<div key={block.id} style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+											<div style={{ fontWeight: 700, marginBottom: 6 }}>{block.name}</div>
+											<div style={{ display: "flex", gap: 8 }}>
+												<button onClick={() => addSavedBlock(block)}>Add</button>
+												<button onClick={() => removeSavedBlock(block.id)}>Delete</button>
+											</div>
+										</div>
+									)) : <div style={{ opacity: 0.7 }}>No saved blocks yet.</div>}
+								</div>
+							</div>
+						) : null}
+
+						{leftPanel === "templates" ? (
+							<div style={{ display: "grid", gap: 8 }}>
+								{Object.entries(TEMPLATE_LIBRARY).map(([key, item]) => (
+									<button key={key} style={panelButtonStyle(false)} onClick={() => createTemplateDoc(key)}>
+										<div style={{ fontWeight: 700 }}>{item.label}</div>
+										<div style={{ opacity: 0.7, fontSize: 12 }}>{PRESETS[item.preset]?.label || item.preset}</div>
+									</button>
+								))}
+							</div>
+						) : null}
+
+						{leftPanel === "assets" ? (
+							<div style={{ display: "grid", gap: 8 }}>
+								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+									<div style={{ fontWeight: 800 }}>Drive Assets</div>
+									<button onClick={loadDriveAssets}>Refresh</button>
+								</div>
+								<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Search Drive images" style={{ width: "100%" }} />
+								<button style={panelButtonStyle(false)} onClick={addImage}>Upload from device</button>
+								{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
+								{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
+								<div style={{ display: "grid", gap: 8 }}>
+									{filteredAssets.map((file) => (
+										<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+											<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+												<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+											</div>
+											<div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+											<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
+										</div>
+									))}
+									{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
+								</div>
+							</div>
+						) : null}
+
+						{leftPanel === "data" ? (
+							<div style={{ display: "grid", gap: 8 }}>
+								<div style={{ fontSize: 12, opacity: 0.8, marginBottom: 2 }}>These tokens are live placeholders. Example: {"{{meeting.title}}"} resolves to your current Bondfire meeting title when preview is on.</div>
+								<div style={{ display: "flex", gap: 8, marginBottom: 6 }}><button onClick={() => setShowBoundPreview((v) => !v)}>{showBoundPreview ? "Show Raw Tokens" : "Show Live Preview"}</button></div>
+								{Object.entries(bindings).map(([key, value]) => (
+									<div key={key} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
+										<div style={{ fontSize: 12, color: "#fca5a5" }}>{`{{${key}}}`}</div>
+										<div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>{String(value || "—")}</div>
+										<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+											<button onClick={() => addBoundText(key, key)}>Add</button>
+											<button onClick={() => insertBindingToken(key)} disabled={!selected || selected.type !== "text"}>Insert</button>
+										</div>
+									</div>
+								))}
+							</div>
+						) : null}
+
+						{leftPanel === "docs" ? (
+							<div style={{ display: "grid", gap: 8, maxHeight: "100%", overflow: "auto" }}>
+								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+									<div style={{ fontWeight: 800 }}>Documents</div>
+									<button onClick={saveCurrentDoc} disabled={!currentDoc}>Save</button>
+								</div>
+								{docs.length ? docs.map((doc) => (
+									<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
+										<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
+											<div style={{ fontWeight: 700 }}>{doc.name}</div>
+											<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
+										</button>
+										<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+											<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
+											<button onClick={() => deleteDoc(doc.id)}>Delete</button>
+										</div>
+									</div>
+								)) : <div style={{ opacity: 0.7 }}>No Studio docs yet for this org.</div>}
+							</div>
+						) : null}
+					</div>
+				) : null}
+
+				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
 						<>
 							{showRulers ? (
@@ -1145,54 +1153,34 @@ export default function Studio() {
 									) : (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", top: guide.position, left: 0, right: 0, height: 1, background: GUIDE_COLORS.horizontal, boxShadow: "0 0 0 1px rgba(96,165,250,0.3)", cursor: "ns-resize", zIndex: 5 }} />
 									))}
-
 									{(currentDoc.elements || []).map((el) => {
 										if (el.hidden) return null;
 										const isSelected = selectedIds.includes(el.id);
-										const common = {
-											position: "absolute",
-											left: el.x,
-											top: el.y,
-											width: el.width,
-											height: el.height,
-											opacity: el.opacity ?? 1,
-											transform: `rotate(${el.rotation || 0}deg)`,
-											boxSizing: "border-box",
-											outline: isSelected ? "2px solid #ef4444" : "none",
-											outlineOffset: 2,
-											userSelect: "none",
-											cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"),
-										};
+										const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move") };
 										if (el.type === "text") {
-											return (
-												<div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>
-													{showBoundPreview ? applyBindings(el.text, bindings) : el.text}
-												</div>
-											);
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 										}
 										if (el.type === "shape") {
 											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 										}
 										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
-
 									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 									{selected && !selected.locked ? <div onMouseDown={startResize} style={{ position: "absolute", left: Number(selected.x || 0) + Number(selected.width || 0) - 7, top: Number(selected.y || 0) + Number(selected.height || 0) - 7, width: 14, height: 14, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize", zIndex: 10 }} /> : null}
 									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 								</div>
 							</div>
 						</>
-					) : <div style={{ minHeight: 400, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
+					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
 
 				{inspectorOpen ? (
-					<div style={{ minWidth: 0, background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, padding: 14, overflow: "auto" }}>
+					<div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 340, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
 							<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
 						</div>
 						<div style={{ fontSize: 12, opacity: 0.72, marginBottom: 12 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
-
 						<div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
 							<button onClick={duplicateSelected} disabled={!selectedIds.length}>Duplicate</button>
 							<button onClick={removeSelected} disabled={!selectedIds.length}>Delete</button>
@@ -1203,11 +1191,10 @@ export default function Studio() {
 							<button onClick={() => toggleSelectedFlag("locked")} disabled={!selectedIds.length}>{selectedElements.every((el) => el.locked) ? "Unlock" : "Lock"}</button>
 							<button onClick={() => toggleSelectedFlag("hidden")} disabled={!selectedIds.length}>{selectedElements.every((el) => el.hidden) ? "Show" : "Hide"}</button>
 						</div>
-
 						{multiSelection ? (
 							<div style={{ display: "grid", gap: 10 }}>
 								<div style={{ fontWeight: 700 }}>{selectedIds.length} layers selected</div>
-								<div style={{ fontSize: 12, opacity: 0.75 }}>Shift click to add or remove layers. Grouping lets them move together, because life is too short to drag five things separately.</div>
+								<div style={{ fontSize: 12, opacity: 0.75 }}>Shift click to add or remove layers. Grouping lets them move together.</div>
 							</div>
 						) : selected ? (
 							<div style={{ display: "grid", gap: 10 }}>
@@ -1220,46 +1207,35 @@ export default function Studio() {
 									<label>Rotation<input type="number" value={selected.rotation || 0} onChange={(e) => updateElement(selected.id, { rotation: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
 									<label>Opacity<input type="number" min="0" max="1" step="0.05" value={selected.opacity ?? 1} onChange={(e) => updateElement(selected.id, { opacity: Number(e.target.value || 1) })} style={{ width: "100%" }} /></label>
 								</div>
-
-								{selected.type === "text" ? (
-									<>
-										<label>Text<textarea value={selected.text} onChange={(e) => updateElement(selected.id, { text: e.target.value })} rows={5} style={{ width: "100%" }} /></label>
-										<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-											<label>Font size<input type="number" value={selected.fontSize} onChange={(e) => updateElement(selected.id, { fontSize: Number(e.target.value || 12) })} style={{ width: "100%" }} /></label>
-											<label>Weight<input type="number" value={selected.fontWeight || 700} onChange={(e) => updateElement(selected.id, { fontWeight: Number(e.target.value || 400) })} style={{ width: "100%" }} /></label>
-											<label>Line height<input type="number" step="0.05" value={selected.lineHeight || 1.1} onChange={(e) => updateElement(selected.id, { lineHeight: Number(e.target.value || 1.1) })} style={{ width: "100%" }} /></label>
-											<label>Letter spacing<input type="number" value={selected.letterSpacing || 0} onChange={(e) => updateElement(selected.id, { letterSpacing: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
-										</div>
-										<label>Font family<select value={selected.fontFamily || FONT_OPTIONS[0]} onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })} style={{ width: "100%" }}>{FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
-										<label>Alignment<select value={selected.align || "left"} onChange={(e) => updateElement(selected.id, { align: e.target.value })} style={{ width: "100%" }}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
-										<label>Text color<input type="color" value={selected.color || "#ffffff"} onChange={(e) => updateElement(selected.id, { color: e.target.value })} style={{ width: "100%" }} /></label>
-									</>
-								) : null}
-
-								{selected.type === "shape" ? (
-									<>
-										<label>Fill<input type="color" value={selected.fill || "#ef4444"} onChange={(e) => updateElement(selected.id, { fill: e.target.value })} style={{ width: "100%" }} /></label>
-										<label>Stroke<input type="color" value={selected.stroke || "#ffffff"} onChange={(e) => updateElement(selected.id, { stroke: e.target.value })} style={{ width: "100%" }} /></label>
-										<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-											<label>Stroke width<input type="number" value={selected.strokeWidth || 0} onChange={(e) => updateElement(selected.id, { strokeWidth: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
-											<label>Radius<input type="number" value={selected.radius || 0} onChange={(e) => updateElement(selected.id, { radius: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
-										</div>
-									</>
-								) : null}
-
+								{selected.type === "text" ? (<>
+									<label>Text<textarea value={selected.text} onChange={(e) => updateElement(selected.id, { text: e.target.value })} rows={5} style={{ width: "100%" }} /></label>
+									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+										<label>Font size<input type="number" value={selected.fontSize} onChange={(e) => updateElement(selected.id, { fontSize: Number(e.target.value || 12) })} style={{ width: "100%" }} /></label>
+										<label>Weight<input type="number" value={selected.fontWeight || 700} onChange={(e) => updateElement(selected.id, { fontWeight: Number(e.target.value || 400) })} style={{ width: "100%" }} /></label>
+										<label>Line height<input type="number" step="0.05" value={selected.lineHeight || 1.1} onChange={(e) => updateElement(selected.id, { lineHeight: Number(e.target.value || 1.1) })} style={{ width: "100%" }} /></label>
+										<label>Letter spacing<input type="number" value={selected.letterSpacing || 0} onChange={(e) => updateElement(selected.id, { letterSpacing: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
+									</div>
+									<label>Font family<select value={selected.fontFamily || FONT_OPTIONS[0]} onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })} style={{ width: "100%" }}>{FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
+									<label>Alignment<select value={selected.align || "left"} onChange={(e) => updateElement(selected.id, { align: e.target.value })} style={{ width: "100%" }}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+									<label>Text color<input type="color" value={selected.color || "#ffffff"} onChange={(e) => updateElement(selected.id, { color: e.target.value })} style={{ width: "100%" }} /></label>
+								</>) : null}
+								{selected.type === "shape" ? (<>
+									<label>Fill<input type="color" value={selected.fill || "#ef4444"} onChange={(e) => updateElement(selected.id, { fill: e.target.value })} style={{ width: "100%" }} /></label>
+									<label>Stroke<input type="color" value={selected.stroke || "#ffffff"} onChange={(e) => updateElement(selected.id, { stroke: e.target.value })} style={{ width: "100%" }} /></label>
+									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+										<label>Stroke width<input type="number" value={selected.strokeWidth || 0} onChange={(e) => updateElement(selected.id, { strokeWidth: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
+										<label>Radius<input type="number" value={selected.radius || 0} onChange={(e) => updateElement(selected.id, { radius: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
+									</div>
+								</>) : null}
 								{selected.type === "image" ? <label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label> : null}
 							</div>
 						) : <div style={{ opacity: 0.7 }}>Select a layer to edit it.</div>}
-
 						<div style={{ marginTop: 14 }}>
 							<div style={{ fontWeight: 700, marginBottom: 8 }}>Layers</div>
 							<div style={{ display: "grid", gap: 6, maxHeight: 320, overflow: "auto" }}>
 								{orderedLayers.length ? orderedLayers.map((el) => (
 									<button key={el.id} onClick={() => selectElement(el, false)} style={{ textAlign: "left", border: selectedIds.includes(el.id) ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: selectedIds.includes(el.id) ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
-										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-											<div style={{ fontWeight: 700 }}>{el.name || el.type}</div>
-											<div style={{ fontSize: 11, opacity: 0.7 }}>#{el._order}</div>
-										</div>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><div style={{ fontWeight: 700 }}>{el.name || el.type}</div><div style={{ fontSize: 11, opacity: 0.7 }}>#{el._order}</div></div>
 										<div style={{ fontSize: 12, opacity: 0.72 }}>{el.type}{el.groupId ? ` • ${el.groupName || "grouped"}` : ""}{el.locked ? " • locked" : ""}{el.hidden ? " • hidden" : ""}</div>
 									</button>
 								)) : <div style={{ opacity: 0.7 }}>No layers yet.</div>}
@@ -1270,4 +1246,5 @@ export default function Studio() {
 			</div>
 		</div>
 	);
+
 }
