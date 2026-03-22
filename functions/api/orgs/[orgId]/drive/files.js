@@ -21,6 +21,14 @@ export async function onRequestPost({ env, request, params }) {
   const db = getDb(env);
   const id = uuid();
   const t = now();
+  const decodeHeaderValue = (value, fallback = "") => {
+    try {
+      return value ? decodeURIComponent(String(value)) : fallback;
+    } catch {
+      return value ? String(value) : fallback;
+    }
+  };
+
 
   if (contentType.includes("multipart/form-data")) {
     const form = await request.formData();
@@ -46,6 +54,44 @@ export async function onRequestPost({ env, request, params }) {
     await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, orgId, parentId, name, mime, size, storageKey, t, t).run();
 
     const bytes = new Uint8Array(await upload.arrayBuffer());
+    const bucket = getDriveBucket(env);
+    if (bucket && storageKey) {
+      await bucket.put(storageKey, bytes, { httpMetadata: { contentType: mime || "application/octet-stream" } });
+      await db.prepare(`DELETE FROM drive_file_blobs WHERE org_id = ? AND file_id = ?`).bind(orgId, id).run();
+    } else {
+      const dataUrl = dataUrlFromBytes(bytes, mime || "application/octet-stream");
+      const textContent = isEditableTextMime(mime, name) ? textFromBytes(bytes) : "";
+      await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl, textContent });
+    }
+
+    const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
+    return created("file", createdFile || file);
+  }
+
+  if (!contentType.includes("multipart/form-data") && !contentType.includes("application/json")) {
+    const name = decodeHeaderValue(request.headers.get("x-drive-name"), "file").trim() || "file";
+    const mime = String(request.headers.get("content-type") || "application/octet-stream").trim() || "application/octet-stream";
+    const parentId = normalizeNullableId(request.headers.get("x-drive-parent-id"));
+    const relativePath = decodeHeaderValue(request.headers.get("x-drive-relative-path"), "");
+    const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(name)}`;
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const size = Number(bytes.byteLength || 0);
+    const file = {
+      id,
+      parentId,
+      name,
+      mime,
+      size,
+      storageKey,
+      relativePath,
+      createdAt: t,
+      updatedAt: t,
+    };
+
+    await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, orgId, parentId, name, mime, size, storageKey, t, t)
+      .run();
+
     const bucket = getDriveBucket(env);
     if (bucket && storageKey) {
       await bucket.put(storageKey, bytes, { httpMetadata: { contentType: mime || "application/octet-stream" } });
