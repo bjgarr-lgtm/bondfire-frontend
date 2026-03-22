@@ -181,6 +181,8 @@ export default function Drive() {
   const objectUrlRegistry = useRef(new Set());
   const loadRequestSeq = useRef(0);
   const mutationSeq = useRef(0);
+  const filesRef = useRef([]);
+  const pendingFileSyncRef = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -198,6 +200,11 @@ export default function Drive() {
       localStorage.setItem(uiStorageKey, JSON.stringify({ sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed }));
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
+
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
@@ -233,11 +240,27 @@ export default function Drive() {
       }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
+      const existingFiles = filesRef.current || [];
+      const serverFiles = Array.isArray(data?.files) ? data.files : [];
+      const seenFileIds = new Set();
+      const nextFiles = serverFiles.map((file) => {
         const hydrated = withFileUrls(orgId, file);
-        const existing = files.find((entry) => entry.id === hydrated.id);
+        seenFileIds.add(hydrated.id);
+        pendingFileSyncRef.current.delete(hydrated.id);
+        const existing = existingFiles.find((entry) => entry.id === hydrated.id);
         return existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated;
       });
+      const now = Date.now();
+      for (const existing of existingFiles) {
+        if (!existing?.id || seenFileIds.has(existing.id)) continue;
+        const pendingSince = pendingFileSyncRef.current.get(existing.id);
+        if (!pendingSince) continue;
+        if (now - pendingSince > 60000) {
+          pendingFileSyncRef.current.delete(existing.id);
+          continue;
+        }
+        nextFiles.push(existing);
+      }
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -508,6 +531,7 @@ export default function Drive() {
   }
   async function deleteFile(id) {
     mutationSeq.current += 1;
+    pendingFileSyncRef.current.delete(id);
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, { method: "DELETE" });
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedId === id && selectedKind === "file") {
@@ -676,6 +700,7 @@ export default function Drive() {
       ...createdFile,
       previewObjectUrl: localPreviewUrl || undefined,
     });
+    pendingFileSyncRef.current.set(nextFile.id, Date.now());
     setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
     return nextFile;
   }
