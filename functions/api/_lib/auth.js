@@ -10,6 +10,10 @@ export function getDb(env) {
 export async function requireUser({ env, request }) {
   const h = request.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/);
+  const requestUrl = (() => {
+    try { return new URL(request.url); } catch { return null; }
+  })();
+  const queryToken = requestUrl?.searchParams?.get("bf_token") || requestUrl?.searchParams?.get("token") || "";
   // Support both Bearer auth AND cookie sessions (httpOnly).
   // This allows a gradual migration away from localStorage tokens.
   const cookieHeader = request.headers.get("cookie") || "";
@@ -20,7 +24,7 @@ export async function requireUser({ env, request }) {
     cookies[k] = decodeURIComponent(rest.join("=") || "");
   }
 
-  const token = (m && m[1]) || cookies.bf_at || cookies.bf_auth_token || cookies.bf_token || "";
+  const token = (m && m[1]) || queryToken || cookies.bf_at || cookies.bf_auth_token || cookies.bf_token || "";
   if (!token) return { ok: false, resp: bad(401, "UNAUTHORIZED") };
 
   const payload = await verifyJwt(env.JWT_SECRET, token);

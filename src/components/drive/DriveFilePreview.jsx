@@ -141,58 +141,31 @@ function pickToken() {
   }
 }
 
-function useProtectedPreviewSrc(file) {
-  const [state, setState] = useState({ src: "", error: "", loading: false });
-
-  const effectiveUrl = useMemo(() => file?.previewObjectUrl || file?.dataUrl || "", [file?.previewObjectUrl, file?.dataUrl]);
-  const remoteUrl = useMemo(() => file?.previewUrl || file?.url || "", [file?.previewUrl, file?.url]);
-  const mime = String(file?.mime || "");
-  const needsBlobFetch = !!file && !effectiveUrl && !!remoteUrl && (mime === "application/pdf" || mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/"));
-
-  useEffect(() => {
-    if (!file) {
-      setState({ src: "", error: "", loading: false });
-      return;
-    }
-    if (effectiveUrl) {
-      setState({ src: effectiveUrl, error: "", loading: false });
-      return;
-    }
-    if (!needsBlobFetch) {
-      setState({ src: remoteUrl || "", error: "", loading: false });
-      return;
-    }
-
-    let cancelled = false;
-    let objectUrl = "";
-    setState({ src: "", error: "", loading: true });
-
-    const headers = new Headers();
-    const token = pickToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-
-    fetch(remoteUrl, { credentials: "include", headers })
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `Preview request failed (${res.status})`);
-        }
-        const blob = await res.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) setState({ src: objectUrl, error: "", loading: false });
-      })
-      .catch((err) => {
-        if (!cancelled) setState({ src: "", error: String(err?.message || err || "Preview failed"), loading: false });
-      });
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [file, effectiveUrl, remoteUrl, needsBlobFetch]);
-
-  return state;
+function pickTokenizedUrl(rawUrl) {
+  const base = String(rawUrl || "").trim();
+  if (!base) return "";
+  const token = pickToken();
+  if (!token) return base;
+  try {
+    const url = new URL(base, window.location.origin);
+    if (!url.searchParams.get("bf_token")) url.searchParams.set("bf_token", token);
+    return url.toString();
+  } catch {
+    const joiner = base.includes("?") ? "&" : "?";
+    return `${base}${joiner}bf_token=${encodeURIComponent(token)}`;
+  }
 }
+
+function useProtectedPreviewSrc(file) {
+  return useMemo(() => {
+    if (!file) return { src: "", error: "", loading: false };
+    const immediateSrc = file.previewObjectUrl || file.dataUrl || "";
+    if (immediateSrc) return { src: immediateSrc, error: "", loading: false };
+    const remoteUrl = file.previewUrl || file.url || "";
+    return { src: pickTokenizedUrl(remoteUrl), error: "", loading: false };
+  }, [file]);
+}
+
 
 export default function DriveFilePreview({ file }) {
   const { src, error, loading } = useProtectedPreviewSrc(file);

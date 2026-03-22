@@ -600,68 +600,59 @@ export default function Drive() {
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    let res = null;
-    let uploadError = null;
+    const tempId = `uploading_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticFile = withFileUrls(orgId, {
+      id: tempId,
+      ...record,
+      createdAt: Date.now(),
+      previewObjectUrl: localPreviewUrl || undefined,
+      isUploading: true,
+    });
+    setFiles((prev) => [optimisticFile, ...prev.filter((existing) => existing.id !== tempId)]);
 
     try {
-      res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        headers: {
-          "Content-Type": record.mime || rawFile.type || "application/octet-stream",
-          "x-drive-name": record.name || rawFile.name || "file",
-          "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
-          ...(parentId ? { "x-drive-parent-id": String(parentId) } : {}),
-          ...(relativePath ? { "x-drive-relative-path": String(relativePath) } : {}),
-        },
-        body: rawFile,
-      });
-    } catch (err) {
-      uploadError = err;
-    }
-
-    if (!res) {
       const form = new FormData();
       form.append("file", rawFile, rawFile.name || record.name || "file");
       form.append("name", record.name || rawFile.name || "file");
       form.append("mime", record.mime || rawFile.type || "application/octet-stream");
       if (parentId) form.append("parentId", String(parentId));
       if (relativePath) form.append("relativePath", String(relativePath));
-      try {
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          body: form,
-        });
-      } catch (err) {
-        uploadError = err;
-      }
-    }
 
-    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-    if (!createdFile?.id) {
+      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+        method: "POST",
+        body: form,
+      });
+
+      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+      if (!createdFile?.id) throw new Error("UPLOAD_RESPONSE_INVALID");
+
+      const nextFile = withFileUrls(orgId, {
+        ...record,
+        ...createdFile,
+        previewObjectUrl: localPreviewUrl || undefined,
+      });
+      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
+      return nextFile;
+    } catch (error) {
+      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      if (uploadError) throw uploadError;
       await loadDrive({ preserveSelection: true });
-      return null;
+      throw error;
     }
-
-    const nextFile = withFileUrls(orgId, {
-      ...record,
-      ...createdFile,
-      parentId: createdFile?.parentId ?? parentId ?? null,
-      previewObjectUrl: localPreviewUrl || undefined,
-    });
-    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
-    return nextFile;
   }
 
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
     for (const rawFile of chosen) {
-      await uploadFileRecord(rawFile, currentFolder);
+      try {
+        await uploadFileRecord(rawFile, currentFolder);
+      } catch (error) {
+        console.error("Drive file upload failed", error);
+      }
     }
     event.target.value = "";
   }
@@ -694,7 +685,11 @@ export default function Drive() {
       const fileName = parts.pop() || file.name;
       const parentId = parts.length ? await ensureFolderChain(parts) : currentFolder;
       const wrapped = new File([file], fileName, { type: file.type });
-      await uploadFileRecord(wrapped, parentId, rel);
+      try {
+        await uploadFileRecord(wrapped, parentId, rel);
+      } catch (error) {
+        console.error("Drive folder upload failed", error);
+      }
     }
     event.target.value = "";
   }

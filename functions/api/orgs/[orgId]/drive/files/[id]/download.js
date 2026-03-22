@@ -32,14 +32,22 @@ export async function onRequestGet({ env, request, params }) {
       if (rangeHeader) {
         const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
         if (match) {
-          const start = match[1] ? Number(match[1]) : undefined;
-          const end = match[2] ? Number(match[2]) : undefined;
-          const obj = await bucket.get(file.storageKey, { range: { offset: start, length: end !== undefined && start !== undefined ? (end - start + 1) : undefined } });
+          const total = Number(file.size || 0);
+          let start = match[1] ? Number(match[1]) : undefined;
+          let end = match[2] ? Number(match[2]) : undefined;
+          if (start === undefined && end !== undefined && total > 0) {
+            start = Math.max(total - end, 0);
+            end = total - 1;
+          }
+          if (start !== undefined && end === undefined && total > 0) end = total - 1;
+          const length = start !== undefined && end !== undefined ? Math.max(end - start + 1, 0) : undefined;
+          const obj = await bucket.get(file.storageKey, { range: { offset: start, length } });
           if (obj) {
-            const total = Number(obj.size || file.size || 0);
-            const servedStart = Number(obj.range?.offset || 0);
-            const servedEnd = servedStart + Number(obj.range?.length || 0) - 1;
-            const headers = buildHeaders({ file, size: Number(obj.range?.length || 0), asDownload, contentRange: `bytes ${servedStart}-${servedEnd}/${total}` });
+            const objSize = Number(obj.size || total || 0);
+            const servedStart = start ?? Number(obj.range?.offset || 0);
+            const servedLength = length ?? Number(obj.range?.length || objSize || 0);
+            const servedEnd = Math.max(servedStart + servedLength - 1, servedStart);
+            const headers = buildHeaders({ file, size: servedLength || objSize, asDownload, contentRange: `bytes ${servedStart}-${servedEnd}/${objSize}` });
             return new Response(obj.body, { status: 206, headers });
           }
         }
