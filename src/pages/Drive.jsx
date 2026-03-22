@@ -179,7 +179,8 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const loadSeqRef = useRef(0);
+  const driveLoadSeq = useRef(0);
+  const driveMutationSeq = useRef(0);
 
   useEffect(() => {
     try {
@@ -200,7 +201,8 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const requestSeq = ++loadSeqRef.current;
+    const requestSeq = ++driveLoadSeq.current;
+    const mutationSeqAtStart = driveMutationSeq.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -226,15 +228,12 @@ export default function Drive() {
           }
         } catch {}
       }
-      if (requestSeq !== loadSeqRef.current) return;
+      if (requestSeq !== driveLoadSeq.current) return;
+      if (mutationSeqAtStart !== driveMutationSeq.current) return;
+
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const existingPreviewById = new Map(files.map((file) => [file.id, file.previewObjectUrl]).filter(([, value]) => !!value));
-      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
-        const withUrls = withFileUrls(orgId, file);
-        const previewObjectUrl = existingPreviewById.get(withUrls.id);
-        return previewObjectUrl ? { ...withUrls, previewObjectUrl } : withUrls;
-      });
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -264,7 +263,8 @@ export default function Drive() {
       }
       setLoadState("ready");
     } catch (e) {
-      if (requestSeq !== loadSeqRef.current) return;
+      if (requestSeq !== driveLoadSeq.current) return;
+      if (mutationSeqAtStart !== driveMutationSeq.current) return;
       setLoadError(String(e?.message || e || "Failed to load Drive"));
       setLoadState("error");
     }
@@ -604,68 +604,43 @@ export default function Drive() {
   }
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
+    const mutationSeq = ++driveMutationSeq.current;
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
     const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const optimisticFile = withFileUrls(orgId, {
-      id: tempId,
-      ...record,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      previewObjectUrl: localPreviewUrl || undefined,
-      isPendingUpload: true,
+    const form = new FormData();
+    form.append("file", rawFile, rawFile.name || record.name || "file");
+    form.append("name", record.name || rawFile.name || "file");
+    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+    if (parentId) form.append("parentId", String(parentId));
+    if (relativePath) form.append("relativePath", String(relativePath));
+
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: form,
     });
-    setFiles((prev) => [optimisticFile, ...prev]);
 
-    try {
-      const headers = {
-        "x-drive-name": record.name || rawFile.name || "file",
-        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
-      };
-      if (parentId) headers["x-drive-parent-id"] = String(parentId);
-      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-
-      let res;
-      try {
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          headers,
-          body: rawFile,
-        });
-      } catch {
-        const form = new FormData();
-        form.append("file", rawFile, rawFile.name || record.name || "file");
-        form.append("name", record.name || rawFile.name || "file");
-        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-        if (parentId) form.append("parentId", String(parentId));
-        if (relativePath) form.append("relativePath", String(relativePath));
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          body: form,
-        });
-      }
-
-      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-      if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
-
-      const nextFile = withFileUrls(orgId, {
-        ...record,
-        ...createdFile,
-        previewObjectUrl: localPreviewUrl || undefined,
-      });
-      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
-      return nextFile;
-    } catch (error) {
-      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
+    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+    if (!createdFile?.id) {
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      throw error;
+      driveMutationSeq.current = Math.max(driveMutationSeq.current, mutationSeq);
+      await loadDrive({ preserveSelection: true });
+      return null;
     }
+
+    const nextFile = withFileUrls(orgId, {
+      ...record,
+      ...createdFile,
+      previewObjectUrl: localPreviewUrl || undefined,
+    });
+    driveMutationSeq.current = Math.max(driveMutationSeq.current, mutationSeq);
+    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
+    return nextFile;
   }
 
   async function onUploadFiles(event) {
