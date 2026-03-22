@@ -88,4 +88,3 @@ export async function onRequestPost({ env, request, params }) {
   const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
   return created("file", createdFile || file);
 }
-
