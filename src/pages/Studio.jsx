@@ -101,48 +101,16 @@ function clone(obj) {
 	return JSON.parse(JSON.stringify(obj));
 }
 
-function makePage(preset = "flyer", patch = {}) {
-	return {
-		id: uid(),
-		width: PRESETS[preset]?.width || 1080,
-		height: PRESETS[preset]?.height || 1350,
-		elements: [],
-		guides: [],
-		...patch,
-	};
-}
-
 function makeDoc(preset = "flyer") {
 	return {
 		id: uid(),
 		name: `Untitled ${PRESETS[preset]?.label || "Design"}`,
 		preset,
-		pages: [makePage(preset)],
+		width: PRESETS[preset]?.width || 1080,
+		height: PRESETS[preset]?.height || 1350,
+		elements: [],
+		guides: [],
 		updatedAt: Date.now(),
-	};
-}
-
-function normalizeDoc(raw = {}) {
-	if (Array.isArray(raw.pages) && raw.pages.length) {
-		return {
-			...raw,
-			pages: raw.pages.map((page) => ({
-				id: page.id || uid(),
-				width: Number(page.width || PRESETS[raw.preset]?.width || 1080),
-				height: Number(page.height || PRESETS[raw.preset]?.height || 1350),
-				elements: Array.isArray(page.elements) ? page.elements : [],
-				guides: Array.isArray(page.guides) ? page.guides : [],
-			})),
-		};
-	}
-	return {
-		...raw,
-		pages: [makePage(raw.preset || "flyer", {
-			width: Number(raw.width || PRESETS[raw.preset]?.width || 1080),
-			height: Number(raw.height || PRESETS[raw.preset]?.height || 1350),
-			elements: Array.isArray(raw.elements) ? raw.elements : [],
-			guides: Array.isArray(raw.guides) ? raw.guides : [],
-		})],
 	};
 }
 
@@ -343,78 +311,6 @@ function makeGuide(orientation, position) {
 	return { id: uid(), orientation, position };
 }
 
-async function renderPageToCanvas(page, bindings) {
-	const canvas = document.createElement("canvas");
-	canvas.width = page.width;
-	canvas.height = page.height;
-	const ctx = canvas.getContext("2d");
-	if (!ctx) return canvas;
-	ctx.fillStyle = "#111827";
-	ctx.fillRect(0, 0, canvas.width, canvas.height);
-	for (const el of page.elements || []) {
-		if (el.hidden) continue;
-		ctx.save();
-		ctx.globalAlpha = Number(el.opacity ?? 1);
-		ctx.translate(Number(el.x || 0), Number(el.y || 0));
-		if (el.rotation) ctx.rotate((Number(el.rotation || 0) * Math.PI) / 180);
-		if (el.type === "shape") {
-			const r = Math.max(0, Number(el.radius || 0));
-			const w = Number(el.width || 0);
-			const h = Number(el.height || 0);
-			ctx.beginPath();
-			ctx.moveTo(r, 0);
-			ctx.lineTo(w - r, 0);
-			ctx.quadraticCurveTo(w, 0, w, r);
-			ctx.lineTo(w, h - r);
-			ctx.quadraticCurveTo(w, h, w - r, h);
-			ctx.lineTo(r, h);
-			ctx.quadraticCurveTo(0, h, 0, h - r);
-			ctx.lineTo(0, r);
-			ctx.quadraticCurveTo(0, 0, r, 0);
-			ctx.closePath();
-			ctx.fillStyle = el.fill || "transparent";
-			ctx.fill();
-			if (el.strokeWidth) {
-				ctx.lineWidth = Number(el.strokeWidth || 0);
-				ctx.strokeStyle = el.stroke || "transparent";
-				ctx.stroke();
-			}
-		} else if (el.type === "text") {
-			ctx.fillStyle = el.color || "#ffffff";
-			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || "sans-serif"}`;
-			ctx.textBaseline = "top";
-			const lineHeight = Number(el.fontSize || 36) * Number(el.lineHeight || 1.1);
-			const lines = [];
-			for (const part of String(applyBindings(el.text || "", bindings)).split("\n")) {
-				const words = part.split(/\s+/);
-				let current = "";
-				for (const word of words) {
-					const test = current ? `${current} ${word}` : word;
-					if (ctx.measureText(test).width > Number(el.width || 9999) && current) {
-						lines.push(current);
-						current = word;
-					} else {
-						current = test;
-					}
-				}
-				if (current) lines.push(current);
-			}
-			lines.forEach((line, idx) => ctx.fillText(line, 0, idx * lineHeight));
-		} else if (el.type === "image" && el.src) {
-			const img = await new Promise((resolve) => {
-				const i = new Image();
-				i.crossOrigin = "anonymous";
-				i.onload = () => resolve(i);
-				i.onerror = () => resolve(null);
-				i.src = el.src;
-			});
-			if (img) ctx.drawImage(img, 0, 0, Number(el.width || 0), Number(el.height || 0));
-		}
-		ctx.restore();
-	}
-	return canvas;
-}
-
 function panelButtonStyle(active) {
 	return {
 		width: "100%",
@@ -439,15 +335,99 @@ function iconButtonStyle(active) {
 	};
 }
 
+
+async function loadImageData(src) {
+	return await new Promise((resolve, reject) => {
+		const img = new Image();
+		img.crossOrigin = "anonymous";
+		img.onload = () => resolve(img);
+		img.onerror = reject;
+		img.src = src;
+	});
+}
+
+function roundRectPath(ctx, x, y, width, height, radius) {
+	const r = Math.max(0, Math.min(radius || 0, width / 2, height / 2));
+	ctx.beginPath();
+	ctx.moveTo(x + r, y);
+	ctx.arcTo(x + width, y, x + width, y + height, r);
+	ctx.arcTo(x + width, y + height, x, y + height, r);
+	ctx.arcTo(x, y + height, x, y, r);
+	ctx.arcTo(x, y, x + width, y, r);
+	ctx.closePath();
+}
+
+async function renderDocToCanvas(doc, bindings) {
+	const canvas = document.createElement("canvas");
+	canvas.width = doc.width;
+	canvas.height = doc.height;
+	const ctx = canvas.getContext("2d");
+	ctx.fillStyle = "#111827";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	for (const el of doc.elements || []) {
+		if (el.hidden) continue;
+		ctx.save();
+		ctx.globalAlpha = Number(el.opacity ?? 1);
+		ctx.translate(Number(el.x || 0) + Number(el.width || 0) / 2, Number(el.y || 0) + Number(el.height || 0) / 2);
+		ctx.rotate((Number(el.rotation || 0) * Math.PI) / 180);
+		ctx.translate(-Number(el.width || 0) / 2, -Number(el.height || 0) / 2);
+		if (el.type === "shape") {
+			roundRectPath(ctx, 0, 0, Number(el.width || 0), Number(el.height || 0), Number(el.radius || 0));
+			ctx.fillStyle = el.fill || "transparent";
+			ctx.fill();
+			if (Number(el.strokeWidth || 0) > 0) {
+				ctx.lineWidth = Number(el.strokeWidth || 0);
+				ctx.strokeStyle = el.stroke || "transparent";
+				ctx.stroke();
+			}
+		} else if (el.type === "image" && el.src) {
+			try {
+				const img = await loadImageData(el.src);
+				ctx.save();
+				roundRectPath(ctx, 0, 0, Number(el.width || 0), Number(el.height || 0), 12);
+				ctx.clip();
+				const fit = el.fit || "cover";
+				if (fit === "fill") {
+					ctx.drawImage(img, 0, 0, Number(el.width || 0), Number(el.height || 0));
+				} else {
+					const rw = Number(el.width || 0) / img.width;
+					const rh = Number(el.height || 0) / img.height;
+					const scale = fit === "contain" ? Math.min(rw, rh) : Math.max(rw, rh);
+					const dw = img.width * scale;
+					const dh = img.height * scale;
+					ctx.drawImage(img, (Number(el.width || 0) - dw) / 2, (Number(el.height || 0) - dh) / 2, dw, dh);
+				}
+				ctx.restore();
+			} catch {}
+		} else if (el.type === "text") {
+			const text = applyBindings(el.text || "", bindings);
+			ctx.fillStyle = el.color || "#fff";
+			ctx.textBaseline = "top";
+			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || FONT_OPTIONS[0]}`;
+			const lines = String(text).split("\n");
+			const lineHeight = Number(el.fontSize || 36) * Number(el.lineHeight || 1.1);
+			for (let i = 0; i < lines.length; i += 1) {
+				const line = lines[i];
+				const metrics = ctx.measureText(line);
+				let x = 0;
+				if (el.align === "center") x = (Number(el.width || 0) - metrics.width) / 2;
+				if (el.align === "right") x = Number(el.width || 0) - metrics.width;
+				ctx.fillText(line, x, i * lineHeight);
+			}
+		}
+		ctx.restore();
+	}
+	return canvas;
+}
+
 export default function Studio() {
 	const { orgId = "" } = useParams();
 	const workspaceRef = React.useRef(null);
 	const canvasShellRef = React.useRef(null);
 	const fileInputRef = React.useRef(null);
 
-	const [docs, setDocs] = React.useState(() => readDocs(orgId).map(normalizeDoc));
-	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId).map(normalizeDoc)[0]?.id || null);
-	const [currentPageId, setCurrentPageId] = React.useState(() => readDocs(orgId).map(normalizeDoc)[0]?.pages?.[0]?.id || null);
+	const [docs, setDocs] = React.useState(() => readDocs(orgId));
+	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
 	const [selectedIds, setSelectedIds] = React.useState([]);
 	const [history, setHistory] = React.useState([]);
 	const [future, setFuture] = React.useState([]);
@@ -455,11 +435,15 @@ export default function Studio() {
 	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 	const [showBoundPreview, setShowBoundPreview] = React.useState(true);
 	const [leftPanel, setLeftPanel] = React.useState(null);
-	const [inspectorOpen, setInspectorOpen] = React.useState(false);
+	const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
+	const [viewMenuOpen, setViewMenuOpen] = React.useState(false);
+	const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
+	const [contextMenu, setContextMenu] = React.useState(null);
 	const [selectedGuideId, setSelectedGuideId] = React.useState(null);
+	const [inspectorOpen, setInspectorOpen] = React.useState(false);
 	const [tool, setTool] = React.useState("select");
-	const [zoom, setZoom] = React.useState(0.45);
-	const [pan, setPan] = React.useState({ x: 120, y: 80 });
+	const [zoom, setZoom] = React.useState(0.42);
+	const [pan, setPan] = React.useState({ x: 84, y: 56 });
 	const [showRulers, setShowRulers] = React.useState(true);
 	const [driveAssets, setDriveAssets] = React.useState([]);
 	const [driveLoading, setDriveLoading] = React.useState(false);
@@ -473,10 +457,9 @@ export default function Studio() {
 	const [spacePan, setSpacePan] = React.useState(false);
 
 	React.useEffect(() => {
-		const nextDocs = readDocs(orgId).map(normalizeDoc);
+		const nextDocs = readDocs(orgId);
 		setDocs(nextDocs);
 		setCurrentId(nextDocs[0]?.id || null);
-		setCurrentPageId(nextDocs[0]?.pages?.[0]?.id || null);
 		setSelectedIds([]);
 		setHistory([]);
 		setFuture([]);
@@ -485,35 +468,16 @@ export default function Studio() {
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
-	const currentDocRaw = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
-	const currentPage = React.useMemo(() => currentDocRaw?.pages?.find((page) => page.id === currentPageId) || currentDocRaw?.pages?.[0] || null, [currentDocRaw, currentPageId]);
-	const currentDoc = React.useMemo(() => currentDocRaw && currentPage ? { ...currentDocRaw, ...currentPage, elements: currentPage.elements || [], guides: currentPage.guides || [] } : null, [currentDocRaw, currentPage]);
+	const currentDoc = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
 	const selectedElements = React.useMemo(() => (currentDoc?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentDoc, selectedIds]);
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
 	const orderedLayers = React.useMemo(() => (currentDoc?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentDoc]);
-	const currentPageOffset = React.useMemo(() => {
-		const pageGap = 72;
-		const pages = currentDocRaw?.pages || [];
-		const maxWidth = Math.max(...pages.map((page) => page.width), 0);
-		let top = 0;
-		for (const page of pages) {
-			if (page.id === currentPageId) return { x: (maxWidth - page.width) / 2, y: top, maxWidth };
-			top += page.height + pageGap;
-		}
-		return { x: 0, y: 0, maxWidth };
-	}, [currentDocRaw, currentPageId]);
-
-	React.useEffect(() => {
-		if (currentDocRaw && !currentDocRaw.pages?.some((page) => page.id === currentPageId)) {
-			setCurrentPageId(currentDocRaw.pages?.[0]?.id || null);
-		}
-	}, [currentDocRaw, currentPageId]);
 
 	const commitDocs = React.useCallback((updater) => {
 		setDocs((prev) => {
 			const next = typeof updater === "function" ? updater(prev) : updater;
-			saveDocs(orgId, next.map(normalizeDoc));
+			saveDocs(orgId, next);
 			setSavedAt(Date.now());
 			return next;
 		});
@@ -528,11 +492,10 @@ export default function Studio() {
 		if (currentDoc) return currentDoc.id;
 		const doc = makeDoc(preset);
 		const next = [doc];
-		setDocs(next.map(normalizeDoc));
-		saveDocs(orgId, next.map(normalizeDoc));
+		setDocs(next);
+		saveDocs(orgId, next);
 		setSavedAt(Date.now());
 		setCurrentId(doc.id);
-		setCurrentPageId(doc.pages?.[0]?.id || null);
 		return doc.id;
 	}, [currentDoc, orgId]);
 
@@ -566,7 +529,6 @@ export default function Studio() {
 		const doc = makeDoc(preset);
 		commitDocs((prev) => [doc, ...prev]);
 		setCurrentId(doc.id);
-		setCurrentPageId(doc.pages?.[0]?.id || null);
 		setSelectedIds([]);
 		setTimeout(() => fitCanvas(doc), 0);
 	}, [snapshot, commitDocs, fitCanvas]);
@@ -577,28 +539,35 @@ export default function Studio() {
 		snapshot();
 		const base = makeDoc(template.preset);
 		const built = template.build(bindings);
-		const doc = { ...base, name: built.name || template.label, pages: [makePage(template.preset, { width: PRESETS[template.preset]?.width || 1080, height: PRESETS[template.preset]?.height || 1350, elements: built.elements || [], guides: [] })], updatedAt: Date.now() };
+		const doc = { ...base, name: built.name || template.label, elements: built.elements || [], updatedAt: Date.now() };
 		commitDocs((prev) => [doc, ...prev]);
 		setCurrentId(doc.id);
-		setCurrentPageId(doc.pages?.[0]?.id || null);
-		setSelectedIds(doc.pages?.[0]?.elements?.[0]?.id ? [doc.pages[0].elements[0].id] : []);
+		setSelectedIds(doc.elements[0]?.id ? [doc.elements[0].id] : []);
 		setLeftPanel(null);
 		setTimeout(() => fitCanvas(doc), 0);
 	}, [snapshot, commitDocs, bindings, fitCanvas]);
 
 	const updateDoc = React.useCallback((patch) => {
-		if (!currentDocRaw || !currentPage) return;
-		const pageKeys = new Set(["width", "height", "elements", "guides"]);
-		const pagePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => pageKeys.has(key)));
-		const docPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => !pageKeys.has(key)));
-		commitDocs((prev) => prev.map((doc) => doc.id === currentDocRaw.id ? { ...doc, ...docPatch, updatedAt: Date.now(), pages: (doc.pages || []).map((page) => page.id === currentPage.id ? { ...page, ...pagePatch } : page) } : doc));
-	}, [currentDocRaw, currentPage, commitDocs]);
+		if (!currentDoc) return;
+		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? { ...doc, ...patch, updatedAt: Date.now() } : doc));
+	}, [currentDoc, commitDocs]);
 
 	const updateElements = React.useCallback((ids, patchOrFn) => {
-		if (!currentDocRaw || !currentPage || !ids?.length) return;
+		if (!currentDoc || !ids?.length) return;
 		const idSet = new Set(ids);
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDocRaw.id ? doc : { ...doc, updatedAt: Date.now(), pages: (doc.pages || []).map((page) => page.id !== currentPage.id ? page : { ...page, elements: page.elements.map((el) => { if (!idSet.has(el.id)) return el; const patch = typeof patchOrFn === "function" ? patchOrFn(el) : patchOrFn; return { ...el, ...patch }; }) }) }));
-	}, [currentDocRaw, currentPage, commitDocs]);
+		commitDocs((prev) => prev.map((doc) => {
+			if (doc.id !== currentDoc.id) return doc;
+			return {
+				...doc,
+				updatedAt: Date.now(),
+				elements: doc.elements.map((el) => {
+					if (!idSet.has(el.id)) return el;
+					const patch = typeof patchOrFn === "function" ? patchOrFn(el) : patchOrFn;
+					return { ...el, ...patch };
+				}),
+			};
+		}));
+	}, [currentDoc, commitDocs]);
 
 	const updateElement = React.useCallback((elementId, patchOrFn) => {
 		updateElements([elementId], patchOrFn);
@@ -739,26 +708,25 @@ export default function Studio() {
 	};
 
 	const duplicateDoc = () => {
-		if (!currentDocRaw) return;
+		if (!currentDoc) return;
 		snapshot();
-		const copy = clone(currentDocRaw);
+		const copy = clone(currentDoc);
 		copy.id = uid();
-		copy.name = `${currentDocRaw.name} Copy`;
-		copy.pages = (currentDocRaw.pages || []).map((page) => ({ ...clone(page), id: uid(), elements: withNewIds(page.elements || []), guides: clone(page.guides || []) }));
+		copy.name = `${currentDoc.name || "Untitled"} Copy`;
+		copy.updatedAt = Date.now();
+		copy.elements = withNewIds(copy.elements || []);
+		copy.guides = (copy.guides || []).map((g) => ({ ...g, id: uid() }));
 		commitDocs((prev) => [copy, ...prev]);
 		setCurrentId(copy.id);
-		setCurrentPageId(copy.pages?.[0]?.id || null);
 		setSelectedIds([]);
+		setFileMenuOpen(false);
+		setLeftPanel(null);
+		setTimeout(() => fitCanvas(copy), 0);
 	};
 
 	const addPage = () => {
-		if (!currentDocRaw) return;
-		snapshot();
-		const page = makePage(currentDocRaw.preset || "flyer");
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDocRaw.id ? doc : { ...doc, updatedAt: Date.now(), pages: [...(doc.pages || []), page] }));
-		setCurrentPageId(page.id);
-		setSelectedIds([]);
-		setTimeout(() => fitCanvas(page), 0);
+		const nextPreset = currentDoc?.preset || "flyer";
+		createDoc(nextPreset);
 	};
 
 	const deleteDoc = (docId) => {
@@ -767,13 +735,15 @@ export default function Studio() {
 		if (!window.confirm(`Delete "${target.name}"?`)) return;
 		snapshot();
 		const next = docs.filter((doc) => doc.id !== docId);
-		setDocs(next.map(normalizeDoc));
-		saveDocs(orgId, next.map(normalizeDoc));
+		setDocs(next);
+		saveDocs(orgId, next);
 		setSavedAt(Date.now());
 		if (currentId === docId) {
 			setCurrentId(next[0]?.id || null);
 			setSelectedIds([]);
 		}
+		setFileMenuOpen(false);
+		setLeftPanel(null);
 	};
 
 	const saveSelectionAsBlock = () => {
@@ -876,16 +846,18 @@ export default function Studio() {
 				duplicateSelected();
 				return;
 			}
-			if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length && !isTyping) {
-				e.preventDefault();
-				removeSelected();
-				return;
-			}
-			if ((e.key === "Delete" || e.key === "Backspace") && selectedGuideId && !isTyping) {
-				e.preventDefault();
-				removeGuide(selectedGuideId);
-				setSelectedGuideId(null);
-				return;
+			if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
+				if (selectedGuideId) {
+					e.preventDefault();
+					removeGuide(selectedGuideId);
+					setSelectedGuideId(null);
+					return;
+				}
+				if (selectedIds.length) {
+					e.preventDefault();
+					removeSelected();
+					return;
+				}
 			}
 			if (selectedElements.length && !isTyping) {
 				const movable = selectedElements.filter((el) => !el.locked).map((el) => el.id);
@@ -959,22 +931,24 @@ export default function Studio() {
 		const rect = workspaceRef.current?.getBoundingClientRect();
 		if (!rect) return { x: 0, y: 0 };
 		return {
-			x: (clientX - rect.left - pan.x - RULER_SIZE - currentPageOffset.x * zoom) / zoom,
-			y: (clientY - rect.top - pan.y - RULER_SIZE - currentPageOffset.y * zoom) / zoom,
+			x: (clientX - rect.left - pan.x - RULER_SIZE) / zoom,
+			y: (clientY - rect.top - pan.y - RULER_SIZE) / zoom,
 		};
-	}, [pan, zoom, currentPageOffset]);
+	}, [pan, zoom]);
 
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
-		setSelectedGuideId(null);
-		if (e.target.closest("[data-studio-menu=\"1\"]")) return;
+		setLeftPanel(null);
+		setFileMenuOpen(false);
+		setViewMenuOpen(false);
+		setExportMenuOpen(false);
+		setContextMenu(null);
 		if (spacePan || tool === "hand" || e.button === 1) {
 			setPanState({ startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y });
 			return;
 		}
-		const onCanvasBackground = e.target === workspaceRef.current || e.target === canvasShellRef.current || e.target.closest("[data-page-canvas=\"1\"]");
-		if (!onCanvasBackground) return;
 		setSelectedIds([]);
+		setSelectedGuideId(null);
 		if (tool === "select") {
 			const point = getCanvasPoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
@@ -1057,13 +1031,52 @@ export default function Studio() {
 		const pointX = e.clientX - rect.left;
 		const pointY = e.clientY - rect.top;
 		const nextZoom = clamp(zoom * (e.deltaY < 0 ? 1.08 : 0.92), 0.1, 3);
-		const worldX = (pointX - pan.x - RULER_SIZE - currentPageOffset.x * zoom) / zoom;
-		const worldY = (pointY - pan.y - RULER_SIZE - currentPageOffset.y * zoom) / zoom;
+		const worldX = (pointX - pan.x - RULER_SIZE) / zoom;
+		const worldY = (pointY - pan.y - RULER_SIZE) / zoom;
 		setZoom(nextZoom);
 		setPan({
-			x: pointX - worldX * nextZoom - RULER_SIZE - currentPageOffset.x * nextZoom,
-			y: pointY - worldY * nextZoom - RULER_SIZE - currentPageOffset.y * nextZoom,
+			x: pointX - worldX * nextZoom - RULER_SIZE,
+			y: pointY - worldY * nextZoom - RULER_SIZE,
 		});
+	};
+
+	const onWorkspaceDrop = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		const file = e.dataTransfer?.files?.[0];
+		if (!file || !String(file.type || "").startsWith("image/")) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			const point = getCanvasPoint(e.clientX, e.clientY);
+			const docId = ensureDoc(currentDoc?.preset || "flyer");
+			snapshot();
+			const element = makeImageElement({ src: String(reader.result || ""), name: file.name || "Image", x: Math.max(0, point.x - 160), y: Math.max(0, point.y - 120) });
+			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+			setCurrentId(docId);
+			setSelectedIds([element.id]);
+		};
+		reader.readAsDataURL(file);
+	};
+
+	const onWorkspaceDragOver = (e) => {
+		e.preventDefault();
+	};
+
+	const openContextMenu = (e, el) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (el) {
+			selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey);
+		}
+		setContextMenu({ x: e.clientX, y: e.clientY });
+	};
+
+	const closeMenus = () => {
+		setLeftPanel(null);
+		setFileMenuOpen(false);
+		setViewMenuOpen(false);
+		setExportMenuOpen(false);
+		setContextMenu(null);
 	};
 
 	const exportJson = () => {
@@ -1072,27 +1085,41 @@ export default function Studio() {
 	};
 
 	const exportPng = async () => {
-		if (!currentDoc || !currentDocRaw) return;
-		const canvas = await renderPageToCanvas(currentDoc, bindings);
+		if (!currentDoc) return;
+		const canvas = await renderDocToCanvas(currentDoc, bindings);
 		canvas.toBlob((png) => {
-			if (png) downloadBlob(`${printableName(currentDocRaw.name || currentDoc.name)}-page-${(currentDocRaw.pages || []).findIndex((page) => page.id === currentPageId) + 1}.png`, png);
+			if (png) downloadBlob(`${printableName(currentDoc.name)}.png`, png);
 		}, "image/png");
 	};
 
 	const exportPdf = async () => {
-		if (!currentDocRaw) return;
-		const pages = [];
-		for (const page of currentDocRaw.pages || []) {
-			const canvas = await renderPageToCanvas(page, bindings);
-			pages.push(canvas.toDataURL("image/png"));
-		}
-		const win = window.open("", "_blank");
+		if (!currentDoc) return;
+		const canvas = await renderDocToCanvas(currentDoc, bindings);
+		const url = canvas.toDataURL("image/png");
+		const win = window.open("", "_blank", "noopener,noreferrer,width=900,height=1200");
 		if (!win) return;
-		win.document.write(`<html><head><title>${currentDocRaw.name}</title><style>body{margin:0;background:#111827;padding:24px;font-family:Arial,sans-serif} img{display:block;width:100%;max-width:900px;margin:0 auto 24px auto;box-shadow:0 10px 40px rgba(0,0,0,.35)} @media print{body{padding:0;background:white} img{max-width:100%;margin:0 0 12px 0;page-break-after:always;box-shadow:none}}</style></head><body>${pages.map((src) => `<img src="${src}" />`).join("")}</body></html>`);
+		win.document.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#111;}img{display:block;max-width:100%;width:100%;height:auto;}@media print{body{background:#fff;}img{page-break-after:always;}}</style></head><body><img src="${url}" alt="" onload="setTimeout(()=>window.print(),120)" /></body></html>`);
 		win.document.close();
-		win.focus();
-		setTimeout(() => win.print(), 250);
 	};
+
+	React.useEffect(() => {
+		const onGlobalDown = () => setContextMenu(null);
+		const onEsc = (e) => {
+			if (e.key === "Escape") {
+				setContextMenu(null);
+				setLeftPanel(null);
+				setFileMenuOpen(false);
+				setViewMenuOpen(false);
+				setExportMenuOpen(false);
+			}
+		};
+		window.addEventListener("click", onGlobalDown);
+		window.addEventListener("keydown", onEsc);
+		return () => {
+			window.removeEventListener("click", onGlobalDown);
+			window.removeEventListener("keydown", onEsc);
+		};
+	}, []);
 
 	const filteredAssets = React.useMemo(() => {
 		const q = assetSearch.trim().toLowerCase();
@@ -1102,35 +1129,73 @@ export default function Studio() {
 
 	const multiSelection = selectedIds.length > 1;
 	const currentGuides = currentDoc?.guides || [];
+	const rulerStep = zoom >= 2 ? 25 : zoom >= 1.2 ? 50 : zoom >= 0.8 ? 100 : zoom >= 0.45 ? 200 : 400;
 
 
 	return (
-		<div style={{ padding: 12, display: "grid", gap: 12 }}>
+		<div style={{ padding: 8, display: "grid", gap: 8 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 
-			<div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
-				<div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 420px" }}>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☰</button>
-					<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ minWidth: 0, flex: 1, padding: "7px 9px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "#111827", color: "white" }} />
+			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
+					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setViewMenuOpen(false); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
+					{fileMenuOpen ? (
+						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+							<div style={{ display: "grid", gap: 6 }}>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("flyer")}>New Flyer</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("square")}>New Square Post</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("story")}>New Story</button>
+								<button style={panelButtonStyle(false)} onClick={() => createDoc("banner")}>New Banner</button>
+								<button style={panelButtonStyle(false)} onClick={duplicateDoc} disabled={!currentDoc}>Duplicate Document</button>
+								<button style={panelButtonStyle(false)} onClick={saveCurrentDoc} disabled={!currentDoc}>Save</button>
+								<button style={panelButtonStyle(false)} onClick={exportJson} disabled={!currentDoc}>Export JSON</button>
+								<button style={panelButtonStyle(false)} onClick={exportPng} disabled={!currentDoc}>Export PNG</button>
+								<button style={panelButtonStyle(false)} onClick={exportPdf} disabled={!currentDoc}>Export PDF</button>
+								<button style={panelButtonStyle(false)} onClick={() => currentDoc && deleteDoc(currentDoc.id)} disabled={!currentDoc}>Delete Current Doc</button>
+							</div>
+						</div>
+					) : null}
+					<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ minWidth: 0, flex: 1, padding: "7px 10px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "#111827", color: "white" }} />
 				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>Undo</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={redo} disabled={!future.length}>Redo</button>
+				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
+					<div style={{ display: "grid", lineHeight: 1.05, textAlign: "right", marginRight: 6 }}>
+						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+						<div style={{ fontSize: 10, opacity: 0.7 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
+					</div>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>↶</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={redo} disabled={!future.length}>↷</button>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 0.9, 0.1, 3))} disabled={!currentDoc}>−</button>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => fitCanvas(currentDoc)} disabled={!currentDoc}>Fit</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100%</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100</button>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))} disabled={!currentDoc}>+</button>
-					<div style={{ minWidth: 68, textAlign: "center", opacity: 0.8 }}>{Math.round(zoom * 100)}%</div>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: tool === "hand" ? "1px solid rgba(239,68,68,0.5)" : "1px solid rgba(255,255,255,0.12)", background: tool === "hand" ? "rgba(239,68,68,0.18)" : "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setTool((t) => t === "hand" ? "select" : "hand")}>{tool === "hand" ? "Hand On" : "Hand"}</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Rulers" : "No Rulers"}</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "⋯ Hide" : "⋯ Inspector"}</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={exportPng} disabled={!currentDoc}>PNG</button>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={exportPdf} disabled={!currentDoc}>PDF</button>
+					<div style={{ minWidth: 46, textAlign: "center", opacity: 0.8 }}>{Math.round(zoom * 100)}%</div>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setViewMenuOpen((v) => !v); setExportMenuOpen(false); setFileMenuOpen(false); }}>⋯</button>
+					{viewMenuOpen ? (
+						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, right: 46, width: 174, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+							<div style={{ display: "grid", gap: 6 }}>
+								<button style={panelButtonStyle(tool === "hand")} onClick={() => setTool((t) => t === "hand" ? "select" : "hand")}>{tool === "hand" ? "Disable Hand" : "Enable Hand"}</button>
+								<button style={panelButtonStyle(showRulers)} onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Hide Rulers" : "Show Rulers"}</button>
+								<button style={panelButtonStyle(inspectorOpen)} onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide Inspector" : "Show Inspector"}</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
+								<button style={panelButtonStyle(false)} onClick={() => selectedGuideId && removeGuide(selectedGuideId)} disabled={!selectedGuideId}>Delete Selected Guide</button>
+							</div>
+						</div>
+					) : null}
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setExportMenuOpen((v) => !v); setViewMenuOpen(false); setFileMenuOpen(false); }}>⇩</button>
+					{exportMenuOpen ? (
+						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 42, right: 0, width: 170, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+							<div style={{ display: "grid", gap: 6 }}>
+								<button style={panelButtonStyle(false)} onClick={exportPng} disabled={!currentDoc}>Export PNG</button>
+								<button style={panelButtonStyle(false)} onClick={exportPdf} disabled={!currentDoc}>Export PDF</button>
+							</div>
+						</div>
+					) : null}
 				</div>
 			</div>
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
-				<div style={{ position: "absolute", top: 12, left: 12, zIndex: 25, display: "grid", gap: 8 }}>
+				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: 12, zIndex: 25, display: "grid", gap: 8 }}>
 					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
 					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>T</button>
 					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>□</button>
@@ -1140,15 +1205,20 @@ export default function Studio() {
 				</div>
 
 				{leftPanel ? (
-					<div style={{ position: "absolute", top: 12, left: 48, bottom: 12, width: 250, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 10, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }} data-studio-menu="1">
+					<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
-							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Create" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
+							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Add" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
 							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
 						</div>
 
 						{leftPanel === "create" ? (
 							<div style={{ display: "grid", gap: 8 }}>
-								<div style={{ fontSize: 12, opacity: 0.7 }}>Add</div>
+								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
+								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
+								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
+								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
+								<hr style={{ opacity: 0.15, margin: "8px 0" }} />
 								<div style={{ display: "flex", gap: 8 }}>
 									<button style={{ ...panelButtonStyle(false), textAlign: "center" }} onClick={() => setTool("select")}>Select</button>
 									<button style={{ ...panelButtonStyle(tool === "hand"), textAlign: "center" }} onClick={() => setTool("hand")}>Hand</button>
@@ -1158,7 +1228,7 @@ export default function Studio() {
 								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
-								<button style={panelButtonStyle(false)} onClick={addPage} disabled={!currentDocRaw}>Add Page</button>
+								<div style={{ fontSize: 12, opacity: 0.65 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
 							</div>
 						) : null}
 
@@ -1172,7 +1242,7 @@ export default function Studio() {
 								<button style={panelButtonStyle(false)} onClick={saveSelectionAsBlock} disabled={!selected}>Save Selected as Block</button>
 								<div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
 									{savedBlocks.length ? savedBlocks.map((block) => (
-										<div key={block.id} style={{ padding: 10, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+										<div key={block.id} style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
 											<div style={{ fontWeight: 700, marginBottom: 6 }}>{block.name}</div>
 											<div style={{ display: "flex", gap: 8 }}>
 												<button onClick={() => addSavedBlock(block)}>Add</button>
@@ -1207,11 +1277,11 @@ export default function Studio() {
 								{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
 								<div style={{ display: "grid", gap: 8 }}>
 									{filteredAssets.map((file) => (
-										<div key={file.id} style={{ padding: 8, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+										<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
 											<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
 												<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
 											</div>
-											<div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+											<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
 											<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
 										</div>
 									))}
@@ -1239,28 +1309,18 @@ export default function Studio() {
 
 						{leftPanel === "docs" ? (
 							<div style={{ display: "grid", gap: 8, maxHeight: "100%", overflow: "auto" }}>
-								<div style={{ display: "grid", gap: 8 }}>
-									<div style={{ fontWeight: 800 }}>File</div>
-									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-										<button onClick={() => createDoc("flyer")}>New Flyer</button>
-										<button onClick={() => createDoc("square")}>New Square</button>
-										<button onClick={() => createDoc("story")}>New Story</button>
-										<button onClick={() => createDoc("banner")}>New Banner</button>
-										<button onClick={duplicateDoc} disabled={!currentDocRaw}>Duplicate</button>
-										<button onClick={saveCurrentDoc} disabled={!currentDocRaw}>Save</button>
-										<button onClick={exportPng} disabled={!currentDoc}>PNG</button>
-										<button onClick={exportPdf} disabled={!currentDoc}>PDF</button>
-										<button onClick={() => currentDocRaw && deleteDoc(currentDocRaw.id)} disabled={!currentDocRaw}>Delete</button>
-									</div>
+								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+									<div style={{ fontWeight: 800 }}>Documents</div>
+									<button onClick={saveCurrentDoc} disabled={!currentDoc}>Save</button>
 								</div>
 								{docs.length ? docs.map((doc) => (
-									<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: 10 }}>
-										<button onClick={() => { setCurrentId(doc.id); setCurrentPageId(doc.pages?.[0]?.id || null); setSelectedIds([]); setTimeout(() => fitCanvas(doc.pages?.[0] || doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
+									<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
+										<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
 											<div style={{ fontWeight: 700 }}>{doc.name}</div>
-											<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.pages?.[0]?.width || 0} × {doc.pages?.[0]?.height || 0}</div>
+											<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
 										</button>
 										<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-											<button onClick={() => { setCurrentId(doc.id); setCurrentPageId(doc.pages?.[0]?.id || null); setSelectedIds([]); setTimeout(() => fitCanvas(doc.pages?.[0] || doc), 0); }}>Open</button>
+											<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
 											<button onClick={() => deleteDoc(doc.id)}>Delete</button>
 										</div>
 									</div>
@@ -1270,54 +1330,68 @@ export default function Studio() {
 					</div>
 				) : null}
 
-				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
-					{currentDocRaw ? (() => {
-						const pageGap = 72;
-						const pages = currentDocRaw.pages || [];
-						const maxWidth = Math.max(...pages.map((page) => page.width), 0);
-						let runningTop = 0;
-						const layouts = pages.map((page) => { const layout = { page, top: runningTop, left: (maxWidth - page.width) / 2 }; runningTop += page.height + pageGap; return layout; });
-						const base = zoom < 0.25 ? 400 : zoom < 0.5 ? 200 : zoom < 0.9 ? 100 : zoom < 1.4 ? 50 : 25;
-						return <>
-							{showRulers ? <>
-								<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-									{Array.from({ length: Math.ceil(maxWidth / base) + 1 }).map((_, index) => { const mark = index * base; return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: index % 2 === 0 ? 12 : 7, background: "rgba(255,255,255,0.2)" }}><div style={{ position: "absolute", top: 1, left: 3, fontSize: 9, color: "rgba(255,255,255,0.55)" }}>{mark}</div></div>; })}
-								</div>
-								<div style={{ position: "absolute", top: RULER_SIZE, left: 0, bottom: 0, width: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-									{Array.from({ length: Math.ceil(runningTop / base) + 1 }).map((_, index) => { const mark = index * base; return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: index % 2 === 0 ? 12 : 7, background: "rgba(255,255,255,0.2)" }}><div style={{ position: "absolute", left: 1, top: 2, fontSize: 9, color: "rgba(255,255,255,0.55)", transform: "rotate(-90deg)", transformOrigin: "top left" }}>{mark}</div></div>; })}
-								</div>
-								<div style={{ position: "absolute", top: 0, left: 0, width: RULER_SIZE, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 21 }} />
-							</> : null}
-							{layouts.map(({ page, top, left }, idx) => {
-								const active = page.id === currentPageId;
-								const view = active ? currentDoc : { ...currentDocRaw, ...page, elements: page.elements || [], guides: page.guides || [] };
-								const bounds = active ? selectionBounds : null;
-								return <React.Fragment key={page.id}>
-									<div ref={active ? canvasShellRef : null} onMouseDown={() => { if (!active) { setCurrentPageId(page.id); setSelectedIds([]); setSelectedGuideId(null); } }} style={{ position: "absolute", left: pan.x + RULER_SIZE + left * zoom, top: pan.y + RULER_SIZE + top * zoom, width: page.width * zoom, height: page.height * zoom, background: "#111827", borderRadius: 14, overflow: "visible", boxShadow: active ? "0 24px 80px rgba(0,0,0,0.35)" : "0 12px 40px rgba(0,0,0,0.25)", outline: active ? "1px solid rgba(239,68,68,0.35)" : "1px solid rgba(255,255,255,0.06)" }}>
-										<div id={active ? "bf-studio-canvas-inner" : undefined} data-page-canvas={active ? "1" : undefined} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: "linear-gradient(180deg, #1f2937 0%, #0f172a 100%)", overflow: "hidden", borderRadius: 14 / Math.max(zoom, 1) }}>
-											{(view.guides || []).map((guide) => guide.orientation === "vertical" ? <div key={guide.id} onClick={(e) => { e.stopPropagation(); if (active) setSelectedGuideId(guide.id); }} onMouseDown={(e) => { e.stopPropagation(); if (active) setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onDoubleClick={() => active && removeGuide(guide.id)} style={{ position: "absolute", left: guide.position - 4, top: 0, bottom: 0, width: 8, background: "transparent", cursor: active ? "ew-resize" : "default", zIndex: 5 }}><div style={{ position: "absolute", left: 3.5, top: 0, bottom: 0, width: 1, background: GUIDE_COLORS.vertical, boxShadow: selectedGuideId === guide.id ? "0 0 0 2px rgba(239,68,68,0.45)" : "0 0 0 1px rgba(239,68,68,0.25)" }} /></div> : <div key={guide.id} onClick={(e) => { e.stopPropagation(); if (active) setSelectedGuideId(guide.id); }} onMouseDown={(e) => { e.stopPropagation(); if (active) setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onDoubleClick={() => active && removeGuide(guide.id)} style={{ position: "absolute", top: guide.position - 4, left: 0, right: 0, height: 8, background: "transparent", cursor: active ? "ns-resize" : "default", zIndex: 5 }}><div style={{ position: "absolute", top: 3.5, left: 0, right: 0, height: 1, background: GUIDE_COLORS.horizontal, boxShadow: selectedGuideId === guide.id ? "0 0 0 2px rgba(96,165,250,0.45)" : "0 0 0 1px rgba(96,165,250,0.25)" }} /></div>)}
-											{(view.elements || []).map((el) => {
-												if (el.hidden) return null;
-												const isSelected = active && selectedIds.includes(el.id);
-												const coversPage = el.type === "shape" && Number(el.x || 0) === 0 && Number(el.y || 0) === 0 && Number(el.width || 0) >= page.width && Number(el.height || 0) >= page.height;
-												const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "1px solid #ef4444" : "none", outlineOffset: 1, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: coversPage ? "none" : "auto" };
-												const onClick = (e) => { e.stopPropagation(); if (!active) { setCurrentPageId(page.id); setSelectedIds([el.id]); return; } selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); };
-												const onDown = (e) => { if (!active) return; startElementDrag(e, el); };
-												if (el.type === "text") return <div key={el.id} onMouseDown={onDown} onClick={onClick} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-												if (el.type === "shape") return <div key={el.id} onMouseDown={onDown} onClick={onClick} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-												return <img key={el.id} alt="" src={el.src} onMouseDown={onDown} onClick={onClick} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
-											})}
-											{active && bounds ? <div style={{ position: "absolute", left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-											{active && selected && !selected.locked ? <div onMouseDown={startResize} style={{ position: "absolute", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize", zIndex: 10 }} /> : null}
-											{active && marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
-										</div>
+				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+					{currentDoc ? (
+						<>
+							{showRulers ? (
+								<>
+									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
+										{Array.from({ length: Math.ceil(currentDoc.width / 50) + 1 }).map((_, index) => {
+											const mark = index * 50;
+											return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: index % 2 === 0 ? 14 : 8, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", top: 2, left: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										})}
 									</div>
-									{idx === layouts.length - 1 ? <button onClick={(e) => { e.stopPropagation(); addPage(); }} style={{ position: "absolute", left: pan.x + RULER_SIZE + (maxWidth * zoom) / 2 - 18, top: pan.y + RULER_SIZE + (top + page.height) * zoom + 18, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(17,24,39,0.96)", color: "white", zIndex: 12 }}>+</button> : null}
-								</React.Fragment>;
-							})}
-						</>;
-					})() : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
+									<div style={{ position: "absolute", top: RULER_SIZE, left: 0, bottom: 0, width: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
+										{Array.from({ length: Math.ceil(currentDoc.height / 50) + 1 }).map((_, index) => {
+											const mark = index * 50;
+											return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", left: 2, top: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										})}
+									</div>
+									<div style={{ position: "absolute", top: 0, left: 0, width: RULER_SIZE, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 21 }} />
+								</>
+							) : null}
+
+							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: "#111827", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
+								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: "linear-gradient(180deg, #1f2937 0%, #0f172a 100%)", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
+										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
+									) : (
+										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", top: guide.position, left: 0, right: 0, height: 8, marginTop: -4, background: guide.id === selectedGuideId ? "rgba(96,165,250,0.22)" : "transparent", borderTop: `1px solid ${GUIDE_COLORS.horizontal}`, cursor: "ns-resize", zIndex: 9 }} />
+									))}
+									{(currentDoc.elements || []).map((el) => {
+										if (el.hidden) return null;
+										const isSelected = selectedIds.includes(el.id);
+										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= currentDoc.width && Number(el.height || 0) >= currentDoc.height;
+									const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
+										if (el.type === "text") {
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+										}
+										if (el.type === "shape") {
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+										}
+										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+									})}
+									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
+									{selected && !selected.locked ? <div onMouseDown={startResize} style={{ position: "absolute", left: Number(selected.x || 0) + Number(selected.width || 0) - 7, top: Number(selected.y || 0) + Number(selected.height || 0) - 7, width: 14, height: 14, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize", zIndex: 10 }} /> : null}
+									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
+								</div>
+							</div>
+						</>
+					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
+
+				{contextMenu ? (
+					<div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 220), width: 190, zIndex: 80, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+						<div style={{ display: "grid", gap: 6 }}>
+							<button style={panelButtonStyle(false)} onClick={() => { duplicateSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Duplicate</button>
+							<button style={panelButtonStyle(false)} onClick={() => { removeSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Delete</button>
+							<button style={panelButtonStyle(false)} onClick={() => { groupSelection(); setContextMenu(null); }} disabled={selectedIds.length < 2}>Group</button>
+							<button style={panelButtonStyle(false)} onClick={() => { ungroupSelection(); setContextMenu(null); }} disabled={!selectedElements.some((el) => el.groupId)}>Ungroup</button>
+							<button style={panelButtonStyle(false)} onClick={() => { setInspectorOpen(true); setContextMenu(null); }} disabled={!selectedIds.length}>Open Inspector</button>
+							<button style={panelButtonStyle(false)} onClick={() => { if (selectedGuideId) removeGuide(selectedGuideId); setContextMenu(null); }} disabled={!selectedGuideId}>Delete Guide</button>
+						</div>
+					</div>
+				) : null}
 				{inspectorOpen ? (
 					<div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 340, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
@@ -1379,7 +1453,7 @@ export default function Studio() {
 							<div style={{ display: "grid", gap: 6, maxHeight: 320, overflow: "auto" }}>
 								{orderedLayers.length ? orderedLayers.map((el) => (
 									<button key={el.id} onClick={() => selectElement(el, false)} style={{ textAlign: "left", border: selectedIds.includes(el.id) ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: selectedIds.includes(el.id) ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
-										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><div style={{ fontWeight: 700 }}>{el.name || el.type}</div><div style={{ fontSize: 11, opacity: 0.7 }}>#{el._order}</div></div>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><div style={{ fontWeight: 700 }}>{el.name || el.type}</div><div style={{ fontSize: 10, opacity: 0.7 }}>#{el._order}</div></div>
 										<div style={{ fontSize: 12, opacity: 0.72 }}>{el.type}{el.groupId ? ` • ${el.groupName || "grouped"}` : ""}{el.locked ? " • locked" : ""}{el.hidden ? " • hidden" : ""}</div>
 									</button>
 								)) : <div style={{ opacity: 0.7 }}>No layers yet.</div>}
