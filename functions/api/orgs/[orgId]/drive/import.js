@@ -1,69 +1,72 @@
-import { json, bad, now, uuid } from "../../../_lib/http.js";
+import { json, now, uuid } from "../../../_lib/http.js";
 import { requireOrgRole } from "../../../_lib/auth.js";
-import { coerceArray, ensureDriveSchema, getDriveBucket, importDriveFileRecord, normalizeParentId, normalizeString, normalizeTags } from "../../../_lib/drive.js";
+import { ensureDriveSchema, getDb, normalizeNullableId, parseTags, saveFileBlob } from "../../../_lib/drive.js";
 
 export async function onRequestPost({ env, request, params }) {
   const orgId = params.orgId;
   const auth = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!auth.ok) return auth.resp;
 
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return bad(400, "INVALID_JSON");
+  await ensureDriveSchema(env);
+  const db = getDb(env);
+  const body = await request.json().catch(() => ({}));
+  const t = now();
 
-  const db = env.BF_DB;
-  const bucket = getDriveBucket(env);
-  await ensureDriveSchema(db);
+  const folders = Array.isArray(body.folders) ? body.folders : [];
+  const notes = Array.isArray(body.notes) ? body.notes : [];
+  const files = Array.isArray(body.files) ? body.files : [];
+  const templates = Array.isArray(body.templates) ? body.templates : [];
 
-  const ts = now();
-  const folders = coerceArray(body.folders);
-  const notes = coerceArray(body.notes);
-  const templates = coerceArray(body.templates);
-  const files = coerceArray(body.files);
-
-  for (const item of folders) {
-    const id = String(item?.id || uuid());
-    await db.prepare(`INSERT OR REPLACE INTO drive_folders (id, org_id, parent_id, name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind(id, orgId, normalizeParentId(item?.parent_id ?? item?.parentId), normalizeString(item?.name || "untitled folder"), Number(item?.created_at || item?.createdAt || ts), Number(item?.updated_at || item?.updatedAt || ts))
-      .run();
+  for (const folder of folders) {
+    const id = String(folder?.id || uuid());
+    await db.prepare(
+      `INSERT INTO drive_folders (id, org_id, parent_id, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id)
+       DO UPDATE SET parent_id = excluded.parent_id, name = excluded.name, updated_at = excluded.updated_at`
+    ).bind(id, orgId, normalizeNullableId(folder?.parentId), String(folder?.name || "untitled folder"), Number(folder?.createdAt || t), Number(folder?.updatedAt || t)).run();
   }
 
-  for (const item of notes) {
-    const id = String(item?.id || uuid());
-    await db.prepare(`INSERT OR REPLACE INTO drive_notes (id, org_id, parent_id, title, content, tags, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(
-        id,
+  for (const note of notes) {
+    const id = String(note?.id || uuid());
+    await db.prepare(
+      `INSERT INTO drive_notes (id, org_id, parent_id, title, content, tags, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id)
+       DO UPDATE SET parent_id = excluded.parent_id, title = excluded.title, content = excluded.content, tags = excluded.tags, updated_at = excluded.updated_at`
+    ).bind(id, orgId, normalizeNullableId(note?.parentId), String(note?.title || "untitled"), String(note?.body || note?.content || ""), parseTags(note?.tags).join(","), Number(note?.createdAt || t), Number(note?.updatedAt || t)).run();
+  }
+
+  for (const template of templates) {
+    const id = String(template?.id || uuid());
+    await db.prepare(
+      `INSERT INTO drive_templates (id, org_id, name, title, content, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id)
+       DO UPDATE SET name = excluded.name, title = excluded.title, content = excluded.content, updated_at = excluded.updated_at`
+    ).bind(id, orgId, String(template?.name || "template"), String(template?.title || "untitled"), String(template?.body || template?.content || ""), Number(template?.createdAt || t), Number(template?.updatedAt || t)).run();
+  }
+
+  for (const file of files) {
+    const id = String(file?.id || uuid());
+    const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(String(file?.name || "file"))}`;
+    await db.prepare(
+      `INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id)
+       DO UPDATE SET parent_id = excluded.parent_id, name = excluded.name, mime = excluded.mime, size = excluded.size, storage_key = excluded.storage_key, updated_at = excluded.updated_at`
+    ).bind(id, orgId, normalizeNullableId(file?.parentId), String(file?.name || "file"), String(file?.mime || "application/octet-stream"), Number(file?.size || 0), storageKey, Number(file?.createdAt || t), Number(file?.updatedAt || t)).run();
+    if (file?.dataUrl) {
+      await saveFileBlob(env, {
         orgId,
-        normalizeParentId(item?.parent_id ?? item?.parentId),
-        normalizeString(item?.title || "untitled"),
-        normalizeString(item?.content || item?.body || ""),
-        normalizeTags(item?.tags),
-        Number(item?.created_at || item?.createdAt || ts),
-        Number(item?.updated_at || item?.updatedAt || ts)
-      )
-      .run();
+        fileId: id,
+        storageKey,
+        mime: String(file?.mime || "application/octet-stream"),
+        dataUrl: String(file.dataUrl),
+        textContent: String(file?.textContent || ""),
+      });
+    }
   }
 
-  for (const item of templates) {
-    const id = String(item?.id || uuid());
-    await db.prepare(`INSERT OR REPLACE INTO drive_templates (id, org_id, name, title, content, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .bind(
-        id,
-        orgId,
-        normalizeString(item?.name || "template"),
-        normalizeString(item?.title || "untitled"),
-        normalizeString(item?.content || item?.body || ""),
-        Number(item?.created_at || item?.createdAt || ts),
-        Number(item?.updated_at || item?.updatedAt || ts)
-      )
-      .run();
-  }
-
-  for (const item of files) {
-    await importDriveFileRecord({ db, bucket, orgId, item, timestamp: ts });
-  }
-
-  return json({ ok: true, counts: { folders: folders.length, notes: notes.length, files: files.length, templates: templates.length } });
+  return json({ ok: true, imported: { folders: folders.length, notes: notes.length, files: files.length, templates: templates.length } });
 }

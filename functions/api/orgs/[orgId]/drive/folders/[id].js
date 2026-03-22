@@ -1,32 +1,47 @@
-import { json, bad, now } from "../../../../_lib/http.js";
+import { bad } from "../../../../_lib/http.js";
 import { requireOrgRole } from "../../../../_lib/auth.js";
-import { deleteDriveFolderTree, ensureDriveSchema, getDriveBucket, normalizeParentId, normalizeString } from "../../../../_lib/drive.js";
+import { ensureDriveSchema, getDb, normalizeNullableId, json, now } from "../../../../_lib/drive.js";
 
 export async function onRequestPatch({ env, request, params }) {
   const orgId = params.orgId;
-  const id = params.id;
+  const folderId = params.id;
   const auth = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!auth.ok) return auth.resp;
+  await ensureDriveSchema(env);
   const body = await request.json().catch(() => ({}));
-  await ensureDriveSchema(env.BF_DB);
-  const existing = await env.BF_DB.prepare(`SELECT id, parent_id, name FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, id).first();
-  if (!existing) return bad(404, "NOT_FOUND");
-  const name = body.name === undefined ? existing.name : normalizeString(body.name).trim();
-  if (!name) return bad(400, "MISSING_NAME");
-  const parentId = body.parent_id === undefined && body.parentId === undefined ? existing.parent_id : normalizeParentId(body.parent_id ?? body.parentId);
-  if (parentId === id) return bad(400, "INVALID_PARENT");
-  await env.BF_DB.prepare(`UPDATE drive_folders SET name = ?, parent_id = ?, updated_at = ? WHERE org_id = ? AND id = ?`).bind(name, parentId, now(), orgId, id).run();
-  return json({ ok: true });
+  const db = getDb(env);
+  await db.prepare(
+    `UPDATE drive_folders
+     SET parent_id = COALESCE(?, parent_id),
+         name = COALESCE(?, name),
+         updated_at = ?
+     WHERE org_id = ? AND id = ?`
+  ).bind(
+    Object.prototype.hasOwnProperty.call(body, "parentId") ? normalizeNullableId(body.parentId) : null,
+    body.name === undefined ? null : String(body.name || "").trim() || "untitled folder",
+    now(),
+    orgId,
+    folderId
+  ).run();
+  const folder = await db.prepare(`SELECT id, parent_id, name, created_at, updated_at FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).first();
+  if (!folder) return bad(404, "NOT_FOUND");
+  return json({ ok: true, folder: { id: folder.id, parentId: folder.parent_id || null, name: folder.name, createdAt: Number(folder.created_at || 0), updatedAt: Number(folder.updated_at || 0) } });
 }
 
 export async function onRequestDelete({ env, request, params }) {
   const orgId = params.orgId;
-  const id = params.id;
+  const folderId = params.id;
   const auth = await requireOrgRole({ env, request, orgId, minRole: "member" });
   if (!auth.ok) return auth.resp;
-  await ensureDriveSchema(env.BF_DB);
-  const existing = await env.BF_DB.prepare(`SELECT id FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, id).first();
-  if (!existing) return bad(404, "NOT_FOUND");
-  const result = await deleteDriveFolderTree(env.BF_DB, getDriveBucket(env), orgId, id);
-  return json({ ok: true, ...result });
+  await ensureDriveSchema(env);
+  const db = getDb(env);
+  const folder = await db.prepare(`SELECT parent_id FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).first();
+  if (!folder) return bad(404, "NOT_FOUND");
+  const parentId = folder.parent_id || null;
+  const t = now();
+  await db.prepare(`UPDATE drive_folders SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
+  await db.prepare(`UPDATE drive_notes SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
+  await db.prepare(`UPDATE drive_files SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
+  await db.prepare(`DELETE FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).run();
+  return json({ ok: true, deleted: true, id: folderId });
 }

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
+import { api } from "../utils/api.js";
 import DriveSidebar from "../components/drive/DriveSidebar.jsx";
 import NoteEditor from "../components/drive/NoteEditor.jsx";
 import NotePreview from "../components/drive/NotePreview.jsx";
@@ -8,9 +10,8 @@ import NoteInspector from "../components/drive/NoteInspector.jsx";
 import RichTextToolbar from "../components/drive/RichTextToolbar.jsx";
 import { renderTemplate } from "../components/drive/templateEngine.js";
 
-const STORAGE_KEY = "bf_drive_v14";
+const LEGACY_STORAGE_KEY = "bf_drive_v14";
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-const newId = (p) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 function parseTags(body) {
   const matches = [...String(body || "").matchAll(/(^|\s)#([a-zA-Z0-9/_-]+)/gim)];
@@ -53,8 +54,7 @@ function isEditableTextFile(file) {
   return String(file?.mime || "").startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext);
 }
 function canPreviewFileInApp(file) {
-  if (!file?.dataUrl) return false;
-  const mime = String(file.mime || "");
+  const mime = String(file?.mime || "");
   if (mime.startsWith("image/")) return true;
   if (mime === "application/pdf") return true;
   if (mime.startsWith("audio/")) return true;
@@ -136,6 +136,10 @@ tags: weekly, checkin
 ];
 
 export default function Drive() {
+  const { orgId = "" } = useParams();
+  const uiStorageKey = `bf_drive_ui_v14_${orgId}`;
+  const importMarkerKey = `bf_drive_imported_${orgId}`;
+
   const [folders, setFolders] = useState([]);
   const [notes, setNotes] = useState([]);
   const [files, setFiles] = useState([]);
@@ -154,8 +158,8 @@ export default function Drive() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [splitRatio, setSplitRatio] = useState(0.5);
-
-
+  const [loadState, setLoadState] = useState("loading");
+  const [loadError, setLoadError] = useState("");
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(false);
@@ -166,27 +170,88 @@ export default function Drive() {
 
   useEffect(() => {
     try {
-      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      setFolders(Array.isArray(raw.folders) ? raw.folders : []);
-      setNotes(Array.isArray(raw.notes) ? raw.notes : []);
-      setFiles(Array.isArray(raw.files) ? raw.files : []);
-      setTemplates(Array.isArray(raw.templates) && raw.templates.length ? raw.templates : STARTER_TEMPLATES);
+      const raw = JSON.parse(localStorage.getItem(uiStorageKey) || "{}");
       setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 220, 380) : 296);
       setSplitRatio(Number.isFinite(raw.splitRatio) ? clamp(raw.splitRatio, 0.3, 0.7) : 0.5);
       setViewMode(["edit", "read", "split"].includes(raw.viewMode) ? raw.viewMode : "split");
       setInspectorOpen(!!raw.inspectorOpen);
       setPropertiesCollapsed(!!raw.propertiesCollapsed);
-    } catch {
-      setTemplates(STARTER_TEMPLATES);
-    }
-  }, []);
+    } catch {}
+  }, [uiStorageKey]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ folders, notes, files, templates, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed }));
+      localStorage.setItem(uiStorageKey, JSON.stringify({ sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed }));
     } catch {}
-  }, [folders, notes, files, templates, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
+  }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
 
+  async function loadDrive({ preserveSelection = true } = {}) {
+    if (!orgId) return;
+    setLoadState("loading");
+    setLoadError("");
+    try {
+      let data = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive`);
+      const empty = !data?.folders?.length && !data?.notes?.length && !data?.files?.length && !data?.templates?.length;
+      if (empty) {
+        try {
+          const alreadyImported = localStorage.getItem(importMarkerKey) === "1";
+          const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "{}");
+          const hasLegacy = Array.isArray(legacy?.folders) && legacy.folders.length || Array.isArray(legacy?.notes) && legacy.notes.length || Array.isArray(legacy?.files) && legacy.files.length || Array.isArray(legacy?.templates) && legacy.templates.length;
+          if (!alreadyImported && hasLegacy) {
+            await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/import`, {
+              method: "POST",
+              body: JSON.stringify({
+                folders: legacy.folders || [],
+                notes: legacy.notes || [],
+                files: legacy.files || [],
+                templates: legacy.templates || STARTER_TEMPLATES,
+              }),
+            });
+            localStorage.setItem(importMarkerKey, "1");
+            data = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive`);
+          }
+        } catch {}
+      }
+      const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
+      const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
+      const nextFiles = Array.isArray(data?.files) ? data.files : [];
+      const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
+      setFolders(nextFolders);
+      setNotes(nextNotes);
+      setFiles(nextFiles);
+      setTemplates(nextTemplates);
+      if (preserveSelection && selectedId) {
+        if (selectedKind === "note") {
+          const note = nextNotes.find((n) => n.id === selectedId);
+          if (note) {
+            skipNextSave.current = true;
+            setTitle(note.title || "untitled");
+            setContent(note.body || "");
+          } else {
+            setSelectedId(null);
+            setTitle("untitled");
+            setContent("");
+          }
+        }
+        if (selectedKind === "file") {
+          const file = nextFiles.find((f) => f.id === selectedId);
+          if (!file) {
+            setSelectedId(null);
+            setTitle("untitled");
+            setContent("");
+          }
+        }
+      }
+      setLoadState("ready");
+    } catch (e) {
+      setLoadError(String(e?.message || e || "Failed to load Drive"));
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    loadDrive({ preserveSelection: false });
+  }, [orgId]);
 
   useEffect(() => {
     const onMove = (e) => {
@@ -224,12 +289,11 @@ export default function Drive() {
         if (focusMode) setFocusMode(false);
         setInspectorOpen(false);
         setMenuOpen(false);
-        setShowHelp(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [focusMode]);
+  }, [focusMode, selectedId, selectedKind, title, content]);
 
   const selectedNote = selectedKind === "note" ? notes.find((n) => n.id === selectedId) || null : null;
   const selectedFile = selectedKind === "file" ? files.find((f) => f.id === selectedId) || null : null;
@@ -250,18 +314,31 @@ export default function Drive() {
     document.body.style.cursor = "col-resize";
   }
 
-  function createFolder() {
+  async function createFolder() {
     const name = prompt("Folder name?");
     if (!name) return;
-    setFolders((prev) => [...prev, { id: newId("folder"), name: String(name).trim(), parentId: currentFolder }]);
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
+      method: "POST",
+      body: JSON.stringify({ name: String(name).trim(), parentId: currentFolder }),
+    });
+    const folder = res?.folder;
+    if (!folder) return;
+    setFolders((prev) => [...prev, folder]);
+    setCurrentFolder(folder.id);
   }
-  function renameFolder(id) {
+  async function renameFolder(id) {
     const folder = folders.find((f) => f.id === id);
     const name = prompt("Rename folder", folder?.name || "");
     if (!name) return;
-    setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: String(name).trim() } : f)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: String(name).trim() }),
+    });
+    if (!res?.folder) return;
+    setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
   }
-  function deleteFolder(id) {
+  async function deleteFolder(id) {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
     const parent = folders.find((f) => f.id === id)?.parentId ?? null;
     setFolders((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)).filter((f) => f.id !== id));
     setNotes((prev) => prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n)));
@@ -269,27 +346,29 @@ export default function Drive() {
     if (currentFolder === id) setCurrentFolder(parent);
   }
 
-  function createNote() {
-    const note = { id: newId("note"), title: "untitled", body: "", parentId: currentFolder, updatedAt: Date.now(), tags: [] };
+  async function createNoteWithPayload(payload) {
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const note = res?.note;
+    if (!note) return null;
     skipNextSave.current = true;
     setNotes((prev) => [note, ...prev]);
     setSelectedId(note.id);
     setSelectedKind("note");
-    setTitle(note.title);
-    setContent(note.body);
+    setTitle(note.title || "untitled");
+    setContent(note.body || "");
     setStatus("saved");
+    return note;
   }
-  function createNoteFromTemplate(template) {
+  async function createNote() {
+    await createNoteWithPayload({ title: "untitled", body: "", parentId: currentFolder, tags: [] });
+  }
+  async function createNoteFromTemplate(template) {
     const renderedTitle = renderTemplate(template.title || template.name || "untitled", {});
     const renderedBody = renderTemplate(template.body || "", { title: renderedTitle });
-    const note = { id: newId("note"), title: renderedTitle, body: renderedBody, parentId: currentFolder, updatedAt: Date.now(), tags: [] };
-    skipNextSave.current = true;
-    setNotes((prev) => [note, ...prev]);
-    setSelectedId(note.id);
-    setSelectedKind("note");
-    setTitle(note.title);
-    setContent(note.body);
-    setStatus("saved");
+    await createNoteWithPayload({ title: renderedTitle, body: renderedBody, parentId: currentFolder, tags: [] });
   }
   function selectNote(id) {
     const note = notes.find((n) => n.id === id);
@@ -301,19 +380,25 @@ export default function Drive() {
     setContent(note.body || "");
     setStatus("saved");
   }
-  function renameNote(id) {
+  async function renameNote(id) {
     const note = notes.find((n) => n.id === id);
     const name = prompt("Rename note", note?.title || "");
     if (!name) return;
-    const nextName = String(name).trim();
-    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, title: nextName, updatedAt: Date.now() } : n)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: String(name).trim() }),
+    });
+    if (!res?.note) return;
+    setNotes((prev) => prev.map((n) => (n.id === id ? res.note : n)));
     if (selectedId === id && selectedKind === "note") {
       skipNextSave.current = true;
-      setTitle(nextName);
+      setTitle(res.note.title || "untitled");
+      setContent(res.note.body || "");
       setStatus("saved");
     }
   }
-  function deleteNote(id) {
+  async function deleteNote(id) {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
     setNotes((prev) => prev.filter((n) => n.id !== id));
     if (selectedId === id && selectedKind === "note") {
       setSelectedId(null);
@@ -322,24 +407,35 @@ export default function Drive() {
       setStatus("saved");
     }
   }
-  function moveNote(id) {
+  async function moveNote(id) {
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
-    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, parentId: target || null, updatedAt: Date.now() } : n)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ parentId: target || null }),
+    });
+    if (!res?.note) return;
+    setNotes((prev) => prev.map((n) => (n.id === id ? res.note : n)));
   }
 
-  function renameFile(id) {
+  async function renameFile(id) {
     const file = files.find((f) => f.id === id);
     const name = prompt("Rename file", file?.name || "");
     if (!name) return;
-    const nextName = String(name).trim();
-    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, name: nextName, updatedAt: Date.now() } : f)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: String(name).trim() }),
+    });
+    if (!res?.file) return;
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...res.file } : f)));
     if (selectedId === id && selectedKind === "file") {
       skipNextSave.current = true;
-      setTitle(nextName);
+      setTitle(res.file.name || "untitled");
+      setContent(res.file.textContent || content);
       setStatus("saved");
     }
   }
-  function deleteFile(id) {
+  async function deleteFile(id) {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, { method: "DELETE" });
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedId === id && selectedKind === "file") {
       setSelectedId(null);
@@ -348,63 +444,102 @@ export default function Drive() {
       setStatus("saved");
     }
   }
-  function moveFile(id) {
+  async function moveFile(id) {
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
-    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, parentId: target || null, updatedAt: Date.now() } : f)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ parentId: target || null }),
+    });
+    if (!res?.file) return;
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...res.file } : f)));
+  }
+
+  async function hydrateFile(fileId) {
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(fileId)}`);
+    const hydrated = res?.file || null;
+    if (!hydrated) return null;
+    setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, ...hydrated } : f)));
+    return hydrated;
   }
 
   function openFileInBrowser(file) {
-    if (!file?.dataUrl) return;
-    const a = document.createElement("a");
-    a.href = file.dataUrl;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.click();
+    if (file?.dataUrl) {
+      const a = document.createElement("a");
+      a.href = file.dataUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.click();
+      return;
+    }
+    window.open(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download`, "_blank", "noopener,noreferrer");
   }
-  function openFile(file) {
-    if (!file?.dataUrl) return;
-    if (canPreviewFileInApp(file)) {
+  async function openFile(file) {
+    let nextFile = file;
+    if (!nextFile?.dataUrl && !isEditableTextFile(nextFile)) {
+      if (!canPreviewFileInApp(nextFile)) {
+        openFileInBrowser(nextFile);
+        return;
+      }
+    }
+    if (!nextFile?.dataUrl && (canPreviewFileInApp(nextFile) || isEditableTextFile(nextFile))) {
+      nextFile = await hydrateFile(nextFile.id);
+      if (!nextFile) return;
+    }
+    if (canPreviewFileInApp(nextFile)) {
       skipNextSave.current = true;
-      setSelectedId(file.id);
+      setSelectedId(nextFile.id);
       setSelectedKind("file");
-      setTitle(file.name || "untitled");
-      setContent(file.textContent || "");
+      setTitle(nextFile.name || "untitled");
+      setContent(nextFile.textContent || "");
       setStatus("saved");
       return;
     }
-    openFileInBrowser(file);
+    openFileInBrowser(nextFile);
   }
   function downloadFile(file) {
     const a = document.createElement("a");
-    a.href = file.dataUrl;
+    a.href = `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
     a.download = file.name || "download";
     a.click();
   }
 
-  function saveNow() {
+  async function saveNow() {
     if (!selectedId) return;
-    if (selectedKind === "note") {
-      const parsed = parseFrontmatter(content);
-      const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
-      const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
-      setNotes((prev) => prev.map((n) => (n.id === selectedId ? { ...n, title, body: content, tags: combinedTags, updatedAt: Date.now() } : n)));
-      setStatus("saved");
-      return;
-    }
-    if (selectedKind === "file" && fileIsEditable) {
-      setFiles((prev) => prev.map((file) => {
-        if (file.id !== selectedId) return file;
-        const mime = file.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
-        return {
-          ...file,
-          name: title,
-          textContent: content,
-          dataUrl: textToDataUrl(content, mime),
-          size: new Blob([content], { type: mime }).size,
-          updatedAt: Date.now(),
-        };
-      }));
-      setStatus("saved");
+    try {
+      if (selectedKind === "note") {
+        const parsed = parseFrontmatter(content);
+        const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
+        const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
+        const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title, body: content, tags: combinedTags }),
+        });
+        if (res?.note) {
+          setNotes((prev) => prev.map((n) => (n.id === selectedId ? res.note : n)));
+        }
+        setStatus("saved");
+        return;
+      }
+      if (selectedKind === "file" && fileIsEditable) {
+        const mime = selectedFile?.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
+        const dataUrl = textToDataUrl(content, mime);
+        const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(selectedId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: title,
+            mime,
+            size: new Blob([content], { type: mime }).size,
+            dataUrl,
+            textContent: content,
+          }),
+        });
+        if (res?.file) {
+          setFiles((prev) => prev.map((file) => (file.id === selectedId ? { ...file, ...res.file } : file)));
+        }
+        setStatus("saved");
+      }
+    } catch {
+      setStatus("error");
     }
   }
 
@@ -417,7 +552,7 @@ export default function Drive() {
     }
     setStatus("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => saveNow(), 350);
+    saveTimer.current = setTimeout(() => { saveNow(); }, 350);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [selectedId, selectedKind, title, content, fileIsEditable]);
 
@@ -432,50 +567,61 @@ export default function Drive() {
     if (isEditableTextFile(file) || String(file.type || "").startsWith("text/")) {
       try { textContent = await file.text(); } catch {}
     }
-    return { id: newId("file"), name: file.name, parentId, updatedAt: Date.now(), size: file.size, mime: file.type || "application/octet-stream", dataUrl, textContent, relativePath };
+    return { name: file.name, parentId, size: file.size, mime: file.type || "application/octet-stream", dataUrl, textContent, relativePath };
   }
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
-    const records = await Promise.all(chosen.map((file) => fileToStoredRecord(file, currentFolder)));
-    setFiles((prev) => [...records, ...prev]);
+    for (const rawFile of chosen) {
+      const record = await fileToStoredRecord(rawFile, currentFolder);
+      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+        method: "POST",
+        body: JSON.stringify(record),
+      });
+      if (res?.file) setFiles((prev) => [res.file, ...prev]);
+    }
     event.target.value = "";
+  }
+  async function ensureFolderChain(segments) {
+    let parentId = currentFolder;
+    let nextFolders = folders;
+    for (const segment of segments) {
+      let existing = nextFolders.find((folder) => (folder.parentId || null) === (parentId || null) && folder.name === segment);
+      if (!existing) {
+        const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
+          method: "POST",
+          body: JSON.stringify({ name: segment, parentId }),
+        });
+        existing = res?.folder || null;
+        if (existing) {
+          nextFolders = [...nextFolders, existing];
+          setFolders(nextFolders);
+        }
+      }
+      parentId = existing?.id || parentId;
+    }
+    return parentId;
   }
   async function onUploadFolder(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
-    let nextFolders = [...folders];
-    const folderLookup = new Map(nextFolders.map((f) => [`${f.parentId || "root"}::${f.name}`, f.id]));
-    function ensureFolderChain(segments) {
-      let parentId = currentFolder;
-      for (const segment of segments) {
-        const key = `${parentId || "root"}::${segment}`;
-        let existingId = folderLookup.get(key);
-        if (!existingId) {
-          existingId = newId("folder");
-          nextFolders.push({ id: existingId, name: segment, parentId });
-          folderLookup.set(key, existingId);
-        }
-        parentId = existingId;
-      }
-      return parentId;
-    }
-    const records = [];
     for (const file of chosen) {
       const rel = String(file.webkitRelativePath || file.name);
       const parts = rel.split("/").filter(Boolean);
       const fileName = parts.pop() || file.name;
-      const folderParent = parts.length ? ensureFolderChain(parts) : currentFolder;
+      const parentId = parts.length ? await ensureFolderChain(parts) : currentFolder;
       const wrapped = new File([file], fileName, { type: file.type });
-      const record = await fileToStoredRecord(wrapped, folderParent, rel);
-      records.push(record);
+      const record = await fileToStoredRecord(wrapped, parentId, rel);
+      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+        method: "POST",
+        body: JSON.stringify(record),
+      });
+      if (res?.file) setFiles((prev) => [res.file, ...prev]);
     }
-    setFolders(nextFolders);
-    setFiles((prev) => [...records, ...prev]);
     event.target.value = "";
   }
 
-  function openLinkedNoteByTitle(rawTitle) {
+  async function openLinkedNoteByTitle(rawTitle) {
     const clean = String(rawTitle || "").trim();
     const existingId = noteMap.get(clean.toLowerCase());
     if (existingId) {
@@ -485,14 +631,7 @@ export default function Drive() {
       return;
     }
     if (!window.confirm(`Create note "${clean}"?`)) return;
-    const note = { id: newId("note"), title: clean || "untitled", body: "", parentId: currentFolder, updatedAt: Date.now(), tags: [] };
-    skipNextSave.current = true;
-    setNotes((prev) => [note, ...prev]);
-    setSelectedId(note.id);
-    setSelectedKind("note");
-    setTitle(note.title);
-    setContent("");
-    setStatus("saved");
+    await createNoteWithPayload({ title: clean || "untitled", body: "", parentId: currentFolder, tags: [] });
   }
 
   function wrapSelection(prefix, suffix = prefix) {
@@ -554,37 +693,39 @@ export default function Drive() {
     const parsed = parseFrontmatter(content);
     setContent(serializeFrontmatter(parsed.properties.filter((p) => p.key !== key), parsed.body));
   }
-  function saveCurrentAsTemplate() {
+  async function saveCurrentAsTemplate() {
     if (!content) return;
     const name = prompt("Template name?", title || "Untitled template");
     if (!name) return;
-    const next = { id: newId("tpl"), name: String(name).trim(), title: title || "untitled", body: content || "" };
-    setTemplates((prev) => [next, ...prev.filter((x) => x.name !== next.name)]);
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates`, {
+      method: "POST",
+      body: JSON.stringify({ name: String(name).trim(), title: title || "untitled", body: content || "" }),
+    });
+    if (res?.template) {
+      setTemplates((prev) => [res.template, ...prev.filter((x) => x.id !== res.template.id)]);
+    }
   }
-  function editTemplate(id) {
+  async function editTemplate(id) {
     const tpl = templates.find((x) => x.id === id);
     if (!tpl) return;
-    const nextName = prompt("Template name", tpl.name || "") ?? tpl.name;
+    const nextName = prompt("Template name", tpl.name || "");
     if (nextName === null) return;
-    const nextTitle = prompt("Template note title", tpl.title || "") ?? tpl.title;
+    const nextTitle = prompt("Template note title", tpl.title || "");
     if (nextTitle === null) return;
-    const nextBody = prompt("Template body", tpl.body || "") ?? tpl.body;
+    const nextBody = prompt("Template body", tpl.body || "");
     if (nextBody === null) return;
-    setTemplates((prev) => prev.map((x) => (x.id === id ? { ...x, name: String(nextName).trim(), title: String(nextTitle), body: String(nextBody) } : x)));
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: String(nextName).trim(), title: String(nextTitle), body: String(nextBody) }),
+    });
+    if (res?.template) setTemplates((prev) => prev.map((x) => (x.id === id ? res.template : x)));
   }
-  function applyTemplate(template) {
+  async function applyTemplate(template) {
     if (!template) return;
     const renderedTitle = renderTemplate(template.title || template.name || "untitled", { title });
     const renderedBody = renderTemplate(template.body || "", { title: renderedTitle });
     if (!selectedId || selectedKind !== "note") {
-      const note = { id: newId("note"), title: renderedTitle, body: renderedBody, parentId: currentFolder, updatedAt: Date.now(), tags: [] };
-      skipNextSave.current = true;
-      setNotes((prev) => [note, ...prev]);
-      setSelectedId(note.id);
-      setSelectedKind("note");
-      setTitle(note.title);
-      setContent(note.body);
-      setStatus("saved");
+      await createNoteWithPayload({ title: renderedTitle, body: renderedBody, parentId: currentFolder, tags: [] });
       return;
     }
     const el = editorRef.current;
@@ -601,7 +742,8 @@ export default function Drive() {
       el.setSelectionRange(start + insertion.length, start + insertion.length);
     });
   }
-  function deleteTemplate(id) {
+  async function deleteTemplate(id) {
+    await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
     setTemplates((prev) => prev.filter((tpl) => tpl.id !== id));
   }
 
@@ -656,7 +798,18 @@ export default function Drive() {
         <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
           <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} compact />
 
-          {showEditableDocument ? (
+          {loadState === "loading" ? (
+            <div className="card" style={{ padding: 18, maxWidth: 560 }}>
+              <h2 style={{ marginTop: 0, marginBottom: 10 }}>Drive</h2>
+              <div className="helper">Loading org Drive…</div>
+            </div>
+          ) : loadState === "error" ? (
+            <div className="card" style={{ padding: 18, maxWidth: 560 }}>
+              <h2 style={{ marginTop: 0, marginBottom: 10 }}>Drive</h2>
+              <div className="helper" style={{ marginBottom: 12 }}>{loadError || "Drive failed to load."}</div>
+              <button className="btn" type="button" onClick={() => loadDrive({ preserveSelection: false })}>Retry</button>
+            </div>
+          ) : showEditableDocument ? (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" style={{ flex: 1, minWidth: 220, fontSize: 20, fontWeight: 800, background: "transparent", border: "none", outline: "none", color: "#fff", padding: "2px 0" }} />
@@ -725,19 +878,18 @@ export default function Drive() {
                   <div className="helper">Notes, folders, uploaded files, markdown editing, templates, backlinks, frontmatter properties, split view, and inspector.</div>
                 </div>
                 <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Templates</div>
-                  <div className="helper">Templates can create a new note, insert into the current note, and be edited in app.</div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Storage</div>
+                  <div className="helper">Drive content now loads from this org instead of living only in browser localStorage.</div>
                 </div>
                 <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Supported template tokens</div>
-                  <div className="helper"><code>{'<% tp.date.now("YYYY-MM-DD") %>'}</code>, <code>{'<% tp.date.now("HH:mm") %>'}</code>, <code>{'<% tp.date.now("dddd") %>'}</code>, <code>{'<% tp.date.now("YYYY-[W]WW") %>'}</code>, <code>{'<% tp.file.title %>'}</code>, <code>{"{{date:YYYY-MM-DD}}"}</code>, <code>{"{{date:HH:mm}}"}</code>, <code>{"{{date:dddd}}"}</code>, and <code>{"{{title}}"}</code>.</div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Templates</div>
+                  <div className="helper">Templates can create a new note, insert into the current note, and be edited in app.</div>
                 </div>
               </div>
             </div>
           )}
         </div>
       </div>
-
 
       {inspectorOpen && selectedNote ? (
         <div style={{ position: "fixed", top: focusMode ? 8 : 94, right: 8, width: 250, maxHeight: focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)", overflow: "auto", zIndex: 90 }}>
