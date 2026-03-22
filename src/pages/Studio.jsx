@@ -108,6 +108,7 @@ function makeDoc(preset = "flyer") {
 		preset,
 		width: PRESETS[preset]?.width || 1080,
 		height: PRESETS[preset]?.height || 1350,
+		background: "#ffffff",
 		elements: [],
 		guides: [],
 		updatedAt: Date.now(),
@@ -362,7 +363,7 @@ async function renderDocToCanvas(doc, bindings) {
 	canvas.width = doc.width;
 	canvas.height = doc.height;
 	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = "#111827";
+	ctx.fillStyle = doc.background || "#ffffff";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 	for (const el of doc.elements || []) {
 		if (el.hidden) continue;
@@ -436,8 +437,8 @@ export default function Studio() {
 	const [showBoundPreview, setShowBoundPreview] = React.useState(true);
 	const [leftPanel, setLeftPanel] = React.useState(null);
 	const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
-	const [viewMenuOpen, setViewMenuOpen] = React.useState(false);
 	const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
+	const [clipboard, setClipboard] = React.useState([]);
 	const [contextMenu, setContextMenu] = React.useState(null);
 	const [selectedGuideId, setSelectedGuideId] = React.useState(null);
 	const [inspectorOpen, setInspectorOpen] = React.useState(false);
@@ -577,7 +578,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeTextElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -586,7 +587,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeShapeElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -595,7 +596,7 @@ export default function Studio() {
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
 		const element = makeImageElement({ src, name });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
@@ -650,7 +651,7 @@ export default function Studio() {
 		snapshot();
 		const toDup = currentDoc.elements.filter((el) => selectedIds.includes(el.id));
 		const dupes = withNewIds(toDup).map((el) => ({ ...el, name: `${el.name || el.type} Copy` }));
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, ...dupes] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...dupes] }));
 		setSelectedIds(dupes.map((el) => el.id));
 	};
 
@@ -697,7 +698,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeTextElement({ name: label, text: `{{${token}}}`, x: 80, y: 80 + ((currentDoc?.elements?.length || 0) * 24), width: 420, height: 80 });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -758,7 +759,7 @@ export default function Studio() {
 		const element = { ...clone(block.element), id: uid(), x: Number(block.element?.x || 80) + 24, y: Number(block.element?.y || 80) + 24, name: `${block.name} Copy` };
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -882,7 +883,7 @@ export default function Studio() {
 			window.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("keyup", onKeyUp);
 		};
-	}, [selectedIds, selectedElements, docs, undo, redo, updateElements, snapshot]);
+	}, [selectedIds, selectedElements, docs, undo, redo, updateElements, snapshot, clipboard, currentDoc, commitDocs, selectedGuideId]);
 
 	const selectElement = React.useCallback((el, add = false) => {
 		if (!el) return;
@@ -903,7 +904,7 @@ export default function Studio() {
 		if (!currentDoc || el.locked) return;
 		e.preventDefault();
 		e.stopPropagation();
-		const add = e.shiftKey;
+		const add = e.shiftKey || e.ctrlKey || e.metaKey;
 		if (!selectedIds.includes(el.id) || (!add && selectedIds.length !== (el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1))) {
 			selectElement(el, add);
 		}
@@ -920,11 +921,20 @@ export default function Studio() {
 		setDragState({ ids, pointer, origins });
 	};
 
-	const startResize = (e) => {
+	const startResize = (e, handle = "se") => {
 		if (!selected || selected.locked) return;
 		e.preventDefault();
 		e.stopPropagation();
-		setResizeState({ startX: e.clientX, startY: e.clientY, width: Number(selected.width || 1), height: Number(selected.height || 1), id: selected.id });
+		setResizeState({
+			startX: e.clientX,
+			startY: e.clientY,
+			x: Number(selected.x || 0),
+			y: Number(selected.y || 0),
+			width: Number(selected.width || 1),
+			height: Number(selected.height || 1),
+			id: selected.id,
+			handle,
+		});
 	};
 
 	const getCanvasPoint = React.useCallback((clientX, clientY) => {
@@ -940,7 +950,6 @@ export default function Studio() {
 		if (!currentDoc) return;
 		setLeftPanel(null);
 		setFileMenuOpen(false);
-		setViewMenuOpen(false);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 		if (spacePan || tool === "hand" || e.button === 1) {
@@ -980,10 +989,36 @@ export default function Studio() {
 				if (!el) return;
 				const dx = (e.clientX - resizeState.startX) / zoom;
 				const dy = (e.clientY - resizeState.startY) / zoom;
-				updateElement(resizeState.id, {
-					width: clamp(snapValue(resizeState.width + dx, [80, 120, 240, currentDoc.width - Number(el.x || 0)], 8), 24, currentDoc.width - Number(el.x || 0)),
-					height: clamp(snapValue(resizeState.height + dy, [40, 80, 120, 240, currentDoc.height - Number(el.y || 0)], 8), 24, currentDoc.height - Number(el.y || 0)),
-				});
+				const handle = resizeState.handle || "se";
+				let nextX = resizeState.x;
+				let nextY = resizeState.y;
+				let nextWidth = resizeState.width;
+				let nextHeight = resizeState.height;
+				if (handle.includes("e")) nextWidth = resizeState.width + dx;
+				if (handle.includes("s")) nextHeight = resizeState.height + dy;
+				if (handle.includes("w")) {
+					nextX = resizeState.x + dx;
+					nextWidth = resizeState.width - dx;
+				}
+				if (handle.includes("n")) {
+					nextY = resizeState.y + dy;
+					nextHeight = resizeState.height - dy;
+				}
+				const minW = 24;
+				const minH = 24;
+				if (nextWidth < minW) {
+					if (handle.includes("w")) nextX -= (minW - nextWidth);
+					nextWidth = minW;
+				}
+				if (nextHeight < minH) {
+					if (handle.includes("n")) nextY -= (minH - nextHeight);
+					nextHeight = minH;
+				}
+				nextX = clamp(nextX, 0, currentDoc.width - minW);
+				nextY = clamp(nextY, 0, currentDoc.height - minH);
+				nextWidth = clamp(nextWidth, minW, currentDoc.width - nextX);
+				nextHeight = clamp(nextHeight, minH, currentDoc.height - nextY);
+				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
 				const point = getCanvasPoint(e.clientX, e.clientY);
@@ -1051,7 +1086,7 @@ export default function Studio() {
 			const docId = ensureDoc(currentDoc?.preset || "flyer");
 			snapshot();
 			const element = makeImageElement({ src: String(reader.result || ""), name: file.name || "Image", x: Math.max(0, point.x - 160), y: Math.max(0, point.y - 120) });
-			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...doc.elements, element] }));
+			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
 			setCurrentId(docId);
 			setSelectedIds([element.id]);
 		};
@@ -1074,7 +1109,6 @@ export default function Studio() {
 	const closeMenus = () => {
 		setLeftPanel(null);
 		setFileMenuOpen(false);
-		setViewMenuOpen(false);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 	};
@@ -1095,11 +1129,25 @@ export default function Studio() {
 	const exportPdf = async () => {
 		if (!currentDoc) return;
 		const canvas = await renderDocToCanvas(currentDoc, bindings);
-		const url = canvas.toDataURL("image/png");
-		const win = window.open("", "_blank", "noopener,noreferrer,width=900,height=1200");
-		if (!win) return;
-		win.document.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#111;}img{display:block;max-width:100%;width:100%;height:auto;}@media print{body{background:#fff;}img{page-break-after:always;}}</style></head><body><img src="${url}" alt="" onload="setTimeout(()=>window.print(),120)" /></body></html>`);
-		win.document.close();
+		const dataUrl = canvas.toDataURL("image/png");
+		const frame = document.createElement("iframe");
+		frame.style.position = "fixed";
+		frame.style.right = "0";
+		frame.style.bottom = "0";
+		frame.style.width = "0";
+		frame.style.height = "0";
+		frame.style.border = "0";
+		document.body.appendChild(frame);
+		const doc = frame.contentWindow?.document;
+		if (!doc) return;
+		doc.open();
+		doc.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#fff;}img{display:block;width:100%;height:auto;}@page{size:auto;margin:0;}</style></head><body><img src="${dataUrl}" alt="" /></body></html>`);
+		doc.close();
+		setTimeout(() => {
+			frame.contentWindow?.focus();
+			frame.contentWindow?.print();
+			setTimeout(() => frame.remove(), 1500);
+		}, 150);
 	};
 
 	React.useEffect(() => {
@@ -1109,8 +1157,7 @@ export default function Studio() {
 				setContextMenu(null);
 				setLeftPanel(null);
 				setFileMenuOpen(false);
-				setViewMenuOpen(false);
-				setExportMenuOpen(false);
+						setExportMenuOpen(false);
 			}
 		};
 		window.addEventListener("click", onGlobalDown);
@@ -1129,7 +1176,10 @@ export default function Studio() {
 
 	const multiSelection = selectedIds.length > 1;
 	const currentGuides = currentDoc?.guides || [];
-	const rulerStep = zoom >= 2 ? 25 : zoom >= 1.2 ? 50 : zoom >= 0.8 ? 100 : zoom >= 0.45 ? 200 : 400;
+	const rulerStep = React.useMemo(() => {
+		const steps = [5, 10, 25, 50, 100, 200, 500, 1000];
+		return steps.find((step) => step * zoom >= 45) || 1000;
+	}, [zoom]);
 
 
 	return (
@@ -1138,7 +1188,7 @@ export default function Studio() {
 
 			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
-					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setViewMenuOpen(false); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
+					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
 					{fileMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 							<div style={{ display: "grid", gap: 6 }}>
@@ -1169,20 +1219,7 @@ export default function Studio() {
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100</button>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))} disabled={!currentDoc}>+</button>
 					<div style={{ minWidth: 46, textAlign: "center", opacity: 0.8 }}>{Math.round(zoom * 100)}%</div>
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setViewMenuOpen((v) => !v); setExportMenuOpen(false); setFileMenuOpen(false); }}>⋯</button>
-					{viewMenuOpen ? (
-						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, right: 46, width: 174, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
-							<div style={{ display: "grid", gap: 6 }}>
-								<button style={panelButtonStyle(tool === "hand")} onClick={() => setTool((t) => t === "hand" ? "select" : "hand")}>{tool === "hand" ? "Disable Hand" : "Enable Hand"}</button>
-								<button style={panelButtonStyle(showRulers)} onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Hide Rulers" : "Show Rulers"}</button>
-								<button style={panelButtonStyle(inspectorOpen)} onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide Inspector" : "Show Inspector"}</button>
-								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
-								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
-								<button style={panelButtonStyle(false)} onClick={() => selectedGuideId && removeGuide(selectedGuideId)} disabled={!selectedGuideId}>Delete Selected Guide</button>
-							</div>
-						</div>
-					) : null}
-					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setExportMenuOpen((v) => !v); setViewMenuOpen(false); setFileMenuOpen(false); }}>⇩</button>
+					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setExportMenuOpen((v) => !v); setFileMenuOpen(false); }}>⇩</button>
 					{exportMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 42, right: 0, width: 170, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 							<div style={{ display: "grid", gap: 6 }}>
@@ -1220,20 +1257,18 @@ export default function Studio() {
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
 								<hr style={{ opacity: 0.15, margin: "8px 0" }} />
 								<div style={{ display: "flex", gap: 8 }}>
-									<button style={{ ...panelButtonStyle(false), textAlign: "center" }} onClick={() => setTool("select")}>Select</button>
+									<button style={{ ...panelButtonStyle(tool !== "hand"), textAlign: "center" }} onClick={() => setTool("select")}>Select</button>
 									<button style={{ ...panelButtonStyle(tool === "hand"), textAlign: "center" }} onClick={() => setTool("hand")}>Hand</button>
 								</div>
-								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
-								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
-								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
-								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
-								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
 								<div style={{ fontSize: 12, opacity: 0.65 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
 							</div>
 						) : null}
 
 						{leftPanel === "content" ? (
 							<div style={{ display: "grid", gap: 8 }}>
+								<label style={{ fontSize: 12, opacity: 0.85 }}>Canvas background
+									<input type="color" value={currentDoc?.background || "#ffffff"} onChange={(e) => currentDoc && updateDoc({ background: e.target.value })} style={{ width: "100%", marginTop: 6 }} />
+								</label>
 								<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
 									{[brandKit.primary, brandKit.secondary, brandKit.accent, brandKit.text].map((color) => (
 										<button key={color} onClick={() => selected?.type === "text" ? updateElement(selected.id, { color }) : selected?.type === "shape" ? updateElement(selected.id, { fill: color }) : null} style={{ height: 40, background: color, borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)" }} />
@@ -1336,22 +1371,24 @@ export default function Studio() {
 							{showRulers ? (
 								<>
 									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-										{Array.from({ length: Math.ceil(currentDoc.width / 50) + 1 }).map((_, index) => {
-											const mark = index * 50;
-											return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: index % 2 === 0 ? 14 : 8, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", top: 2, left: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										{Array.from({ length: Math.ceil(currentDoc.width / rulerStep) + 1 }).map((_, index) => {
+											const mark = index * rulerStep;
+											const major = index % 2 === 0;
+											return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: major ? 14 : 8, background: "rgba(255,255,255,0.25)" }}>{major ? <div style={{ position: "absolute", top: 2, left: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div> : null}</div>;
 										})}
 									</div>
 									<div style={{ position: "absolute", top: RULER_SIZE, left: 0, bottom: 0, width: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-										{Array.from({ length: Math.ceil(currentDoc.height / 50) + 1 }).map((_, index) => {
-											const mark = index * 50;
-											return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", left: 2, top: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										{Array.from({ length: Math.ceil(currentDoc.height / rulerStep) + 1 }).map((_, index) => {
+											const mark = index * rulerStep;
+											const major = index % 2 === 0;
+											return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: major ? 18 : 10, background: "rgba(255,255,255,0.25)" }}>{major ? <div style={{ position: "absolute", left: 2, top: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div> : null}</div>;
 										})}
 									</div>
 									<div style={{ position: "absolute", top: 0, left: 0, width: RULER_SIZE, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 21 }} />
 								</>
 							) : null}
 
-							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: "#111827", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
+							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
 								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: "linear-gradient(180deg, #1f2937 0%, #0f172a 100%)", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
 									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
@@ -1372,7 +1409,16 @@ export default function Studio() {
 										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
 									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-									{selected && !selected.locked ? <div onMouseDown={startResize} style={{ position: "absolute", left: Number(selected.x || 0) + Number(selected.width || 0) - 7, top: Number(selected.y || 0) + Number(selected.height || 0) - 7, width: 14, height: 14, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize", zIndex: 10 }} /> : null}
+									{selected && !selected.locked ? [
+										{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
+										{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
+										{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nesw-resize" },
+										{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
+										{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nwse-resize" },
+										{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "ns-resize" },
+										{ key: "sw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nesw-resize" },
+										{ key: "w", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
+									].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
 									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 								</div>
 							</div>
@@ -1388,7 +1434,6 @@ export default function Studio() {
 							<button style={panelButtonStyle(false)} onClick={() => { groupSelection(); setContextMenu(null); }} disabled={selectedIds.length < 2}>Group</button>
 							<button style={panelButtonStyle(false)} onClick={() => { ungroupSelection(); setContextMenu(null); }} disabled={!selectedElements.some((el) => el.groupId)}>Ungroup</button>
 							<button style={panelButtonStyle(false)} onClick={() => { setInspectorOpen(true); setContextMenu(null); }} disabled={!selectedIds.length}>Open Inspector</button>
-							<button style={panelButtonStyle(false)} onClick={() => { if (selectedGuideId) removeGuide(selectedGuideId); setContextMenu(null); }} disabled={!selectedGuideId}>Delete Guide</button>
 						</div>
 					</div>
 				) : null}
@@ -1396,7 +1441,10 @@ export default function Studio() {
 					<div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 340, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
-							<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+							<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+								<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+								<button onClick={() => setInspectorOpen(false)} style={{ padding: "4px 8px", borderRadius: 8 }}>✕</button>
+							</div>
 						</div>
 						<div style={{ fontSize: 12, opacity: 0.72, marginBottom: 12 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
 						<div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
@@ -1447,12 +1495,15 @@ export default function Studio() {
 								</>) : null}
 								{selected.type === "image" ? <label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label> : null}
 							</div>
-						) : <div style={{ opacity: 0.7 }}>Select a layer to edit it.</div>}
+						) : <div style={{ display: "grid", gap: 10 }}>
+							<label>Canvas background<input type="color" value={currentDoc?.background || "#ffffff"} onChange={(e) => currentDoc && updateDoc({ background: e.target.value })} style={{ width: "100%" }} /></label>
+							<div style={{ opacity: 0.7 }}>Select a layer to edit it.</div>
+						</div>}
 						<div style={{ marginTop: 14 }}>
 							<div style={{ fontWeight: 700, marginBottom: 8 }}>Layers</div>
 							<div style={{ display: "grid", gap: 6, maxHeight: 320, overflow: "auto" }}>
 								{orderedLayers.length ? orderedLayers.map((el) => (
-									<button key={el.id} onClick={() => selectElement(el, false)} style={{ textAlign: "left", border: selectedIds.includes(el.id) ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: selectedIds.includes(el.id) ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
+									<button key={el.id} onClick={(e) => selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey)} style={{ textAlign: "left", border: selectedIds.includes(el.id) ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: selectedIds.includes(el.id) ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
 										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}><div style={{ fontWeight: 700 }}>{el.name || el.type}</div><div style={{ fontSize: 10, opacity: 0.7 }}>#{el._order}</div></div>
 										<div style={{ fontSize: 12, opacity: 0.72 }}>{el.type}{el.groupId ? ` • ${el.groupName || "grouped"}` : ""}{el.locked ? " • locked" : ""}{el.hidden ? " • hidden" : ""}</div>
 									</button>
