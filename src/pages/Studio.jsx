@@ -315,42 +315,23 @@ function panelButtonStyle(active) {
 	return {
 		width: "100%",
 		textAlign: "left",
-		padding: "8px 10px",
-		borderRadius: 10,
-		border: active ? "1px solid rgba(239,68,68,0.48)" : "1px solid rgba(255,255,255,0.08)",
-		background: active ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.035)",
+		padding: "10px 12px",
+		borderRadius: 12,
+		border: active ? "1px solid rgba(239,68,68,0.6)" : "1px solid rgba(255,255,255,0.08)",
+		background: active ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)",
 		color: "white",
-		fontSize: 13,
-		lineHeight: 1.2,
 	};
 }
 
 function iconButtonStyle(active) {
 	return {
-		width: 34,
-		height: 34,
-		borderRadius: 10,
-		border: active ? "1px solid rgba(239,68,68,0.48)" : "1px solid rgba(255,255,255,0.08)",
-		background: active ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.03)",
+		width: 42,
+		height: 42,
+		borderRadius: 12,
+		border: active ? "1px solid rgba(239,68,68,0.6)" : "1px solid rgba(255,255,255,0.08)",
+		background: active ? "rgba(239,68,68,0.16)" : "rgba(255,255,255,0.04)",
 		color: "white",
 		fontWeight: 700,
-		fontSize: 12,
-		padding: 0,
-	};
-}
-
-function toolbarButtonStyle(active = false) {
-	return {
-		height: 34,
-		minWidth: 34,
-		padding: "0 10px",
-		borderRadius: 10,
-		border: active ? "1px solid rgba(239,68,68,0.48)" : "1px solid rgba(255,255,255,0.08)",
-		background: active ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.03)",
-		color: "white",
-		fontSize: 13,
-		fontWeight: 700,
-		lineHeight: 1,
 	};
 }
 
@@ -370,7 +351,6 @@ export default function Studio() {
 	const [showBoundPreview, setShowBoundPreview] = React.useState(true);
 	const [leftPanel, setLeftPanel] = React.useState(null);
 	const [inspectorOpen, setInspectorOpen] = React.useState(false);
-	const [topMenu, setTopMenu] = React.useState(null);
 	const [tool, setTool] = React.useState("select");
 	const [zoom, setZoom] = React.useState(0.45);
 	const [pan, setPan] = React.useState({ x: 120, y: 80 });
@@ -379,21 +359,15 @@ export default function Studio() {
 	const [driveLoading, setDriveLoading] = React.useState(false);
 	const [driveError, setDriveError] = React.useState("");
 	const [assetSearch, setAssetSearch] = React.useState("");
+	const [viewMenuOpen, setViewMenuOpen] = React.useState(false);
+	const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
+	const [contextMenu, setContextMenu] = React.useState(null);
 	const [dragState, setDragState] = React.useState(null);
 	const [resizeState, setResizeState] = React.useState(null);
 	const [marquee, setMarquee] = React.useState(null);
 	const [panState, setPanState] = React.useState(null);
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
-
-	React.useEffect(() => {
-		const onDocDown = (e) => {
-			const inMenu = e.target?.closest?.("[data-studio-menu]");
-			if (!inMenu) setTopMenu(null);
-		};
-		document.addEventListener("mousedown", onDocDown);
-		return () => document.removeEventListener("mousedown", onDocDown);
-	}, []);
 
 	React.useEffect(() => {
 		const nextDocs = readDocs(orgId);
@@ -404,6 +378,15 @@ export default function Studio() {
 		setFuture([]);
 		setSavedBlocks(readBlocks(orgId));
 	}, [orgId]);
+
+	React.useEffect(() => {
+		const closeMenus = () => { setViewMenuOpen(false); setExportMenuOpen(false); setContextMenu(null); };
+		window.addEventListener("click", closeMenus);
+		window.addEventListener("contextmenu", () => {}, { passive: true });
+		return () => {
+			window.removeEventListener("click", closeMenus);
+		};
+	}, []);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
@@ -834,6 +817,15 @@ export default function Studio() {
 		setResizeState({ startX: e.clientX, startY: e.clientY, width: Number(selected.width || 1), height: Number(selected.height || 1), id: selected.id });
 	};
 
+	const openContextMenu = (e, el = null) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (el) {
+			selectElement(el, false);
+		}
+		setContextMenu({ x: e.clientX, y: e.clientY, hasSelection: !!(el || selectedIds.length) });
+	};
+
 	const getCanvasPoint = React.useCallback((clientX, clientY) => {
 		const rect = workspaceRef.current?.getBoundingClientRect();
 		if (!rect) return { x: 0, y: 0 };
@@ -844,7 +836,7 @@ export default function Studio() {
 	}, [pan, zoom]);
 
 	const startWorkspaceAction = (e) => {
-		setTopMenu(null);
+		setContextMenu(null);
 		if (!currentDoc) return;
 		if (spacePan || tool === "hand" || e.button === 1) {
 			setPanState({ startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y });
@@ -993,63 +985,60 @@ export default function Studio() {
 
 
 	return (
-		<div style={{ padding: 8, display: "grid", gap: 8 }}>
+		<div style={{ padding: 12, display: "grid", gap: 12 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 
-			<div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", flexWrap: "nowrap" }}>
-				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-					<button title="Tools" style={toolbarButtonStyle(Boolean(leftPanel))} onClick={() => setLeftPanel((v) => v ? null : "create")}>☰</button>
-					<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ minWidth: 0, flex: 1, height: 38, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(10,15,28,0.92)", color: "white", fontSize: 14, fontWeight: 600 }} />
-					<div style={{ display: "grid", lineHeight: 1.1, textAlign: "right", whiteSpace: "nowrap", paddingLeft: 4 }}>
-						<div style={{ fontSize: 11, fontWeight: 700, opacity: 0.9 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
-						<div style={{ fontSize: 11, opacity: 0.65 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
-					</div>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-					<button title="Undo" style={toolbarButtonStyle()} onClick={undo} disabled={!history.length}>↶</button>
-					<button title="Redo" style={toolbarButtonStyle()} onClick={redo} disabled={!future.length}>↷</button>
-					<button title="Zoom out" style={toolbarButtonStyle()} onClick={() => setZoom((z) => clamp(z * 0.9, 0.1, 3))} disabled={!currentDoc}>−</button>
-					<button title="Fit" style={toolbarButtonStyle()} onClick={() => fitCanvas(currentDoc)} disabled={!currentDoc}>Fit</button>
-					<button title="Reset zoom" style={toolbarButtonStyle()} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100</button>
-					<button title="Zoom in" style={toolbarButtonStyle()} onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))} disabled={!currentDoc}>+</button>
-					<div style={{ width: 42, textAlign: "center", fontSize: 12, opacity: 0.8 }}>{Math.round(zoom * 100)}%</div>
-					<div data-studio-menu="true" style={{ position: "relative" }}>
-						<button title="View options" style={toolbarButtonStyle(topMenu === "view")} onClick={() => setTopMenu((v) => v === "view" ? null : "view")}>⋯</button>
-						{topMenu === "view" ? (
-							<div style={{ position: "absolute", top: 40, right: 0, width: 180, zIndex: 40, background: "rgba(9,14,26,0.98)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 12, padding: 8, display: "grid", gap: 6, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
-								<button style={panelButtonStyle(tool === "hand")} onClick={() => { setTool((t) => t === "hand" ? "select" : "hand"); setTopMenu(null); }}>{tool === "hand" ? "Disable hand tool" : "Enable hand tool"}</button>
-								<button style={panelButtonStyle(showRulers)} onClick={() => { setShowRulers((v) => !v); setTopMenu(null); }}>{showRulers ? "Hide rulers" : "Show rulers"}</button>
-								<button style={panelButtonStyle(inspectorOpen)} onClick={() => { setInspectorOpen((v) => !v); setTopMenu(null); }}>{inspectorOpen ? "Hide inspector" : "Show inspector"}</button>
-							</div>
-						) : null}
-					</div>
-					<div data-studio-menu="true" style={{ position: "relative" }}>
-						<button title="Export" style={toolbarButtonStyle(topMenu === "export")} onClick={() => setTopMenu((v) => v === "export" ? null : "export")}>☷</button>
-						{topMenu === "export" ? (
-							<div style={{ position: "absolute", top: 40, right: 0, width: 140, zIndex: 40, background: "rgba(9,14,26,0.98)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 12, padding: 8, display: "grid", gap: 6, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
-								<button style={panelButtonStyle(false)} onClick={() => { exportPng(); setTopMenu(null); }} disabled={!currentDoc}>Export PNG</button>
-								<button style={panelButtonStyle(false)} onClick={() => { exportPdf(); setTopMenu(null); }} disabled={!currentDoc}>Export PDF</button>
-							</div>
-						) : null}
+			<div style={{ display: "grid", gap: 8 }}>
+				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+					<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white", fontSize: 16, lineHeight: 1 }} onClick={(e) => { e.stopPropagation(); setLeftPanel((v) => v ? null : "create"); setViewMenuOpen(false); setExportMenuOpen(false); }}>☰</button>
+					<input value={currentDoc?.name || ""} onChange={(e) => updateDoc({ name: e.target.value })} placeholder="Untitled design" disabled={!currentDoc} style={{ minWidth: 0, flex: 1, height: 36, padding: "0 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)", background: "#0b1329", color: "white", fontSize: 14, fontWeight: 700 }} />
+					<div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto", flexWrap: "nowrap" }}>
+						<div style={{ textAlign: "right", fontSize: 12, lineHeight: 1.1, minWidth: 92, color: "rgba(255,255,255,0.82)" }}>
+							<div style={{ fontWeight: 700 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+							<div style={{ opacity: 0.7 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
+						</div>
+						<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>↶</button>
+						<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={redo} disabled={!future.length}>↷</button>
+						<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 0.9, 0.1, 3))} disabled={!currentDoc}>−</button>
+						<button style={{ padding: "6px 10px", minWidth: 40, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white", fontWeight: 700 }} onClick={() => fitCanvas(currentDoc)} disabled={!currentDoc}>Fit</button>
+						<button style={{ padding: "6px 10px", minWidth: 50, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white", fontWeight: 700 }} onClick={() => { setZoom(1); setPan({ x: 80, y: 80 }); }} disabled={!currentDoc}>100</button>
+						<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={() => setZoom((z) => clamp(z * 1.1, 0.1, 3))} disabled={!currentDoc}>+</button>
+						<div style={{ fontSize: 12, opacity: 0.78, minWidth: 40, textAlign: "center" }}>{Math.round(zoom * 100)}%</div>
+						<div style={{ position: "relative" }}>
+							<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setViewMenuOpen((v) => !v); setExportMenuOpen(false); }}>⋯</button>
+							{viewMenuOpen ? <div style={{ position: "absolute", top: 42, right: 0, width: 180, zIndex: 40, background: "rgba(10,16,32,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 8, display: "grid", gap: 6, boxShadow: "0 18px 50px rgba(0,0,0,0.45)" }} onClick={(e) => e.stopPropagation()}>
+								<button style={panelButtonStyle(tool === "hand")} onClick={() => { setTool((t) => t === "hand" ? "select" : "hand"); setViewMenuOpen(false); }}>{tool === "hand" ? "Disable hand tool" : "Enable hand tool"}</button>
+								<button style={panelButtonStyle(showRulers)} onClick={() => setShowRulers((v) => !v)}>{showRulers ? "Hide rulers" : "Show rulers"}</button>
+								<button style={panelButtonStyle(inspectorOpen)} onClick={() => setInspectorOpen((v) => !v)}>{inspectorOpen ? "Hide inspector" : "Show inspector"}</button>
+								<button style={panelButtonStyle(false)} onClick={exportJson} disabled={!currentDoc}>Export JSON</button>
+							</div> : null}
+						</div>
+						<div style={{ position: "relative" }}>
+							<button style={{ padding: "6px 9px", minWidth: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,16,32,0.92)", color: "white" }} onClick={(e) => { e.stopPropagation(); setExportMenuOpen((v) => !v); setViewMenuOpen(false); }}>⇩</button>
+							{exportMenuOpen ? <div style={{ position: "absolute", top: 42, right: 0, width: 160, zIndex: 40, background: "rgba(10,16,32,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 8, display: "grid", gap: 6, boxShadow: "0 18px 50px rgba(0,0,0,0.45)" }} onClick={(e) => e.stopPropagation()}>
+								<button style={panelButtonStyle(false)} onClick={exportPng} disabled={!currentDoc}>Export PNG</button>
+								<button style={panelButtonStyle(false)} onClick={exportPdf} disabled={!currentDoc}>Export PDF</button>
+							</div> : null}
+						</div>
 					</div>
 				</div>
 			</div>
 
-			<div style={{ position: "relative", minHeight: "calc(100vh - 126px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
-				<div style={{ position: "absolute", top: 8, left: 8, zIndex: 25, display: "grid", gap: 6 }}>
-					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")} title="Create">＋</button>
-					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")} title="Text & Blocks">T</button>
-					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")} title="Templates">□</button>
-					<button style={iconButtonStyle(leftPanel === "assets")} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")} title="Assets">◫</button>
-					<button style={iconButtonStyle(leftPanel === "data")} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")} title="Bondfire Data">⌘</button>
-					<button style={iconButtonStyle(leftPanel === "docs")} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")} title="Documents">☷</button>
+			<div style={{ position: "relative", minHeight: "calc(100vh - 150px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }} onClick={() => { setContextMenu(null); setViewMenuOpen(false); setExportMenuOpen(false); }}>
+				<div style={{ position: "absolute", top: showRulers ? 36 : 12, left: 12, zIndex: 25, display: "grid", gap: 6 }}>
+					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
+					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>T</button>
+					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>□</button>
+					<button style={iconButtonStyle(leftPanel === "assets")} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>Img</button>
+					<button style={iconButtonStyle(leftPanel === "data")} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>{"{}"}</button>
+					<button style={iconButtonStyle(leftPanel === "docs")} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☷</button>
 				</div>
 
 				{leftPanel ? (
-					<div style={{ position: "absolute", top: 8, left: 48, bottom: 8, width: 260, zIndex: 26, background: "rgba(9,14,26,0.98)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 10, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+					<div style={{ position: "absolute", top: showRulers ? 36 : 12, left: 56, bottom: 12, width: 280, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
-							<div style={{ fontWeight: 700, fontSize: 13 }}>{leftPanel === "create" ? "Create" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
-							<button style={{ padding: "0", width: 30, height: 30, borderRadius: 9, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
+							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Create" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
+							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
 						</div>
 
 						{leftPanel === "create" ? (
@@ -1173,23 +1162,21 @@ export default function Studio() {
 					</div>
 				) : null}
 
-				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default", background: "radial-gradient(circle at center, rgba(30,41,59,0.14), rgba(2,6,23,0.02) 42%, rgba(0,0,0,0) 70%)" }}>
+				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
 						<>
 							{showRulers ? (
 								<>
 									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-										{Array.from({ length: Math.ceil(currentDoc.width / (zoom < 0.4 ? 200 : zoom < 0.75 ? 100 : 50)) + 2 }).map((_, index) => {
-											const rulerStep = zoom < 0.4 ? 200 : zoom < 0.75 ? 100 : 50;
-											const mark = index * rulerStep;
-											return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", top: 2, left: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										{Array.from({ length: Math.ceil(currentDoc.width / 50) + 1 }).map((_, index) => {
+											const mark = index * 50;
+											return <div key={mark} style={{ position: "absolute", left: pan.x + mark * zoom, top: 0, width: 1, height: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", top: 2, left: 4, fontSize: 10, color: "rgba(255,255,255,0.6)" }}>{mark}</div></div>;
 										})}
 									</div>
 									<div style={{ position: "absolute", top: RULER_SIZE, left: 0, bottom: 0, width: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
-										{Array.from({ length: Math.ceil(currentDoc.height / (zoom < 0.4 ? 200 : zoom < 0.75 ? 100 : 50)) + 2 }).map((_, index) => {
-											const rulerStep = zoom < 0.4 ? 200 : zoom < 0.75 ? 100 : 50;
-											const mark = index * rulerStep;
-											return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", left: 2, top: 4, fontSize: 9, color: "rgba(255,255,255,0.58)" }}>{mark}</div></div>;
+										{Array.from({ length: Math.ceil(currentDoc.height / 50) + 1 }).map((_, index) => {
+											const mark = index * 50;
+											return <div key={mark} style={{ position: "absolute", top: pan.y + mark * zoom, left: 0, height: 1, width: index % 2 === 0 ? 18 : 10, background: "rgba(255,255,255,0.25)" }}><div style={{ position: "absolute", left: 2, top: 4, fontSize: 10, color: "rgba(255,255,255,0.6)" }}>{mark}</div></div>;
 										})}
 									</div>
 									<div style={{ position: "absolute", top: 0, left: 0, width: RULER_SIZE, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderRight: "1px solid rgba(255,255,255,0.08)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 21 }} />
@@ -1211,9 +1198,9 @@ export default function Studio() {
 											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 										}
 										if (el.type === "shape") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 										}
-										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
 									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 									{selected && !selected.locked ? <div onMouseDown={startResize} style={{ position: "absolute", left: Number(selected.x || 0) + Number(selected.width || 0) - 7, top: Number(selected.y || 0) + Number(selected.height || 0) - 7, width: 14, height: 14, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize", zIndex: 10 }} /> : null}
@@ -1224,8 +1211,17 @@ export default function Studio() {
 					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
 
+				{contextMenu ? (
+					<div style={{ position: "fixed", top: contextMenu.y, left: contextMenu.x, zIndex: 90, width: 180, background: "rgba(10,16,32,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 8, display: "grid", gap: 6, boxShadow: "0 18px 50px rgba(0,0,0,0.45)" }} onClick={(e) => e.stopPropagation()}>
+						<button style={panelButtonStyle(false)} onClick={() => { duplicateSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Duplicate</button>
+						<button style={panelButtonStyle(false)} onClick={() => { removeSelected(); setContextMenu(null); }} disabled={!selectedIds.length}>Delete</button>
+						<button style={panelButtonStyle(false)} onClick={() => { groupSelection(); setContextMenu(null); }} disabled={selectedIds.length < 2}>Group</button>
+						<button style={panelButtonStyle(false)} onClick={() => { ungroupSelection(); setContextMenu(null); }} disabled={!selectedElements.some((el) => el.groupId)}>Ungroup</button>
+						<button style={panelButtonStyle(false)} onClick={() => { setInspectorOpen(true); setContextMenu(null); }} disabled={!selectedIds.length}>Open Inspector</button>
+					</div>
+				) : null}
 				{inspectorOpen ? (
-					<div style={{ position: "absolute", top: 8, right: 8, bottom: 8, width: 292, zIndex: 26, background: "rgba(9,14,26,0.98)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 10, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+					<div style={{ position: "absolute", top: showRulers ? 36 : 12, right: 12, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
 							<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
