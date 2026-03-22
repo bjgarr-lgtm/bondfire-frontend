@@ -53,11 +53,6 @@ function isEditableTextFile(file) {
   const ext = getFileExtension(file?.name);
   return String(file?.mime || "").startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext);
 }
-const INLINE_VIDEO_FALLBACK_MAX_BYTES = 8 * 1024 * 1024;
-
-function isVideoFile(file) {
-  return String(file?.mime || file?.type || "").toLowerCase().startsWith("video/");
-}
 function canPreviewFileInApp(file) {
   const mime = String(file?.mime || "");
   if (mime.startsWith("image/")) return true;
@@ -70,6 +65,18 @@ function canPreviewFileInApp(file) {
 function textToDataUrl(text, mime = "text/plain;charset=utf-8") {
   const safeMime = String(mime || "text/plain;charset=utf-8");
   return `data:${safeMime};base64,${btoa(unescape(encodeURIComponent(String(text || ""))))}`;
+}
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 function buildDriveFileUrls(orgId, fileId) {
@@ -186,8 +193,7 @@ export default function Drive() {
   const objectUrlRegistry = useRef(new Set());
   const loadRequestSeq = useRef(0);
   const mutationSeq = useRef(0);
-  const filesRef = useRef([]);
-  const pendingUploadedFilesRef = useRef(new Map());
+  const pendingUploadedFiles = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -205,10 +211,6 @@ export default function Drive() {
       localStorage.setItem(uiStorageKey, JSON.stringify({ sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed }));
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
-
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
@@ -244,23 +246,20 @@ export default function Drive() {
       }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const existingFiles = filesRef.current;
-      const serverFiles = Array.isArray(data?.files) ? data.files : [];
-      const serverIds = new Set(serverFiles.map((file) => String(file?.id || "")).filter(Boolean));
-      const nextFiles = serverFiles.map((file) => {
+      const serverFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
         const hydrated = withFileUrls(orgId, file);
-        const existing = existingFiles.find((entry) => entry.id === hydrated.id);
-        if (serverIds.has(hydrated.id)) pendingUploadedFilesRef.current.delete(hydrated.id);
+        const existing = files.find((entry) => entry.id === hydrated.id);
         return existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated;
       });
-      for (const [pendingId, pendingFile] of pendingUploadedFilesRef.current.entries()) {
-        if (!serverIds.has(pendingId)) {
-          const existing = existingFiles.find((entry) => entry.id === pendingId);
-          nextFiles.unshift(existing || pendingFile);
-          continue;
+      const nextFiles = [...serverFiles];
+      const serverIds = new Set(serverFiles.map((file) => file.id));
+      pendingUploadedFiles.current.forEach((pendingFile, fileId) => {
+        if (serverIds.has(fileId)) {
+          pendingUploadedFiles.current.delete(fileId);
+          return;
         }
-        pendingUploadedFilesRef.current.delete(pendingId);
-      }
+        nextFiles.unshift(pendingFile);
+      });
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -674,20 +673,15 @@ export default function Drive() {
 
     let res = null;
     try {
-      if (isVideoFile(record) && Number(rawFile?.size || 0) <= INLINE_VIDEO_FALLBACK_MAX_BYTES) {
-        const dataUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || ""));
-          reader.onerror = () => reject(reader.error || new Error("VIDEO_READ_FAILED"));
-          reader.readAsDataURL(rawFile);
-        });
+      if (String(record.mime || "").toLowerCase().startsWith("video/")) {
+        const dataUrl = await fileToDataUrl(rawFile);
         res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
           method: "POST",
           body: JSON.stringify({
             name: record.name || rawFile.name || "file",
             mime: record.mime || rawFile.type || "application/octet-stream",
+            size: record.size || Number(rawFile?.size || 0),
             parentId,
-            size: Number(rawFile?.size || record.size || 0),
             dataUrl,
             textContent: "",
           }),
@@ -699,6 +693,7 @@ export default function Drive() {
         form.append("mime", record.mime || rawFile.type || "application/octet-stream");
         if (parentId) form.append("parentId", String(parentId));
         if (relativePath) form.append("relativePath", String(relativePath));
+
         res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
           method: "POST",
           body: form,
@@ -727,7 +722,7 @@ export default function Drive() {
       ...createdFile,
       previewObjectUrl: localPreviewUrl || undefined,
     });
-    if (isVideoFile(nextFile)) pendingUploadedFilesRef.current.set(nextFile.id, nextFile);
+    pendingUploadedFiles.current.set(nextFile.id, nextFile);
     setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
     return nextFile;
   }
