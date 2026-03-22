@@ -181,8 +181,6 @@ export default function Drive() {
   const objectUrlRegistry = useRef(new Set());
   const loadRequestSeq = useRef(0);
   const mutationSeq = useRef(0);
-  const filesRef = useRef([]);
-  const pendingVideoUploadsRef = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -201,12 +199,7 @@ export default function Drive() {
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
 
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
-
   async function loadDrive({ preserveSelection = true } = {}) {
-
     if (!orgId) return;
     const requestSeq = ++loadRequestSeq.current;
     const mutationSeqAtStart = mutationSeq.current;
@@ -240,28 +233,11 @@ export default function Drive() {
       }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const existingFiles = filesRef.current;
-      const nextFilesById = new Map();
-      (Array.isArray(data?.files) ? data.files : []).forEach((file) => {
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
         const hydrated = withFileUrls(orgId, file);
-        const existing = existingFiles.find((entry) => entry.id === hydrated.id);
-        nextFilesById.set(hydrated.id, existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated);
+        const existing = files.find((entry) => entry.id === hydrated.id);
+        return existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated;
       });
-      const now = Date.now();
-      pendingVideoUploadsRef.current.forEach((pending, pendingId) => {
-        if (!pending?.file || pending.expiresAt <= now) {
-          pendingVideoUploadsRef.current.delete(pendingId);
-          return;
-        }
-        const serverFile = nextFilesById.get(pendingId);
-        if (serverFile) {
-          pendingVideoUploadsRef.current.delete(pendingId);
-          nextFilesById.set(pendingId, serverFile?.previewObjectUrl || !pending.file.previewObjectUrl ? serverFile : { ...serverFile, previewObjectUrl: pending.file.previewObjectUrl });
-          return;
-        }
-        nextFilesById.set(pendingId, pending.file);
-      });
-      const nextFiles = Array.from(nextFilesById.values());
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -532,7 +508,6 @@ export default function Drive() {
   }
   async function deleteFile(id) {
     mutationSeq.current += 1;
-    pendingVideoUploadsRef.current.delete(id);
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, { method: "DELETE" });
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedId === id && selectedKind === "file") {
@@ -701,12 +676,6 @@ export default function Drive() {
       ...createdFile,
       previewObjectUrl: localPreviewUrl || undefined,
     });
-    if (String(nextFile?.mime || record?.mime || rawFile?.type || "").startsWith("video/")) {
-      pendingVideoUploadsRef.current.set(nextFile.id, {
-        file: nextFile,
-        expiresAt: Date.now() + 120000,
-      });
-    }
     setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
     return nextFile;
   }
