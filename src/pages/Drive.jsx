@@ -67,6 +67,17 @@ function textToDataUrl(text, mime = "text/plain;charset=utf-8") {
   return `data:${safeMime};base64,${btoa(unescape(encodeURIComponent(String(text || ""))))}`;
 }
 
+function buildDriveFileUrls(orgId, fileId) {
+  const encodedOrgId = encodeURIComponent(String(orgId || ""));
+  const encodedFileId = encodeURIComponent(String(fileId || ""));
+  const base = `/api/orgs/${encodedOrgId}/drive/files/${encodedFileId}/download`;
+  return { previewUrl: base, downloadUrl: `${base}?download=1`, url: base };
+}
+function withFileUrls(orgId, file) {
+  if (!file?.id) return file;
+  return { ...file, ...buildDriveFileUrls(orgId, file.id) };
+}
+
 const STARTER_TEMPLATES = [
   {
     id: "tpl_daily_note",
@@ -214,7 +225,7 @@ export default function Drive() {
       }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const nextFiles = Array.isArray(data?.files) ? data.files : [];
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
@@ -426,7 +437,7 @@ export default function Drive() {
       body: JSON.stringify({ name: String(name).trim() }),
     });
     if (!res?.file) return;
-    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...res.file } : f)));
+    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...res.file }) : f)));
     if (selectedId === id && selectedKind === "file") {
       skipNextSave.current = true;
       setTitle(res.file.name || "untitled");
@@ -451,14 +462,14 @@ export default function Drive() {
       body: JSON.stringify({ parentId: target || null }),
     });
     if (!res?.file) return;
-    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...res.file } : f)));
+    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...res.file }) : f)));
   }
 
   async function hydrateFile(fileId) {
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(fileId)}`);
     const hydrated = res?.file || null;
     if (!hydrated) return null;
-    setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, ...hydrated } : f)));
+    setFiles((prev) => prev.map((f) => (f.id === fileId ? withFileUrls(orgId, { ...f, ...hydrated }) : f)));
     return hydrated;
   }
 
@@ -471,19 +482,15 @@ export default function Drive() {
       a.click();
       return;
     }
-    window.open(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download`, "_blank", "noopener,noreferrer");
+    window.open(file?.previewUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download`, "_blank", "noopener,noreferrer");
   }
   async function openFile(file) {
-    let nextFile = file;
-    if (!nextFile?.dataUrl && !isEditableTextFile(nextFile)) {
-      if (!canPreviewFileInApp(nextFile)) {
-        openFileInBrowser(nextFile);
-        return;
-      }
-    }
-    if (!nextFile?.dataUrl && (canPreviewFileInApp(nextFile) || isEditableTextFile(nextFile))) {
+    let nextFile = withFileUrls(orgId, file);
+    if (!nextFile) return;
+    if (isEditableTextFile(nextFile) && !nextFile.textContent && !nextFile.dataUrl) {
       nextFile = await hydrateFile(nextFile.id);
       if (!nextFile) return;
+      nextFile = withFileUrls(orgId, nextFile);
     }
     if (canPreviewFileInApp(nextFile)) {
       skipNextSave.current = true;
@@ -498,7 +505,7 @@ export default function Drive() {
   }
   function downloadFile(file) {
     const a = document.createElement("a");
-    a.href = `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
+    a.href = file?.downloadUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
     a.download = file.name || "download";
     a.click();
   }
@@ -534,7 +541,7 @@ export default function Drive() {
           }),
         });
         if (res?.file) {
-          setFiles((prev) => prev.map((file) => (file.id === selectedId ? { ...file, ...res.file } : file)));
+          setFiles((prev) => prev.map((file) => (file.id === selectedId ? withFileUrls(orgId, { ...file, ...res.file }) : file)));
         }
         setStatus("saved");
       }
@@ -578,7 +585,7 @@ export default function Drive() {
         method: "POST",
         body: JSON.stringify(record),
       });
-      if (res?.file) setFiles((prev) => [res.file, ...prev]);
+      if (res?.file) setFiles((prev) => [withFileUrls(orgId, { ...record, ...res.file }), ...prev.filter((existing) => existing.id !== res.file.id)]);
     }
     event.target.value = "";
   }
@@ -616,7 +623,7 @@ export default function Drive() {
         method: "POST",
         body: JSON.stringify(record),
       });
-      if (res?.file) setFiles((prev) => [res.file, ...prev]);
+      if (res?.file) setFiles((prev) => [withFileUrls(orgId, { ...record, ...res.file }), ...prev.filter((existing) => existing.id !== res.file.id)]);
     }
     event.target.value = "";
   }

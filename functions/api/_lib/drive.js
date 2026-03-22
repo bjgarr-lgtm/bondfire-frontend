@@ -11,19 +11,18 @@ export function getDriveBucket(env) {
 export async function ensureDriveSchema(env) {
   const db = getDb(env);
   if (!db) throw new Error("NO_DB_BINDING");
-
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS drive_folders (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS drive_folders (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       parent_id TEXT,
       name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_drive_folders_org_parent ON drive_folders(org_id, parent_id, updated_at)`,
+    );
+    CREATE INDEX IF NOT EXISTS idx_drive_folders_org_parent ON drive_folders(org_id, parent_id, updated_at);
 
-    `CREATE TABLE IF NOT EXISTS drive_notes (
+    CREATE TABLE IF NOT EXISTS drive_notes (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       parent_id TEXT,
@@ -32,10 +31,10 @@ export async function ensureDriveSchema(env) {
       tags TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_drive_notes_org_parent ON drive_notes(org_id, parent_id, updated_at)`,
+    );
+    CREATE INDEX IF NOT EXISTS idx_drive_notes_org_parent ON drive_notes(org_id, parent_id, updated_at);
 
-    `CREATE TABLE IF NOT EXISTS drive_files (
+    CREATE TABLE IF NOT EXISTS drive_files (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       parent_id TEXT,
@@ -45,10 +44,10 @@ export async function ensureDriveSchema(env) {
       storage_key TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_drive_files_org_parent ON drive_files(org_id, parent_id, updated_at)`,
+    );
+    CREATE INDEX IF NOT EXISTS idx_drive_files_org_parent ON drive_files(org_id, parent_id, updated_at);
 
-    `CREATE TABLE IF NOT EXISTS drive_templates (
+    CREATE TABLE IF NOT EXISTS drive_templates (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       name TEXT,
@@ -56,10 +55,10 @@ export async function ensureDriveSchema(env) {
       content TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_drive_templates_org ON drive_templates(org_id, updated_at)`,
+    );
+    CREATE INDEX IF NOT EXISTS idx_drive_templates_org ON drive_templates(org_id, updated_at);
 
-    `CREATE TABLE IF NOT EXISTS drive_file_blobs (
+    CREATE TABLE IF NOT EXISTS drive_file_blobs (
       file_id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL,
       mime TEXT,
@@ -67,13 +66,9 @@ export async function ensureDriveSchema(env) {
       text_content TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_drive_file_blobs_org ON drive_file_blobs(org_id, updated_at)`,
-  ];
-
-  for (const sql of statements) {
-    await db.prepare(sql).run();
-  }
+    );
+    CREATE INDEX IF NOT EXISTS idx_drive_file_blobs_org ON drive_file_blobs(org_id, updated_at);
+  `);
 }
 
 export function encrypt(data) {
@@ -138,6 +133,17 @@ export function isEditableTextMime(mime, name = "") {
   return [".md", ".markdown", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".xml", ".yaml", ".yml", ".csv"].some((ext) => safeName.endsWith(ext));
 }
 
+export function buildDriveFileUrls(orgId, fileId) {
+  const encodedOrgId = encodeURIComponent(String(orgId || ""));
+  const encodedFileId = encodeURIComponent(String(fileId || ""));
+  const base = `/api/orgs/${encodedOrgId}/drive/files/${encodedFileId}/download`;
+  return {
+    previewUrl: base,
+    downloadUrl: `${base}?download=1`,
+    url: base,
+  };
+}
+
 export async function listDriveTree(env, orgId) {
   await ensureDriveSchema(env);
   const db = getDb(env);
@@ -174,6 +180,7 @@ export async function listDriveTree(env, orgId) {
       storageKey: row.storage_key || null,
       createdAt: Number(row.created_at || 0),
       updatedAt: Number(row.updated_at || 0),
+      ...buildDriveFileUrls(orgId, row.id),
     })),
     templates: (templatesRes.results || []).map((row) => ({
       id: row.id,
@@ -204,6 +211,7 @@ export async function getFileRecord(env, orgId, fileId, { includeData = false } 
     storageKey: row.storage_key || null,
     createdAt: Number(row.created_at || 0),
     updatedAt: Number(row.updated_at || 0),
+    ...buildDriveFileUrls(orgId, row.id),
   };
   if (!includeData) return file;
   const blob = await loadFileBlob(env, orgId, row.id, row.storage_key, file.mime, file.name);

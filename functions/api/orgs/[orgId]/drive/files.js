@@ -1,5 +1,5 @@
 import { requireOrgRole } from "../../../_lib/auth.js";
-import { ensureDriveSchema, getDb, normalizeNullableId, created, json, now, uuid, saveFileBlob } from "../../../_lib/drive.js";
+import { ensureDriveSchema, getDb, normalizeNullableId, created, json, now, uuid, saveFileBlob, getFileRecord, isEditableTextMime } from "../../../_lib/drive.js";
 
 export async function onRequestGet({ env, request, params }) {
   const orgId = params.orgId;
@@ -33,5 +33,6 @@ export async function onRequestPost({ env, request, params }) {
   };
   await getDb(env).prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, orgId, file.parentId, name, mime, file.size, storageKey, t, t).run();
   await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl: String(body.dataUrl || ""), textContent: String(body.textContent || "") });
-  return created("file", file);
+  const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
+  return created("file", createdFile || file);
 }

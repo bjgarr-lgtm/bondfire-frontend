@@ -135,15 +135,16 @@ function markdownToHtml(md) {
 
 export default function DriveFilePreview({ file }) {
   if (!file) return null;
+  const src = file?.dataUrl || file?.previewUrl || file?.url || "";
 
-  if (String(file.mime || "").startsWith("image/")) {
-    return <div style={{ display: "flex", justifyContent: "center" }}><img src={file.dataUrl} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
+  if (String(file.mime || "").startsWith("image/") && src) {
+    return <div style={{ display: "flex", justifyContent: "center" }}><img src={src} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
   }
-  if (file.mime === "application/pdf") {
-    return <iframe title={file.name} src={file.dataUrl} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
+  if (file.mime === "application/pdf" && src) {
+    return <iframe title={file.name} src={src} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
   }
-  if (String(file.mime || "").startsWith("audio/")) return <audio controls src={file.dataUrl} style={{ width: "100%" }} />;
-  if (String(file.mime || "").startsWith("video/")) return <video controls src={file.dataUrl} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
+  if (String(file.mime || "").startsWith("audio/") && src) return <audio controls preload="metadata" src={src} style={{ width: "100%" }} />;
+  if (String(file.mime || "").startsWith("video/") && src) return <video controls playsInline preload="metadata" src={src} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
   if (file.textContent) {
     return (
       <div style={{ maxWidth: 920, margin: "0 auto", background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 14, minHeight: "72vh" }}>
