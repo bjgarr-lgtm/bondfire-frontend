@@ -1093,26 +1093,6 @@ export default function Studio() {
 				const ids = currentDoc.elements.filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
 			}
-			if (dragState && currentDoc) {
-				const removeIds = currentDoc.elements
-					.filter((el) => dragState.ids.includes(el.id))
-					.filter((el) => {
-						const left = Number(el.x || 0);
-						const top = Number(el.y || 0);
-						const right = left + Number(el.width || 0);
-						const bottom = top + Number(el.height || 0);
-						return right < 0 || bottom < 0 || left > currentDoc.width || top > currentDoc.height;
-					})
-					.map((el) => el.id);
-				if (removeIds.length) {
-					commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : {
-						...doc,
-						updatedAt: Date.now(),
-						elements: (doc.elements || []).filter((el) => !removeIds.includes(el.id)),
-					}));
-					setSelectedIds((prev) => prev.filter((id) => !removeIds.includes(id)));
-				}
-			}
 			setDragState(null);
 			setResizeState(null);
 			setMarquee(null);
