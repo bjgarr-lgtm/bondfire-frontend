@@ -23,6 +23,7 @@ import BondfireChat from "./pages/BondfireChat.jsx";
 import SignIn from "./pages/SignIn.jsx";
 import Security from "./pages/Security.jsx";
 import Drive from "./pages/Drive.jsx";
+import Studio from "./pages/Studio.jsx";
 
 // COMPONENTS
 import AppHeader from "./components/AppHeader.jsx";
@@ -265,6 +266,7 @@ function Shell() {
 					<Route path="meetings/:meetingId" element={<MeetingDetail />} />
 					<Route path="settings" element={<Settings />} />
 					<Route path="drive" element={<Drive />} />
+					<Route path="studio" element={<Studio />} />
 					<Route path="public" element={<OrgPublicPreview />} />
 					<Route path="chat" element={<BondfireChat />} />
 					<Route path="guard/*" element={<OrgSecretGuard />} />
