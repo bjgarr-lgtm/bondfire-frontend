@@ -141,10 +141,14 @@ export default function DriveFilePreview({ file }) {
     return <div style={{ display: "flex", justifyContent: "center" }}><img src={src} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
   }
   if (file.mime === "application/pdf" && src) {
-    return <iframe title={file.name} src={src} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
+    return <iframe key={src} title={file.name} src={src} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
   }
-  if (String(file.mime || "").startsWith("audio/") && src) return <audio controls preload="metadata" src={src} style={{ width: "100%" }} />;
-  if (String(file.mime || "").startsWith("video/") && src) return <video controls playsInline preload="metadata" src={src} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
+  if (String(file.mime || "").startsWith("audio/") && src) {
+    return <audio key={src} controls preload="metadata" style={{ width: "100%" }}><source src={src} type={file.mime || "audio/mpeg"} /></audio>;
+  }
+  if (String(file.mime || "").startsWith("video/") && src) {
+    return <video key={src} controls playsInline preload="metadata" style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }}><source src={src} type={file.mime || "video/mp4"} /></video>;
+  }
   if (file.textContent) {
     return (
       <div style={{ maxWidth: 920, margin: "0 auto", background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 14, minHeight: "72vh" }}>

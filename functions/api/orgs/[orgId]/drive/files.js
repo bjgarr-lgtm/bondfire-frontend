@@ -21,107 +21,87 @@ export async function onRequestPost({ env, request, params }) {
   const db = getDb(env);
   const id = uuid();
   const t = now();
-  const decodeHeaderValue = (value, fallback = "") => {
-    try {
-      return value ? decodeURIComponent(String(value)) : fallback;
-    } catch {
-      return value ? String(value) : fallback;
-    }
-  };
 
+  async function persistUpload({ name, mime, parentId, bytes, size }) {
+    const safeName = String(name || "file").trim() || "file";
+    const safeMime = String(mime || "application/octet-stream");
+    const safeParentId = normalizeNullableId(parentId);
+    const safeSize = Number(size ?? bytes?.byteLength ?? 0);
+    const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(safeName)}`;
+
+    await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, orgId, safeParentId, safeName, safeMime, safeSize, storageKey, t, t)
+      .run();
+
+    const chunk = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    const bucket = getDriveBucket(env);
+    if (bucket && storageKey) {
+      await bucket.put(storageKey, chunk, { httpMetadata: { contentType: safeMime || "application/octet-stream" } });
+      await db.prepare(`DELETE FROM drive_file_blobs WHERE org_id = ? AND file_id = ?`).bind(orgId, id).run();
+    } else {
+      const dataUrl = dataUrlFromBytes(chunk, safeMime || "application/octet-stream");
+      const textContent = isEditableTextMime(safeMime, safeName) ? textFromBytes(chunk) : "";
+      await saveFileBlob(env, { orgId, fileId: id, storageKey, mime: safeMime, dataUrl, textContent });
+    }
+
+    const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(safeMime, safeName) });
+    return created("file", createdFile || {
+      id,
+      parentId: safeParentId,
+      name: safeName,
+      mime: safeMime,
+      size: safeSize,
+      storageKey,
+      createdAt: t,
+      updatedAt: t,
+    });
+  }
 
   if (contentType.includes("multipart/form-data")) {
     const form = await request.formData();
     const upload = form.get("file");
     if (!upload || typeof upload.arrayBuffer !== "function") return bad(400, "FILE_REQUIRED");
+    return persistUpload({
+      name: form.get("name") || upload.name || "file",
+      mime: form.get("mime") || upload.type || "application/octet-stream",
+      parentId: form.get("parentId"),
+      bytes: new Uint8Array(await upload.arrayBuffer()),
+      size: Number(upload.size || 0),
+    });
+  }
 
-    const name = String(form.get("name") || upload.name || "file").trim() || "file";
-    const mime = String(form.get("mime") || upload.type || "application/octet-stream");
-    const parentId = normalizeNullableId(form.get("parentId"));
+  if (contentType.includes("application/json")) {
+    const body = await request.json().catch(() => ({}));
+    const name = String(body.name || "file").trim() || "file";
+    const mime = String(body.mime || "application/octet-stream");
     const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(name)}`;
-    const size = Number(upload.size || 0);
     const file = {
       id,
-      parentId,
+      parentId: normalizeNullableId(body.parentId),
       name,
       mime,
-      size,
+      size: Number(body.size || 0),
       storageKey,
       createdAt: t,
       updatedAt: t,
     };
-
-    await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, orgId, parentId, name, mime, size, storageKey, t, t).run();
-
-    const bytes = new Uint8Array(await upload.arrayBuffer());
-    const bucket = getDriveBucket(env);
-    if (bucket && storageKey) {
-      await bucket.put(storageKey, bytes, { httpMetadata: { contentType: mime || "application/octet-stream" } });
-      await db.prepare(`DELETE FROM drive_file_blobs WHERE org_id = ? AND file_id = ?`).bind(orgId, id).run();
-    } else {
-      const dataUrl = dataUrlFromBytes(bytes, mime || "application/octet-stream");
-      const textContent = isEditableTextMime(mime, name) ? textFromBytes(bytes) : "";
-      await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl, textContent });
-    }
-
+    await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, orgId, file.parentId, name, mime, file.size, storageKey, t, t).run();
+    await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl: String(body.dataUrl || ""), textContent: String(body.textContent || "") });
     const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
     return created("file", createdFile || file);
   }
 
-  if (!contentType.includes("multipart/form-data") && !contentType.includes("application/json")) {
-    const name = decodeHeaderValue(request.headers.get("x-drive-name"), "file").trim() || "file";
-    const mime = String(request.headers.get("content-type") || "application/octet-stream").trim() || "application/octet-stream";
-    const parentId = normalizeNullableId(request.headers.get("x-drive-parent-id"));
-    const relativePath = decodeHeaderValue(request.headers.get("x-drive-relative-path"), "");
-    const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(name)}`;
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    const size = Number(bytes.byteLength || 0);
-    const file = {
-      id,
-      parentId,
-      name,
-      mime,
-      size,
-      storageKey,
-      relativePath,
-      createdAt: t,
-      updatedAt: t,
-    };
-
-    await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, orgId, parentId, name, mime, size, storageKey, t, t)
-      .run();
-
-    const bucket = getDriveBucket(env);
-    if (bucket && storageKey) {
-      await bucket.put(storageKey, bytes, { httpMetadata: { contentType: mime || "application/octet-stream" } });
-      await db.prepare(`DELETE FROM drive_file_blobs WHERE org_id = ? AND file_id = ?`).bind(orgId, id).run();
-    } else {
-      const dataUrl = dataUrlFromBytes(bytes, mime || "application/octet-stream");
-      const textContent = isEditableTextMime(mime, name) ? textFromBytes(bytes) : "";
-      await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl, textContent });
-    }
-
-    const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
-    return created("file", createdFile || file);
-  }
-
-  const body = await request.json().catch(() => ({}));
-  const name = String(body.name || "file").trim() || "file";
-  const mime = String(body.mime || "application/octet-stream");
-  const storageKey = `${orgId}/drive/files/${id}/${encodeURIComponent(name)}`;
-  const file = {
-    id,
-    parentId: normalizeNullableId(body.parentId),
-    name,
-    mime,
-    size: Number(body.size || 0),
-    storageKey,
-    createdAt: t,
-    updatedAt: t,
-  };
-  await db.prepare(`INSERT INTO drive_files (id, org_id, parent_id, name, mime, size, storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, orgId, file.parentId, name, mime, file.size, storageKey, t, t).run();
-  await saveFileBlob(env, { orgId, fileId: id, storageKey, mime, dataUrl: String(body.dataUrl || ""), textContent: String(body.textContent || "") });
-  const createdFile = await getFileRecord(env, orgId, id, { includeData: isEditableTextMime(mime, name) });
-  return created("file", createdFile || file);
+  const rawName = request.headers.get("x-drive-name") || request.headers.get("x-file-name") || "file";
+  const rawMime = request.headers.get("x-drive-mime") || request.headers.get("content-type") || "application/octet-stream";
+  const rawParentId = request.headers.get("x-drive-parent-id");
+  const rawSize = request.headers.get("x-drive-size");
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!bytes.byteLength) return bad(400, "FILE_REQUIRED");
+  return persistUpload({
+    name: rawName,
+    mime: rawMime,
+    parentId: rawParentId,
+    bytes,
+    size: Number(rawSize || bytes.byteLength || 0),
+  });
 }

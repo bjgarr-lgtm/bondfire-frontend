@@ -180,12 +180,14 @@ export default function Drive() {
   const folderInputRef = useRef(null);
 
   useEffect(() => {
-    if (folderInputRef.current) {
-      folderInputRef.current.setAttribute("webkitdirectory", "");
-      folderInputRef.current.setAttribute("directory", "");
-    }
+    const folderEl = folderInputRef.current;
+    if (!folderEl) return;
+    try {
+      folderEl.setAttribute("webkitdirectory", "");
+      folderEl.setAttribute("directory", "");
+      folderEl.setAttribute("multiple", "");
+    } catch {}
   }, []);
-
 
   useEffect(() => {
     try {
@@ -589,11 +591,14 @@ export default function Drive() {
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
-    const headers = {};
-    headers["x-drive-name"] = encodeURIComponent(record.name || rawFile.name || "file");
-    headers["x-drive-parent-id"] = parentId ? String(parentId) : "";
-    headers["x-drive-relative-path"] = relativePath ? encodeURIComponent(String(relativePath)) : "";
-    if (record.mime || rawFile.type) headers["Content-Type"] = record.mime || rawFile.type || "application/octet-stream";
+    const headers = {
+      "x-drive-name": String(record.name || rawFile.name || "file"),
+      "x-drive-mime": String(record.mime || rawFile.type || "application/octet-stream"),
+      "x-drive-size": String(Number(record.size || rawFile.size || 0)),
+    };
+    if (parentId) headers["x-drive-parent-id"] = String(parentId);
+    if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
+
     let res = null;
     try {
       res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
@@ -601,24 +606,16 @@ export default function Drive() {
         headers,
         body: rawFile,
       });
-    } catch (rawUploadError) {
-      const reader = new FileReader();
-      const dataUrl = await new Promise((resolve, reject) => {
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(reader.error || new Error("FILE_READ_FAILED"));
-        reader.readAsDataURL(rawFile);
-      });
+    } catch {
+      const form = new FormData();
+      form.append("file", rawFile, rawFile.name || record.name || "file");
+      form.append("name", record.name || rawFile.name || "file");
+      form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+      if (parentId) form.append("parentId", String(parentId));
+      if (relativePath) form.append("relativePath", String(relativePath));
       res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
         method: "POST",
-        body: JSON.stringify({
-          name: record.name || rawFile.name || "file",
-          mime: record.mime || rawFile.type || "application/octet-stream",
-          size: Number(rawFile?.size || record.size || 0),
-          parentId: parentId || null,
-          relativePath: relativePath || "",
-          dataUrl,
-          textContent: record.textContent || "",
-        }),
+        body: form,
       });
     }
     if (!res?.file) return null;
@@ -627,25 +624,13 @@ export default function Drive() {
     return nextFile;
   }
 
-  function openFilePicker() {
-    if (!fileInputRef.current) return;
-    fileInputRef.current.value = "";
-    fileInputRef.current.click();
-  }
-
-  function openFolderPicker() {
-    if (!folderInputRef.current) return;
-    folderInputRef.current.value = "";
-    folderInputRef.current.click();
-  }
-
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
+    event.target.value = "";
     if (!chosen.length) return;
     for (const rawFile of chosen) {
       await uploadFileRecord(rawFile, currentFolder);
     }
-    event.target.value = "";
   }
   async function ensureFolderChain(segments) {
     let parentId = currentFolder;
@@ -669,6 +654,7 @@ export default function Drive() {
   }
   async function onUploadFolder(event) {
     const chosen = Array.from(event.target.files || []);
+    event.target.value = "";
     if (!chosen.length) return;
     for (const file of chosen) {
       const rel = String(file.webkitRelativePath || file.name);
@@ -678,7 +664,6 @@ export default function Drive() {
       const wrapped = new File([file], fileName, { type: file.type });
       await uploadFileRecord(wrapped, parentId, rel);
     }
-    event.target.value = "";
   }
 
   async function openLinkedNoteByTitle(rawTitle) {
@@ -833,8 +818,8 @@ export default function Drive() {
             onSelectFile={openFile}
             onNewNote={createNote}
             onNewFolder={createFolder}
-            onUploadFile={openFilePicker}
-            onUploadFolder={openFolderPicker}
+            onUploadFile={() => fileInputRef.current?.click()}
+            onUploadFolder={() => folderInputRef.current?.click()}
             onRenameFolder={renameFolder}
             onDeleteFolder={deleteFolder}
             onRenameNote={renameNote}
