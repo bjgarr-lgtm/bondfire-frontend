@@ -179,9 +179,7 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const loadSeqRef = useRef(0);
-  const appliedLoadSeqRef = useRef(0);
-  const mutationSeqRef = useRef(0);
+  const latestLoadRequestRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -202,9 +200,8 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const loadSeq = loadSeqRef.current + 1;
-    loadSeqRef.current = loadSeq;
-    const mutationSeqAtStart = mutationSeqRef.current;
+    const requestId = latestLoadRequestRef.current + 1;
+    latestLoadRequestRef.current = requestId;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -234,19 +231,20 @@ export default function Drive() {
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
       const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
-      const isStaleLoad = loadSeq < loadSeqRef.current || mutationSeqAtStart !== mutationSeqRef.current || loadSeq < appliedLoadSeqRef.current;
-      if (isStaleLoad) {
-        return;
-      }
-      appliedLoadSeqRef.current = loadSeq;
+      if (requestId !== latestLoadRequestRef.current) return;
       setFolders(nextFolders);
       setNotes(nextNotes);
       setFiles((prev) => {
         const prevById = new Map(prev.map((file) => [file.id, file]));
-        return nextFiles.map((file) => {
+        const mergedFromServer = nextFiles.map((file) => {
           const existing = prevById.get(file.id);
-          return existing?.previewObjectUrl ? { ...file, previewObjectUrl: existing.previewObjectUrl } : file;
+          return existing?.previewObjectUrl
+            ? { ...file, previewObjectUrl: existing.previewObjectUrl, pendingSync: false, isUploading: false }
+            : { ...file, pendingSync: false, isUploading: false };
         });
+        const nextIds = new Set(mergedFromServer.map((file) => file.id));
+        const pendingLocal = prev.filter((file) => file?.pendingSync && !nextIds.has(file.id));
+        return [...mergedFromServer, ...pendingLocal];
       });
       setTemplates(nextTemplates);
       if (preserveSelection && selectedId) {
@@ -611,13 +609,7 @@ export default function Drive() {
     };
   }
 
-  function markDriveMutation() {
-    mutationSeqRef.current += 1;
-    return mutationSeqRef.current;
-  }
-
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
-    markDriveMutation();
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
     const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
@@ -669,6 +661,8 @@ export default function Drive() {
         ...record,
         ...createdFile,
         previewObjectUrl: localPreviewUrl || undefined,
+        pendingSync: true,
+        isUploading: false,
       });
       setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
       return nextFile;
