@@ -459,6 +459,38 @@ function printableName(name, fallback = "design") {
 	return String(name || fallback).trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-_]/g, "").toLowerCase() || fallback;
 }
 
+
+function blocksKey(orgId) {
+	return `bf_studio_blocks_${orgId}`;
+}
+
+function readBlocks(orgId) {
+	if (!orgId) return [];
+	return readJson(blocksKey(orgId), []);
+}
+
+function saveBlocks(orgId, blocks) {
+	localStorage.setItem(blocksKey(orgId), JSON.stringify(blocks));
+}
+
+function getBrandKit(orgId) {
+	const settings = readJson(`bf_org_settings_${orgId}`, {});
+	return {
+		name: String(settings?.name || "Bondfire Org"),
+		primary: String(settings?.brandPrimary || settings?.primaryColor || "#ef4444"),
+		secondary: String(settings?.brandSecondary || settings?.secondaryColor || "#111827"),
+		accent: String(settings?.brandAccent || settings?.accentColor || "#fca5a5"),
+		text: String(settings?.brandText || settings?.textColor || "#ffffff"),
+	};
+}
+
+function snapValue(value, targets, threshold = 8) {
+	for (const target of targets) {
+		if (Math.abs(value - target) <= threshold) return target;
+	}
+	return value;
+}
+
 export default function Studio() {
 	const { orgId } = useParams();
 
@@ -470,6 +502,11 @@ export default function Studio() {
 	const [history, setHistory] = React.useState([]);
 	const [future, setFuture] = React.useState([]);
 	const [showTemplates, setShowTemplates] = React.useState(false);
+	const [showBoundPreview, setShowBoundPreview] = React.useState(true);
+	const [savedAt, setSavedAt] = React.useState(0);
+	const [resizingId, setResizingId] = React.useState(null);
+	const [resizeOrigin, setResizeOrigin] = React.useState(null);
+	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 
 	React.useEffect(() => {
 		const nextDocs = readDocs(orgId);
@@ -478,9 +515,11 @@ export default function Studio() {
 		setSelectedId(null);
 		setHistory([]);
 		setFuture([]);
+		setSavedBlocks(readBlocks(orgId));
 	}, [orgId]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
+	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
 	const currentDoc = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
 	const selected = React.useMemo(() => currentDoc?.elements?.find((el) => el.id === selectedId) || null, [currentDoc, selectedId]);
 
@@ -488,6 +527,7 @@ export default function Studio() {
 		setDocs((prev) => {
 			const next = typeof updater === "function" ? updater(prev) : updater;
 			saveDocs(orgId, next);
+			setSavedAt(Date.now());
 			return next;
 		});
 	}, [orgId]);
@@ -503,6 +543,7 @@ export default function Studio() {
 		const next = [doc];
 		setDocs(next);
 		saveDocs(orgId, next);
+		setSavedAt(Date.now());
 		setCurrentId(doc.id);
 		return doc.id;
 	}, [currentDoc, orgId]);
@@ -684,6 +725,55 @@ export default function Studio() {
 		setSelectedId(element.id);
 	};
 
+
+	const saveCurrentDoc = () => {
+		saveDocs(orgId, docs);
+		setSavedAt(Date.now());
+	};
+
+	const deleteDoc = (docId) => {
+		const target = docs.find((doc) => doc.id === docId);
+		if (!target) return;
+		const ok = window.confirm(`Delete "${target.name}"?`);
+		if (!ok) return;
+		snapshot();
+		const next = docs.filter((doc) => doc.id !== docId);
+		setDocs(next);
+		saveDocs(orgId, next);
+		setSavedAt(Date.now());
+		if (currentId === docId) {
+			setCurrentId(next[0]?.id || null);
+			setSelectedId(null);
+		}
+	};
+
+	const saveSelectionAsBlock = () => {
+		if (!selected) return;
+		const next = [{ id: uid(), name: selected.name || `${selected.type} Block`, element: clone(selected), createdAt: Date.now() }, ...savedBlocks];
+		setSavedBlocks(next);
+		saveBlocks(orgId, next);
+	};
+
+	const addSavedBlock = (block) => {
+		if (!block) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = { ...clone(block.element), id: uid(), x: Number(block.element?.x || 80) + 24, y: Number(block.element?.y || 80) + 24, name: `${block.name} Copy` };
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : {
+			...doc,
+			updatedAt: Date.now(),
+			elements: [...doc.elements, element],
+		}));
+		setCurrentId(docId);
+		setSelectedId(element.id);
+	};
+
+	const removeSavedBlock = (blockId) => {
+		const next = savedBlocks.filter((block) => block.id !== blockId);
+		setSavedBlocks(next);
+		saveBlocks(orgId, next);
+	};
+
 	const undo = () => {
 		setHistory((prev) => {
 			if (!prev.length) return prev;
@@ -691,6 +781,7 @@ export default function Studio() {
 			setFuture((f) => [clone(docs), ...f]);
 			setDocs(last);
 			saveDocs(orgId, last);
+			setSavedAt(Date.now());
 			const nextCurrent = last.find((d) => d.id === currentId)?.id || last[0]?.id || null;
 			setCurrentId(nextCurrent);
 			setSelectedId(null);
@@ -705,6 +796,7 @@ export default function Studio() {
 			setHistory((h) => [...h, clone(docs)]);
 			setDocs(first);
 			saveDocs(orgId, first);
+			setSavedAt(Date.now());
 			const nextCurrent = first.find((d) => d.id === currentId)?.id || first[0]?.id || null;
 			setCurrentId(nextCurrent);
 			setSelectedId(null);
@@ -778,6 +870,16 @@ export default function Studio() {
 		});
 	};
 
+
+	const startResize = (e, el) => {
+		if (el.locked) return;
+		e.preventDefault();
+		e.stopPropagation();
+		setSelectedId(el.id);
+		setResizingId(el.id);
+		setResizeOrigin({ startX: e.clientX, startY: e.clientY, width: Number(el.width || 1), height: Number(el.height || 1) });
+	};
+
 	React.useEffect(() => {
 		if (!draggingId) return;
 		const onMove = (e) => {
@@ -785,8 +887,11 @@ export default function Studio() {
 			if (!canvas || !currentDoc) return;
 			const rect = canvas.getBoundingClientRect();
 			const scale = Math.min(1, 780 / currentDoc.width);
-			const x = Math.max(0, Math.min(currentDoc.width - 20, (e.clientX - rect.left) / scale - dragOffset.x));
-			const y = Math.max(0, Math.min(currentDoc.height - 20, (e.clientY - rect.top) / scale - dragOffset.y));
+			const dragged = currentDoc.elements.find((el) => el.id === draggingId);
+			const rawX = Math.max(0, Math.min(currentDoc.width - 20, (e.clientX - rect.left) / scale - dragOffset.x));
+			const rawY = Math.max(0, Math.min(currentDoc.height - 20, (e.clientY - rect.top) / scale - dragOffset.y));
+			const x = snapValue(rawX, [0, currentDoc.width / 2, currentDoc.width - Number(dragged?.width || 0), 40, currentDoc.width - Number(dragged?.width || 0) - 40]);
+			const y = snapValue(rawY, [0, currentDoc.height / 2, currentDoc.height - Number(dragged?.height || 0), 40, currentDoc.height - Number(dragged?.height || 0) - 40]);
 			updateElement(draggingId, { x, y });
 		};
 		const onUp = () => setDraggingId(null);
@@ -797,6 +902,32 @@ export default function Studio() {
 			window.removeEventListener("mouseup", onUp);
 		};
 	}, [draggingId, dragOffset, currentDoc]);
+
+	React.useEffect(() => {
+		if (!resizingId || !resizeOrigin || !currentDoc) return;
+		const onMove = (e) => {
+			const el = currentDoc.elements.find((item) => item.id === resizingId);
+			if (!el) return;
+			const canvas = document.getElementById("bf-studio-canvas");
+			const rect = canvas?.getBoundingClientRect();
+			const scale = Math.min(1, 780 / currentDoc.width);
+			const dx = (e.clientX - resizeOrigin.startX) / scale;
+			const dy = (e.clientY - resizeOrigin.startY) / scale;
+			const width = snapValue(Math.max(24, resizeOrigin.width + dx), [80, 120, 240, currentDoc.width - Number(el.x || 0) - 40]);
+			const height = snapValue(Math.max(24, resizeOrigin.height + dy), [40, 80, 120, 240, currentDoc.height - Number(el.y || 0) - 40]);
+			updateElement(resizingId, { width, height });
+		};
+		const onUp = () => {
+			setResizingId(null);
+			setResizeOrigin(null);
+		};
+		window.addEventListener("mousemove", onMove);
+		window.addEventListener("mouseup", onUp);
+		return () => {
+			window.removeEventListener("mousemove", onMove);
+			window.removeEventListener("mouseup", onUp);
+		};
+	}, [resizingId, resizeOrigin, currentDoc]);
 
 	const exportJson = () => {
 		if (!currentDoc) return;
@@ -855,6 +986,8 @@ export default function Studio() {
 					<button onClick={() => createDoc("banner")}>New Banner</button>
 					<button onClick={() => setShowTemplates((v) => !v)}>{showTemplates ? "Hide Templates" : "Show Templates"}</button>
 					<button onClick={duplicateDoc} disabled={!currentDoc}>Duplicate Document</button>
+					<button onClick={saveCurrentDoc} disabled={!currentDoc}>Save Now</button>
+					<button onClick={() => currentDoc && deleteDoc(currentDoc.id)} disabled={!currentDoc}>Delete Current Doc</button>
 				</div>
 
 				{showTemplates ? (
@@ -890,6 +1023,8 @@ export default function Studio() {
 				<hr style={{ margin: "14px 0", opacity: 0.2 }} />
 
 				<div style={{ fontWeight: 700, marginBottom: 8 }}>Bondfire Data</div>
+				<div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>These tokens are live placeholders. Example: {{meeting.title}} resolves to your current Bondfire meeting title when preview is on.</div>
+				<div style={{ display: "flex", gap: 8, marginBottom: 10 }}><button onClick={() => setShowBoundPreview((v) => !v)}>{showBoundPreview ? "Show Raw Tokens" : "Show Live Preview"}</button></div>
 				<div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
 					{Object.entries(bindings).map(([key, value]) => (
 						<div key={key} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
@@ -908,20 +1043,19 @@ export default function Studio() {
 				<div style={{ fontWeight: 700, marginBottom: 8 }}>Documents</div>
 				<div style={{ display: "grid", gap: 8, maxHeight: 320, overflow: "auto" }}>
 					{docs.length ? docs.map((doc) => (
-						<button
-							key={doc.id}
-							onClick={() => { setCurrentId(doc.id); setSelectedId(null); }}
-							style={{
-								textAlign: "left",
-								border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)",
-								background: doc.id === currentId ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)",
-								borderRadius: 12,
-								padding: 10
-							}}
-						>
-							<div style={{ fontWeight: 700 }}>{doc.name}</div>
-							<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
-						</button>
+						<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.1)", background: doc.id === currentId ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
+							<button
+								onClick={() => { setCurrentId(doc.id); setSelectedId(null); }}
+								style={{ textAlign: "left", width: "100%", background: "transparent", border: "none", padding: 0 }}
+							>
+								<div style={{ fontWeight: 700 }}>{doc.name}</div>
+								<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
+							</button>
+							<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+								<button onClick={() => { setCurrentId(doc.id); setSelectedId(null); }}>Open</button>
+								<button onClick={() => deleteDoc(doc.id)}>Delete</button>
+							</div>
+						</div>
 					)) : <div style={{ opacity: 0.7 }}>No Studio docs yet for this org.</div>}
 				</div>
 			</div>
@@ -935,7 +1069,7 @@ export default function Studio() {
 						disabled={!currentDoc}
 						style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "#111827", color: "white" }}
 					/>
-					<div style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+					<div style={{ display: "grid", justifyItems: "end", gap: 4 }}><div style={{ opacity: 0.7, whiteSpace: "nowrap" }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div><div style={{ opacity: 0.65, fontSize: 12 }}>{savedAt ? `Saved locally ${new Date(savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</div></div>
 				</div>
 
 				<div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, padding: 18, overflow: "auto", minHeight: 760 }} onMouseDown={() => setSelectedId(null)}>
@@ -978,7 +1112,8 @@ export default function Studio() {
 													pointerEvents: "auto",
 												}}
 											>
-												{applyBindings(el.text, bindings)}
+												{showBoundPreview ? applyBindings(el.text, bindings) : el.text}
+												{selectedId === el.id && !el.locked ? <div onMouseDown={(e) => startResize(e, el)} style={{ position: "absolute", right: -7, bottom: -7, width: 14, height: 14, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: "nwse-resize" }} /> : null}
 											</div>
 										);
 									}
@@ -1085,6 +1220,20 @@ export default function Studio() {
 				)}
 
 				<div style={{ marginTop: 14 }}>
+					<div style={{ fontWeight: 700, marginBottom: 8 }}>Brand Kit</div>
+					<div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+						<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+							{[brandKit.primary, brandKit.secondary, brandKit.accent, brandKit.text].map((color) => <button key={color} onClick={() => selected?.type === "text" ? updateElement(selected.id, { color }) : selected?.type === "shape" ? updateElement(selected.id, { fill: color }) : null} style={{ height: 32, background: color, borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)" }} />)}
+						</div>
+						<div style={{ fontSize: 12, opacity: 0.72 }}>Tap a swatch to apply it to the selected text or shape.</div>
+					</div>
+					<div style={{ fontWeight: 700, marginBottom: 8 }}>Saved Blocks</div>
+					<div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+						<button onClick={saveSelectionAsBlock} disabled={!selected}>Save Selected as Block</button>
+						<div style={{ display: "grid", gap: 6, maxHeight: 180, overflow: "auto" }}>
+							{savedBlocks.length ? savedBlocks.map((block) => <div key={block.id} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}><div style={{ fontWeight: 700, marginBottom: 6 }}>{block.name}</div><div style={{ display: "flex", gap: 8 }}><button onClick={() => addSavedBlock(block)}>Add</button><button onClick={() => removeSavedBlock(block.id)}>Delete</button></div></div>) : <div style={{ opacity: 0.7 }}>No saved blocks yet.</div>}
+						</div>
+					</div>
 					<div style={{ fontWeight: 700, marginBottom: 8 }}>Layers</div>
 					<div style={{ display: "grid", gap: 6, maxHeight: 420, overflow: "auto" }}>
 						{orderedLayers.length ? orderedLayers.map((el) => (
