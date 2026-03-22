@@ -655,6 +655,35 @@ export default function Studio() {
 		setSelectedIds(dupes.map((el) => el.id));
 	};
 
+	const copySelected = () => {
+		if (!currentDoc || !selectedIds.length) return;
+		const copied = currentDoc.elements.filter((el) => selectedIds.includes(el.id)).map((el) => clone(el));
+		setClipboard(copied);
+	};
+
+	const pasteClipboard = () => {
+		if (!currentDoc || !clipboard.length) return;
+		snapshot();
+		const pasted = withNewIds(clipboard).map((el) => ({
+			...el,
+			x: Number(el.x || 0) + 24,
+			y: Number(el.y || 0) + 24,
+			name: `${el.name || el.type} Copy`,
+		}));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : {
+			...doc,
+			updatedAt: Date.now(),
+			elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...pasted],
+		}));
+		setSelectedIds(pasted.map((el) => el.id));
+	};
+
+	const cutSelected = () => {
+		if (!currentDoc || !selectedIds.length) return;
+		copySelected();
+		removeSelected();
+	};
+
 	const moveLayer = (dir) => {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
@@ -847,6 +876,21 @@ export default function Studio() {
 				duplicateSelected();
 				return;
 			}
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selectedIds.length && !isTyping) {
+				e.preventDefault();
+				copySelected();
+				return;
+			}
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && selectedIds.length && !isTyping) {
+				e.preventDefault();
+				cutSelected();
+				return;
+			}
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard.length && !isTyping) {
+				e.preventDefault();
+				pasteClipboard();
+				return;
+			}
 			if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
 				if (selectedGuideId) {
 					e.preventDefault();
@@ -905,19 +949,27 @@ export default function Studio() {
 		e.preventDefault();
 		e.stopPropagation();
 		const add = e.shiftKey || e.ctrlKey || e.metaKey;
-		if (!selectedIds.includes(el.id) || (!add && selectedIds.length !== (el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1))) {
-			selectElement(el, add);
+		if (add) {
+			selectElement(el, true);
+			return;
 		}
-		const ids = (el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).map((item) => item.id) : selectedIds.includes(el.id) ? selectedIds : [el.id]).filter((id) => {
+		if (!selectedIds.includes(el.id) || selectedIds.length !== (el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1)) {
+			selectElement(el, false);
+		}
+		const activeIds = el.groupId
+			? currentDoc.elements.filter((item) => item.groupId === el.groupId).map((item) => item.id)
+			: (selectedIds.includes(el.id) ? selectedIds : [el.id]);
+		const ids = activeIds.filter((id) => {
 			const item = currentDoc.elements.find((x) => x.id === id);
 			return item && !item.locked;
 		});
-		const pointer = { x: e.clientX, y: e.clientY };
-		const origins = {};
-		ids.forEach((id) => {
+		if (!ids.length) return;
+		const pointer = getCanvasPoint(e.clientX, e.clientY);
+		const origins = Object.fromEntries(ids.map((id) => {
 			const item = currentDoc.elements.find((x) => x.id === id);
-			origins[id] = { x: Number(item?.x || 0), y: Number(item?.y || 0), width: Number(item?.width || 0), height: Number(item?.height || 0) };
-		});
+			return [id, { x: Number(item?.x || 0), y: Number(item?.y || 0) }];
+		}));
+		snapshot();
 		setDragState({ ids, pointer, origins });
 	};
 
@@ -1365,7 +1417,17 @@ export default function Studio() {
 					</div>
 				) : null}
 
-				<div ref={workspaceRef} onMouseDown={startWorkspaceAction} onWheel={handleWheel} onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }} style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+				<div
+					ref={workspaceRef}
+					onMouseDown={startWorkspaceAction}
+					onClick={(e) => {
+						if (e.target === e.currentTarget) closeMenus();
+					}}
+					onWheel={handleWheel}
+					onDrop={onWorkspaceDrop}
+					onDragOver={onWorkspaceDragOver}
+					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
+					style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
 						<>
 							{showRulers ? (
@@ -1389,7 +1451,7 @@ export default function Studio() {
 							) : null}
 
 							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
-								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: "linear-gradient(180deg, #1f2937 0%, #0f172a 100%)", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: currentDoc.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
 									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
 									) : (
@@ -1401,12 +1463,12 @@ export default function Studio() {
 										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= currentDoc.width && Number(el.height || 0) >= currentDoc.height;
 									const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
 										if (el.type === "text") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 										}
 										if (el.type === "shape") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 										}
-										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); selectElement(el, e.shiftKey || e.ctrlKey || e.metaKey); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
 									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 									{selected && !selected.locked ? [
