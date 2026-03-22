@@ -179,7 +179,6 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const driveStateEpoch = useRef(0);
 
   useEffect(() => {
     try {
@@ -200,7 +199,6 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const loadEpoch = driveStateEpoch.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -226,7 +224,6 @@ export default function Drive() {
           }
         } catch {}
       }
-      if (loadEpoch !== driveStateEpoch.current) return;
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
       const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
@@ -598,41 +595,55 @@ export default function Drive() {
   }
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
-    driveStateEpoch.current += 1;
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
     const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const form = new FormData();
-    form.append("file", rawFile, rawFile.name || record.name || "file");
-    form.append("name", record.name || rawFile.name || "file");
-    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-    if (parentId) form.append("parentId", String(parentId));
-    if (relativePath) form.append("relativePath", String(relativePath));
-
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-      method: "POST",
-      body: form,
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticFile = withFileUrls(orgId, {
+      id: tempId,
+      ...record,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      previewObjectUrl: localPreviewUrl || undefined,
+      __optimistic: true,
     });
+    setFiles((prev) => [optimisticFile, ...prev]);
 
-    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-    if (!createdFile?.id) {
+    try {
+      const headers = {
+        "x-drive-name": record.name || rawFile.name || "file",
+        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+      };
+      if (parentId) headers["x-drive-parent-id"] = String(parentId);
+      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
+      if (rawFile.size) headers["x-drive-size"] = String(rawFile.size);
+
+      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+        method: "POST",
+        headers,
+        body: rawFile,
+      });
+
+      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+      if (!createdFile?.id) throw new Error("UPLOAD_NO_FILE_RESPONSE");
+
+      const nextFile = withFileUrls(orgId, {
+        ...record,
+        ...createdFile,
+        previewObjectUrl: localPreviewUrl || undefined,
+      });
+      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
+      return nextFile;
+    } catch (err) {
+      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      await loadDrive({ preserveSelection: true });
-      return null;
+      throw err;
     }
-
-    const nextFile = withFileUrls(orgId, {
-      ...record,
-      ...createdFile,
-      previewObjectUrl: localPreviewUrl || undefined,
-    });
-    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
-    return nextFile;
   }
 
   async function onUploadFiles(event) {

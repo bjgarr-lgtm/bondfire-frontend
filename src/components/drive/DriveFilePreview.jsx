@@ -141,31 +141,40 @@ function pickToken() {
   }
 }
 
-function pickTokenizedUrl(rawUrl) {
-  const base = String(rawUrl || "").trim();
-  if (!base) return "";
+function appendToken(url) {
   const token = pickToken();
-  if (!token) return base;
-  try {
-    const url = new URL(base, window.location.origin);
-    if (!url.searchParams.get("bf_token")) url.searchParams.set("bf_token", token);
-    return url.toString();
-  } catch {
-    const joiner = base.includes("?") ? "&" : "?";
-    return `${base}${joiner}bf_token=${encodeURIComponent(token)}`;
-  }
+  if (!url || !token) return url || "";
+  const next = new URL(url, window.location.origin);
+  if (!next.searchParams.get("bf_token")) next.searchParams.set("bf_token", token);
+  return next.toString();
 }
 
 function useProtectedPreviewSrc(file) {
-  return useMemo(() => {
-    if (!file) return { src: "", error: "", loading: false };
-    const immediateSrc = file.previewObjectUrl || file.dataUrl || "";
-    if (immediateSrc) return { src: immediateSrc, error: "", loading: false };
-    const remoteUrl = file.previewUrl || file.url || "";
-    return { src: pickTokenizedUrl(remoteUrl), error: "", loading: false };
-  }, [file]);
-}
+  const [state, setState] = useState({ src: "", error: "", loading: false, direct: false });
 
+  const effectiveUrl = useMemo(() => file?.previewObjectUrl || file?.dataUrl || "", [file?.previewObjectUrl, file?.dataUrl]);
+  const remoteUrl = useMemo(() => file?.previewUrl || file?.url || "", [file?.previewUrl, file?.url]);
+  const mime = String(file?.mime || "");
+  const canUseDirect = !!file && !effectiveUrl && !!remoteUrl && (mime === "application/pdf" || mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/"));
+
+  useEffect(() => {
+    if (!file) {
+      setState({ src: "", error: "", loading: false, direct: false });
+      return;
+    }
+    if (effectiveUrl) {
+      setState({ src: effectiveUrl, error: "", loading: false, direct: false });
+      return;
+    }
+    if (canUseDirect) {
+      setState({ src: appendToken(remoteUrl), error: "", loading: false, direct: true });
+      return;
+    }
+    setState({ src: remoteUrl || "", error: "", loading: false, direct: false });
+  }, [file, effectiveUrl, remoteUrl, canUseDirect]);
+
+  return state;
+}
 
 export default function DriveFilePreview({ file }) {
   const { src, error, loading } = useProtectedPreviewSrc(file);
