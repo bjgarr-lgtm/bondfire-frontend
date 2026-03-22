@@ -179,6 +179,7 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
+  const driveStateEpoch = useRef(0);
 
   useEffect(() => {
     try {
@@ -199,6 +200,7 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
+    const loadEpoch = driveStateEpoch.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -224,6 +226,7 @@ export default function Drive() {
           }
         } catch {}
       }
+      if (loadEpoch !== driveStateEpoch.current) return;
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
       const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
@@ -595,64 +598,48 @@ export default function Drive() {
   }
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
+    driveStateEpoch.current += 1;
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
     const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const tempId = `uploading_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const optimisticFile = withFileUrls(orgId, {
-      id: tempId,
-      ...record,
-      createdAt: Date.now(),
-      previewObjectUrl: localPreviewUrl || undefined,
-      isUploading: true,
+    const form = new FormData();
+    form.append("file", rawFile, rawFile.name || record.name || "file");
+    form.append("name", record.name || rawFile.name || "file");
+    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+    if (parentId) form.append("parentId", String(parentId));
+    if (relativePath) form.append("relativePath", String(relativePath));
+
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: form,
     });
-    setFiles((prev) => [optimisticFile, ...prev.filter((existing) => existing.id !== tempId)]);
 
-    try {
-      const form = new FormData();
-      form.append("file", rawFile, rawFile.name || record.name || "file");
-      form.append("name", record.name || rawFile.name || "file");
-      form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-      if (parentId) form.append("parentId", String(parentId));
-      if (relativePath) form.append("relativePath", String(relativePath));
-
-      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        body: form,
-      });
-
-      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-      if (!createdFile?.id) throw new Error("UPLOAD_RESPONSE_INVALID");
-
-      const nextFile = withFileUrls(orgId, {
-        ...record,
-        ...createdFile,
-        previewObjectUrl: localPreviewUrl || undefined,
-      });
-      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
-      return nextFile;
-    } catch (error) {
-      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
+    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+    if (!createdFile?.id) {
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
       await loadDrive({ preserveSelection: true });
-      throw error;
+      return null;
     }
+
+    const nextFile = withFileUrls(orgId, {
+      ...record,
+      ...createdFile,
+      previewObjectUrl: localPreviewUrl || undefined,
+    });
+    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
+    return nextFile;
   }
 
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
     for (const rawFile of chosen) {
-      try {
-        await uploadFileRecord(rawFile, currentFolder);
-      } catch (error) {
-        console.error("Drive file upload failed", error);
-      }
+      await uploadFileRecord(rawFile, currentFolder);
     }
     event.target.value = "";
   }
@@ -685,11 +672,7 @@ export default function Drive() {
       const fileName = parts.pop() || file.name;
       const parentId = parts.length ? await ensureFolderChain(parts) : currentFolder;
       const wrapped = new File([file], fileName, { type: file.type });
-      try {
-        await uploadFileRecord(wrapped, parentId, rel);
-      } catch (error) {
-        console.error("Drive folder upload failed", error);
-      }
+      await uploadFileRecord(wrapped, parentId, rel);
     }
     event.target.value = "";
   }
