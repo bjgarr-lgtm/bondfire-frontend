@@ -35,13 +35,34 @@ export async function onRequestDelete({ env, request, params }) {
   if (!auth.ok) return auth.resp;
   await ensureDriveSchema(env);
   const db = getDb(env);
-  const folder = await db.prepare(`SELECT parent_id FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).first();
+  const folder = await db.prepare(`SELECT id FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).first();
   if (!folder) return bad(404, "NOT_FOUND");
-  const parentId = folder.parent_id || null;
-  const t = now();
-  await db.prepare(`UPDATE drive_folders SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
-  await db.prepare(`UPDATE drive_notes SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
-  await db.prepare(`UPDATE drive_files SET parent_id = ?, updated_at = ? WHERE org_id = ? AND parent_id = ?`).bind(parentId, t, orgId, folderId).run();
-  await db.prepare(`DELETE FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).run();
-  return json({ ok: true, deleted: true, id: folderId });
+
+  const folderIds = [];
+  const queue = [folderId];
+  while (queue.length) {
+    const currentId = queue.shift();
+    if (!currentId || folderIds.includes(currentId)) continue;
+    folderIds.push(currentId);
+    const children = await db.prepare(`SELECT id FROM drive_folders WHERE org_id = ? AND parent_id = ?`).bind(orgId, currentId).all();
+    for (const row of children?.results || []) {
+      if (row?.id) queue.push(String(row.id));
+    }
+  }
+
+  const placeholders = folderIds.map(() => "?").join(", ");
+  await db.prepare(`DELETE FROM drive_notes WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run();
+  const filesToDelete = await db.prepare(`SELECT id, storage_key FROM drive_files WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).all();
+  for (const file of filesToDelete?.results || []) {
+    const storageKey = String(file?.storage_key || "").trim();
+    if (!storageKey) continue;
+    try {
+      const bucket = env.DRIVE_BUCKET || env.BONDFIRE_DRIVE_BUCKET || env.R2 || null;
+      if (bucket?.delete) await bucket.delete(storageKey);
+    } catch {}
+  }
+  await db.prepare(`DELETE FROM drive_files WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run();
+  await db.prepare(`DELETE FROM drive_templates WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run().catch(() => null);
+  await db.prepare(`DELETE FROM drive_folders WHERE org_id = ? AND id IN (${placeholders})`).bind(orgId, ...folderIds).run();
+  return json({ ok: true, deleted: true, id: folderId, deletedFolderIds: folderIds });
 }
