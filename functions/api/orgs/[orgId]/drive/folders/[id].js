@@ -1,6 +1,6 @@
 import { bad } from "../../../../_lib/http.js";
 import { requireOrgRole } from "../../../../_lib/auth.js";
-import { ensureDriveSchema, getDb, normalizeNullableId, json, now } from "../../../../_lib/drive.js";
+import { deleteFileBlob, ensureDriveSchema, getDb, normalizeNullableId, json, now } from "../../../../_lib/drive.js";
 
 export async function onRequestPatch({ env, request, params }) {
   const orgId = params.orgId;
@@ -38,31 +38,33 @@ export async function onRequestDelete({ env, request, params }) {
   const folder = await db.prepare(`SELECT id FROM drive_folders WHERE org_id = ? AND id = ?`).bind(orgId, folderId).first();
   if (!folder) return bad(404, "NOT_FOUND");
 
-  const folderIds = [];
-  const queue = [folderId];
-  while (queue.length) {
-    const currentId = queue.shift();
-    if (!currentId || folderIds.includes(currentId)) continue;
-    folderIds.push(currentId);
-    const children = await db.prepare(`SELECT id FROM drive_folders WHERE org_id = ? AND parent_id = ?`).bind(orgId, currentId).all();
-    for (const row of children?.results || []) {
-      if (row?.id) queue.push(String(row.id));
-    }
-  }
+  const descendantsRes = await db.prepare(
+    `WITH RECURSIVE subtree(id) AS (
+       SELECT id FROM drive_folders WHERE org_id = ? AND id = ?
+       UNION ALL
+       SELECT f.id
+       FROM drive_folders f
+       JOIN subtree s ON f.parent_id = s.id
+       WHERE f.org_id = ?
+     )
+     SELECT id FROM subtree`
+  ).bind(orgId, folderId, orgId).all();
+
+  const folderIds = (descendantsRes.results || []).map((row) => String(row.id || "")).filter(Boolean);
+  if (!folderIds.length) return json({ ok: true, deleted: true, id: folderId });
 
   const placeholders = folderIds.map(() => "?").join(", ");
-  await db.prepare(`DELETE FROM drive_notes WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run();
-  const filesToDelete = await db.prepare(`SELECT id, storage_key FROM drive_files WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).all();
-  for (const file of filesToDelete?.results || []) {
-    const storageKey = String(file?.storage_key || "").trim();
-    if (!storageKey) continue;
-    try {
-      const bucket = env.DRIVE_BUCKET || env.BONDFIRE_DRIVE_BUCKET || env.R2 || null;
-      if (bucket?.delete) await bucket.delete(storageKey);
-    } catch {}
+  const fileRows = await db.prepare(
+    `SELECT id, storage_key FROM drive_files WHERE org_id = ? AND parent_id IN (${placeholders})`
+  ).bind(orgId, ...folderIds).all();
+
+  for (const row of (fileRows.results || [])) {
+    await deleteFileBlob(env, { orgId, fileId: row.id, storageKey: row.storage_key || null });
   }
+
+  await db.prepare(`DELETE FROM drive_notes WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run();
   await db.prepare(`DELETE FROM drive_files WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run();
-  await db.prepare(`DELETE FROM drive_templates WHERE org_id = ? AND parent_id IN (${placeholders})`).bind(orgId, ...folderIds).run().catch(() => null);
   await db.prepare(`DELETE FROM drive_folders WHERE org_id = ? AND id IN (${placeholders})`).bind(orgId, ...folderIds).run();
+
   return json({ ok: true, deleted: true, id: folderId, deletedFolderIds: folderIds });
 }

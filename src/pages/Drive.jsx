@@ -179,8 +179,8 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const loadSeqRef = useRef(0);
-  const foldersRef = useRef([]);
+  const loadRequestSeq = useRef(0);
+  const mutationSeq = useRef(0);
 
   useEffect(() => {
     try {
@@ -199,13 +199,10 @@ export default function Drive() {
     } catch {}
   }, [uiStorageKey, sidebarWidth, splitRatio, viewMode, inspectorOpen, propertiesCollapsed]);
 
-  useEffect(() => {
-    foldersRef.current = folders;
-  }, [folders]);
-
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const requestSeq = ++loadSeqRef.current;
+    const requestSeq = ++loadRequestSeq.current;
+    const mutationSeqAtStart = mutationSeq.current;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -231,14 +228,15 @@ export default function Drive() {
           }
         } catch {}
       }
-      if (requestSeq !== loadSeqRef.current) return;
+      if (requestSeq !== loadRequestSeq.current || mutationSeqAtStart !== mutationSeq.current) {
+        return;
+      }
       const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const existingPreviewById = new Map(files.map((file) => [file.id, file.previewObjectUrl]).filter(([, value]) => !!value));
       const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => {
-        const withUrls = withFileUrls(orgId, file);
-        const previewObjectUrl = existingPreviewById.get(withUrls.id);
-        return previewObjectUrl ? { ...withUrls, previewObjectUrl } : withUrls;
+        const hydrated = withFileUrls(orgId, file);
+        const existing = files.find((entry) => entry.id === hydrated.id);
+        return existing?.previewObjectUrl ? { ...hydrated, previewObjectUrl: existing.previewObjectUrl } : hydrated;
       });
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
@@ -269,7 +267,6 @@ export default function Drive() {
       }
       setLoadState("ready");
     } catch (e) {
-      if (requestSeq !== loadSeqRef.current) return;
       setLoadError(String(e?.message || e || "Failed to load Drive"));
       setLoadState("error");
     }
@@ -357,6 +354,7 @@ export default function Drive() {
   async function createFolder() {
     const name = prompt("Folder name?");
     if (!name) return;
+    mutationSeq.current += 1;
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
       method: "POST",
       body: JSON.stringify({ name: String(name).trim(), parentId: currentFolder }),
@@ -367,6 +365,7 @@ export default function Drive() {
     setCurrentFolder(folder.id);
   }
   async function renameFolder(id) {
+    mutationSeq.current += 1;
     const folder = folders.find((f) => f.id === id);
     const name = prompt("Rename folder", folder?.name || "");
     if (!name) return;
@@ -378,15 +377,44 @@ export default function Drive() {
     setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
   }
   async function deleteFolder(id) {
+    mutationSeq.current += 1;
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
-    const parent = folders.find((f) => f.id === id)?.parentId ?? null;
-    setFolders((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)).filter((f) => f.id !== id));
-    setNotes((prev) => prev.map((n) => (n.parentId === id ? { ...n, parentId: parent } : n)));
-    setFiles((prev) => prev.map((f) => (f.parentId === id ? { ...f, parentId: parent } : f)));
-    if (currentFolder === id) setCurrentFolder(parent);
+    const foldersByParent = new Map();
+    folders.forEach((folder) => {
+      const key = folder.parentId || "__root__";
+      const bucket = foldersByParent.get(key) || [];
+      bucket.push(folder);
+      foldersByParent.set(key, bucket);
+    });
+    const folderIdsToDelete = new Set();
+    const stack = [id];
+    while (stack.length) {
+      const nextId = stack.pop();
+      if (!nextId || folderIdsToDelete.has(nextId)) continue;
+      folderIdsToDelete.add(nextId);
+      const children = foldersByParent.get(nextId) || [];
+      children.forEach((child) => stack.push(child.id));
+    }
+    setFolders((prev) => prev.filter((folder) => !folderIdsToDelete.has(folder.id)));
+    setNotes((prev) => prev.filter((note) => !folderIdsToDelete.has(note.parentId || "")));
+    setFiles((prev) => prev.filter((file) => !folderIdsToDelete.has(file.parentId || "")));
+    if (folderIdsToDelete.has(currentFolder)) setCurrentFolder(null);
+    if (selectedKind === "note" && selectedId && notes.some((note) => note.id === selectedId && folderIdsToDelete.has(note.parentId || ""))) {
+      setSelectedId(null);
+      setTitle("untitled");
+      setContent("");
+      setStatus("saved");
+    }
+    if (selectedKind === "file" && selectedId && files.some((file) => file.id === selectedId && folderIdsToDelete.has(file.parentId || ""))) {
+      setSelectedId(null);
+      setTitle("untitled");
+      setContent("");
+      setStatus("saved");
+    }
   }
 
   async function createNoteWithPayload(payload) {
+    mutationSeq.current += 1;
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -421,6 +449,7 @@ export default function Drive() {
     setStatus("saved");
   }
   async function renameNote(id) {
+    mutationSeq.current += 1;
     const note = notes.find((n) => n.id === id);
     const name = prompt("Rename note", note?.title || "");
     if (!name) return;
@@ -438,6 +467,7 @@ export default function Drive() {
     }
   }
   async function deleteNote(id) {
+    mutationSeq.current += 1;
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
     setNotes((prev) => prev.filter((n) => n.id !== id));
     if (selectedId === id && selectedKind === "note") {
@@ -448,6 +478,7 @@ export default function Drive() {
     }
   }
   async function moveNote(id) {
+    mutationSeq.current += 1;
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -458,6 +489,7 @@ export default function Drive() {
   }
 
   async function renameFile(id) {
+    mutationSeq.current += 1;
     const file = files.find((f) => f.id === id);
     const name = prompt("Rename file", file?.name || "");
     if (!name) return;
@@ -475,6 +507,7 @@ export default function Drive() {
     }
   }
   async function deleteFile(id) {
+    mutationSeq.current += 1;
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, { method: "DELETE" });
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (selectedId === id && selectedKind === "file") {
@@ -485,6 +518,7 @@ export default function Drive() {
     }
   }
   async function moveFile(id) {
+    mutationSeq.current += 1;
     const target = prompt("Move to folderId (blank for root)", currentFolder || "");
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -609,68 +643,41 @@ export default function Drive() {
   }
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
+    mutationSeq.current += 1;
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
     const isPreviewableBinary = canPreviewFileInApp(record) && !isEditableTextFile(record);
     const localPreviewUrl = isPreviewableBinary ? URL.createObjectURL(rawFile) : "";
     if (localPreviewUrl) objectUrlRegistry.current.add(localPreviewUrl);
 
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const optimisticFile = withFileUrls(orgId, {
-      id: tempId,
-      ...record,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      previewObjectUrl: localPreviewUrl || undefined,
-      isPendingUpload: true,
+    const form = new FormData();
+    form.append("file", rawFile, rawFile.name || record.name || "file");
+    form.append("name", record.name || rawFile.name || "file");
+    form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+    if (parentId) form.append("parentId", String(parentId));
+    if (relativePath) form.append("relativePath", String(relativePath));
+
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: form,
     });
-    setFiles((prev) => [optimisticFile, ...prev]);
 
-    try {
-      const headers = {
-        "x-drive-name": record.name || rawFile.name || "file",
-        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
-      };
-      if (parentId) headers["x-drive-parent-id"] = String(parentId);
-      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-
-      let res;
-      try {
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          headers,
-          body: rawFile,
-        });
-      } catch {
-        const form = new FormData();
-        form.append("file", rawFile, rawFile.name || record.name || "file");
-        form.append("name", record.name || rawFile.name || "file");
-        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-        if (parentId) form.append("parentId", String(parentId));
-        if (relativePath) form.append("relativePath", String(relativePath));
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          body: form,
-        });
-      }
-
-      const createdFile = res?.file || (res?.id ? { id: res.id } : null);
-      if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
-
-      const nextFile = withFileUrls(orgId, {
-        ...record,
-        ...createdFile,
-        previewObjectUrl: localPreviewUrl || undefined,
-      });
-      setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
-      return nextFile;
-    } catch (error) {
-      setFiles((prev) => prev.filter((existing) => existing.id !== tempId));
+    const createdFile = res?.file || (res?.id ? { id: res.id } : null);
+    if (!createdFile?.id) {
       if (localPreviewUrl) {
         try { URL.revokeObjectURL(localPreviewUrl); } catch {}
         objectUrlRegistry.current.delete(localPreviewUrl);
       }
-      throw error;
+      await loadDrive({ preserveSelection: true });
+      return null;
     }
+
+    const nextFile = withFileUrls(orgId, {
+      ...record,
+      ...createdFile,
+      previewObjectUrl: localPreviewUrl || undefined,
+    });
+    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== nextFile.id)]);
+    return nextFile;
   }
 
   async function onUploadFiles(event) {
@@ -681,13 +688,12 @@ export default function Drive() {
     }
     event.target.value = "";
   }
-  async function ensureFolderChain(segments, folderCache = null) {
+  async function ensureFolderChain(segments, folderCache = new Map()) {
     let parentId = currentFolder;
-    const cache = folderCache || [...foldersRef.current];
-    for (const rawSegment of segments) {
-      const segment = String(rawSegment || "").trim();
-      if (!segment) continue;
-      let existing = cache.find((folder) => (folder.parentId || null) === (parentId || null) && folder.name === segment);
+    let nextFolders = folders;
+    for (const segment of segments) {
+      const cacheKey = `${parentId || "root"}::${segment}`;
+      let existing = folderCache.get(cacheKey) || nextFolders.find((folder) => (folder.parentId || null) === (parentId || null) && folder.name === segment);
       if (!existing) {
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
           method: "POST",
@@ -695,10 +701,12 @@ export default function Drive() {
         });
         existing = res?.folder || null;
         if (existing) {
-          cache.push(existing);
-          foldersRef.current = cache;
-          setFolders([...cache]);
+          nextFolders = [...nextFolders, existing];
+          setFolders(nextFolders);
+          folderCache.set(cacheKey, existing);
         }
+      } else {
+        folderCache.set(cacheKey, existing);
       }
       parentId = existing?.id || parentId;
     }
@@ -707,19 +715,16 @@ export default function Drive() {
   async function onUploadFolder(event) {
     const chosen = Array.from(event.target.files || []);
     if (!chosen.length) return;
-    const folderCache = [...foldersRef.current];
-    try {
-      for (const file of chosen) {
-        const rel = String(file.webkitRelativePath || file.name);
-        const parts = rel.split("/").filter(Boolean);
-        const fileName = parts.pop() || file.name;
-        const parentId = parts.length ? await ensureFolderChain(parts, folderCache) : currentFolder;
-        const wrapped = new File([file], fileName, { type: file.type });
-        await uploadFileRecord(wrapped, parentId, rel);
-      }
-    } finally {
-      event.target.value = "";
+    const folderCache = new Map();
+    for (const file of chosen) {
+      const rel = String(file.webkitRelativePath || file.name);
+      const parts = rel.split("/").filter(Boolean);
+      const fileName = parts.pop() || file.name;
+      const parentId = parts.length ? await ensureFolderChain(parts, folderCache) : currentFolder;
+      const wrapped = new File([file], fileName, { type: file.type });
+      await uploadFileRecord(wrapped, parentId, rel);
     }
+    event.target.value = "";
   }
 
   async function openLinkedNoteByTitle(rawTitle) {
