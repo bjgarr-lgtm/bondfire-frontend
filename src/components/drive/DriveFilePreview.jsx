@@ -1,11 +1,11 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
+    .replace(/"/g, "&quot;");
 }
 
 function applyInlineMarkdown(text) {
@@ -133,9 +133,69 @@ function markdownToHtml(md) {
   return html;
 }
 
+function pickToken() {
+  try {
+    return localStorage.getItem("bf_token") || localStorage.getItem("bf_auth_token") || localStorage.getItem("bf_access_token") || localStorage.getItem("bf_accessToken") || "";
+  } catch {
+    return "";
+  }
+}
+
+function useAuthenticatedObjectUrl(file) {
+  const [objectUrl, setObjectUrl] = useState("");
+  const [error, setError] = useState("");
+  const sourceUrl = file?.previewUrl || file?.url || "";
+  const needsBlobFetch = !!file && !file?.textContent && !file?.dataUrl && !!sourceUrl && (
+    String(file?.mime || "").startsWith("image/") ||
+    String(file?.mime || "").startsWith("audio/") ||
+    String(file?.mime || "").startsWith("video/") ||
+    file?.mime === "application/pdf"
+  );
+
+  useEffect(() => {
+    let revoked = "";
+    let cancelled = false;
+    setObjectUrl("");
+    setError("");
+    if (!needsBlobFetch) return undefined;
+
+    const token = pickToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    (async () => {
+      try {
+        const res = await fetch(sourceUrl, { credentials: "include", headers });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `Preview request failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        revoked = URL.createObjectURL(blob);
+        setObjectUrl(revoked);
+      } catch (err) {
+        if (!cancelled) setError(String(err?.message || err || "Failed to load preview"));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [file?.id, file?.updatedAt, sourceUrl, needsBlobFetch]);
+
+  return { objectUrl, error };
+}
+
 export default function DriveFilePreview({ file }) {
   if (!file) return null;
-  const src = file?.dataUrl || file?.previewUrl || file?.url || "";
+  const directSrc = file?.dataUrl || "";
+  const { objectUrl, error } = useAuthenticatedObjectUrl(file);
+  const src = directSrc || objectUrl || file?.previewUrl || file?.url || "";
+
+  if (error) {
+    return <div className="card" style={{ padding: 16, color: "#ffb4b4", whiteSpace: "pre-wrap" }}>{error}</div>;
+  }
 
   if (String(file.mime || "").startsWith("image/") && src) {
     return <div style={{ display: "flex", justifyContent: "center" }}><img src={src} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
@@ -143,12 +203,8 @@ export default function DriveFilePreview({ file }) {
   if (file.mime === "application/pdf" && src) {
     return <iframe key={src} title={file.name} src={src} style={{ width: "100%", height: "78vh", border: "1px solid #1f1f1f", borderRadius: 12, background: "#111" }} />;
   }
-  if (String(file.mime || "").startsWith("audio/") && src) {
-    return <audio key={src} controls preload="metadata" style={{ width: "100%" }}><source src={src} type={file.mime || "audio/mpeg"} /></audio>;
-  }
-  if (String(file.mime || "").startsWith("video/") && src) {
-    return <video key={src} controls playsInline preload="metadata" style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }}><source src={src} type={file.mime || "video/mp4"} /></video>;
-  }
+  if (String(file.mime || "").startsWith("audio/") && src) return <audio key={src} controls preload="metadata" src={src} style={{ width: "100%" }} />;
+  if (String(file.mime || "").startsWith("video/") && src) return <video key={src} controls playsInline preload="metadata" src={src} style={{ width: "100%", borderRadius: 12, border: "1px solid #1f1f1f", background: "#111" }} />;
   if (file.textContent) {
     return (
       <div style={{ maxWidth: 920, margin: "0 auto", background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 14, minHeight: "72vh" }}>
