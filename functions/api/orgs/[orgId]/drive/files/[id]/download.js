@@ -1,37 +1,40 @@
 import { bad } from "../../../../../_lib/http.js";
 import { requireOrgRole } from "../../../../../_lib/auth.js";
-import { getDriveBucket, getFileRecord, loadFileBlob, bytesFromDataUrl } from "../../../../../_lib/drive.js";
+import { getFileRecord, loadFileBlob, bytesFromDataUrl, getDriveBucket } from "../../../../../_lib/drive.js";
 
-function buildHeaders(file, mime, size, asDownload, rangeHeader, byteRange) {
+function buildCommonHeaders({ file, mime, asDownload, length, rangeHeader }) {
   const headers = new Headers({
     "content-type": mime || file.mime || "application/octet-stream",
     "accept-ranges": "bytes",
     "cache-control": "private, max-age=60",
     "content-disposition": `${asDownload ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(file.name || "download")}`,
   });
-  if (byteRange) {
-    headers.set("content-range", `bytes ${byteRange.start}-${byteRange.end}/${size}`);
-    headers.set("content-length", String(byteRange.end - byteRange.start + 1));
-  } else if (Number.isFinite(size)) {
-    headers.set("content-length", String(size));
+  if (rangeHeader) {
+    headers.set("content-range", rangeHeader);
+  }
+  if (Number.isFinite(length)) {
+    headers.set("content-length", String(length));
   }
   return headers;
 }
 
-function parseRangeHeader(rangeHeader, size) {
-  const match = String(rangeHeader || "").match(/^bytes=(\d*)-(\d*)$/i);
+function parseRangeHeader(rangeValue, size) {
+  const raw = String(rangeValue || "").trim();
+  const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
   if (!match || !Number.isFinite(size) || size <= 0) return null;
   let start = match[1] === "" ? null : Number(match[1]);
   let end = match[2] === "" ? null : Number(match[2]);
   if (start === null && end === null) return null;
   if (start === null) {
-    const length = end || 0;
-    start = Math.max(size - length, 0);
+    const suffix = end;
+    if (!Number.isFinite(suffix) || suffix <= 0) return null;
+    start = Math.max(size - suffix, 0);
     end = size - 1;
   } else {
-    if (end === null || end >= size) end = size - 1;
+    if (!Number.isFinite(start) || start < 0 || start >= size) return null;
+    if (end === null || !Number.isFinite(end) || end >= size) end = size - 1;
+    if (end < start) return null;
   }
-  if (start < 0 || start >= size || end < start) return null;
   return { start, end };
 }
 
@@ -45,20 +48,33 @@ export async function onRequestGet({ env, request, params }) {
 
   const url = new URL(request.url);
   const asDownload = url.searchParams.get("download") === "1";
-  const rangeHeader = request.headers.get("range") || "";
+  const requestedRange = request.headers.get("range");
   const bucket = getDriveBucket(env);
 
   if (bucket && file.storageKey) {
-    const byteRange = parseRangeHeader(rangeHeader, Number(file.size || 0));
-    const obj = byteRange
-      ? await bucket.get(file.storageKey, { range: { offset: byteRange.start, length: byteRange.end - byteRange.start + 1 } })
-      : await bucket.get(file.storageKey);
+    if (requestedRange) {
+      const parsed = parseRangeHeader(requestedRange, file.size);
+      if (parsed) {
+        const obj = await bucket.get(file.storageKey, { range: { offset: parsed.start, length: parsed.end - parsed.start + 1 } });
+        if (obj) {
+          const mime = file.mime || obj.httpMetadata?.contentType || "application/octet-stream";
+          const headers = buildCommonHeaders({
+            file,
+            mime,
+            asDownload,
+            length: parsed.end - parsed.start + 1,
+            rangeHeader: `bytes ${parsed.start}-${parsed.end}/${file.size}`,
+          });
+          return new Response(obj.body, { status: 206, headers });
+        }
+      }
+    }
 
+    const obj = await bucket.get(file.storageKey);
     if (obj) {
       const mime = file.mime || obj.httpMetadata?.contentType || "application/octet-stream";
-      const size = Number(file.size || obj.size || 0);
-      const headers = buildHeaders(file, mime, size, asDownload, rangeHeader, byteRange);
-      return new Response(obj.body, { status: byteRange ? 206 : 200, headers });
+      const headers = buildCommonHeaders({ file, mime, asDownload, length: file.size || obj.size || undefined });
+      return new Response(obj.body, { status: 200, headers });
     }
   }
 
@@ -66,9 +82,21 @@ export async function onRequestGet({ env, request, params }) {
   if (!blob?.dataUrl) return bad(404, "FILE_BLOB_MISSING");
   const payload = bytesFromDataUrl(blob.dataUrl);
   if (!payload) return bad(500, "INVALID_FILE_DATA");
-  const size = payload.bytes.byteLength || 0;
-  const byteRange = parseRangeHeader(rangeHeader, size);
-  const body = byteRange ? payload.bytes.slice(byteRange.start, byteRange.end + 1) : payload.bytes;
-  const headers = buildHeaders(file, file.mime || payload.mime || "application/octet-stream", size, asDownload, rangeHeader, byteRange);
-  return new Response(body, { status: byteRange ? 206 : 200, headers });
+
+  const total = payload.bytes.byteLength || 0;
+  const parsed = requestedRange ? parseRangeHeader(requestedRange, total) : null;
+  if (parsed) {
+    const slice = payload.bytes.slice(parsed.start, parsed.end + 1);
+    const headers = buildCommonHeaders({
+      file,
+      mime: file.mime || payload.mime || "application/octet-stream",
+      asDownload,
+      length: slice.byteLength,
+      rangeHeader: `bytes ${parsed.start}-${parsed.end}/${total}`,
+    });
+    return new Response(slice, { status: 206, headers });
+  }
+
+  const headers = buildCommonHeaders({ file, mime: file.mime || payload.mime || "application/octet-stream", asDownload, length: total });
+  return new Response(payload.bytes, { status: 200, headers });
 }

@@ -180,16 +180,6 @@ export default function Drive() {
   const folderInputRef = useRef(null);
 
   useEffect(() => {
-    const folderEl = folderInputRef.current;
-    if (!folderEl) return;
-    try {
-      folderEl.setAttribute("webkitdirectory", "");
-      folderEl.setAttribute("directory", "");
-      folderEl.setAttribute("multiple", "");
-    } catch {}
-  }, []);
-
-  useEffect(() => {
     try {
       const raw = JSON.parse(localStorage.getItem(uiStorageKey) || "{}");
       setSidebarWidth(Number.isFinite(raw.sidebarWidth) ? clamp(raw.sidebarWidth, 220, 380) : 296);
@@ -273,6 +263,15 @@ export default function Drive() {
   useEffect(() => {
     loadDrive({ preserveSelection: false });
   }, [orgId]);
+
+  useEffect(() => {
+    const input = folderInputRef.current;
+    if (!input) return;
+    try {
+      input.setAttribute("webkitdirectory", "");
+      input.setAttribute("directory", "");
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const onMove = (e) => {
@@ -591,19 +590,16 @@ export default function Drive() {
 
   async function uploadFileRecord(rawFile, parentId, relativePath = "") {
     const record = await fileToStoredRecord(rawFile, parentId, relativePath);
-    const headers = {
-      "x-drive-name": String(record.name || rawFile.name || "file"),
-      "x-drive-mime": String(record.mime || rawFile.type || "application/octet-stream"),
-      "x-drive-size": String(Number(record.size || rawFile.size || 0)),
-    };
-    if (parentId) headers["x-drive-parent-id"] = String(parentId);
-    if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-
     let res = null;
     try {
       res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
         method: "POST",
-        headers,
+        headers: {
+          "x-drive-name": record.name || rawFile.name || "file",
+          "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+          ...(parentId ? { "x-drive-parent-id": String(parentId) } : {}),
+          ...(relativePath ? { "x-drive-relative-path": String(relativePath) } : {}),
+        },
         body: rawFile,
       });
     } catch {
@@ -626,11 +622,11 @@ export default function Drive() {
 
   async function onUploadFiles(event) {
     const chosen = Array.from(event.target.files || []);
-    event.target.value = "";
     if (!chosen.length) return;
     for (const rawFile of chosen) {
       await uploadFileRecord(rawFile, currentFolder);
     }
+    event.target.value = "";
   }
   async function ensureFolderChain(segments) {
     let parentId = currentFolder;
@@ -654,7 +650,6 @@ export default function Drive() {
   }
   async function onUploadFolder(event) {
     const chosen = Array.from(event.target.files || []);
-    event.target.value = "";
     if (!chosen.length) return;
     for (const file of chosen) {
       const rel = String(file.webkitRelativePath || file.name);
@@ -664,6 +659,7 @@ export default function Drive() {
       const wrapped = new File([file], fileName, { type: file.type });
       await uploadFileRecord(wrapped, parentId, rel);
     }
+    event.target.value = "";
   }
 
   async function openLinkedNoteByTitle(rawTitle) {
@@ -800,7 +796,7 @@ export default function Drive() {
   return (
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
       <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFiles} />
-      <input ref={folderInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFolder} />
+      <input ref={folderInputRef} type="file" multiple webkitdirectory="true" directory="true" style={{ display: "none" }} onChange={onUploadFolder} />
 
       <div style={{ display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)`, height: "100%" }}>
         <div style={{ borderRight: "1px solid #1b1b1b", overflow: "hidden" }}>
