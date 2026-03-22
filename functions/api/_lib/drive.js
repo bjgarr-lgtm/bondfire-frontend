@@ -72,7 +72,7 @@ export async function ensureDriveSchema(env) {
   ];
 
   for (const sql of statements) {
-    await db.exec(sql);
+    await db.prepare(sql).run();
   }
 }
 
