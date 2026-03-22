@@ -179,7 +179,6 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const latestLoadRequestRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -200,8 +199,6 @@ export default function Drive() {
 
   async function loadDrive({ preserveSelection = true } = {}) {
     if (!orgId) return;
-    const requestId = latestLoadRequestRef.current + 1;
-    latestLoadRequestRef.current = requestId;
     setLoadState("loading");
     setLoadError("");
     try {
@@ -231,21 +228,9 @@ export default function Drive() {
       const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
       const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
       const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
-      if (requestId !== latestLoadRequestRef.current) return;
       setFolders(nextFolders);
       setNotes(nextNotes);
-      setFiles((prev) => {
-        const prevById = new Map(prev.map((file) => [file.id, file]));
-        const mergedFromServer = nextFiles.map((file) => {
-          const existing = prevById.get(file.id);
-          return existing?.previewObjectUrl
-            ? { ...file, previewObjectUrl: existing.previewObjectUrl, pendingSync: false, isUploading: false }
-            : { ...file, pendingSync: false, isUploading: false };
-        });
-        const nextIds = new Set(mergedFromServer.map((file) => file.id));
-        const pendingLocal = prev.filter((file) => file?.pendingSync && !nextIds.has(file.id));
-        return [...mergedFromServer, ...pendingLocal];
-      });
+      setFiles(nextFiles);
       setTemplates(nextTemplates);
       if (preserveSelection && selectedId) {
         if (selectedKind === "note") {
@@ -661,8 +646,6 @@ export default function Drive() {
         ...record,
         ...createdFile,
         previewObjectUrl: localPreviewUrl || undefined,
-        pendingSync: true,
-        isUploading: false,
       });
       setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
       return nextFile;
