@@ -29,7 +29,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1080, height: 1350, fill: "#0f172a", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}}", x: 90, y: 110, width: 900, height: 60, fontSize: 28, fontWeight: 700, color: "#fca5a5", name: "Org Name" }),
-				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#ffffff", name: "Title" }),
+				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Title" }),
 				makeTextElement({ text: "{{meeting.date}}\n{{meeting.location}}", x: 90, y: 420, width: 420, height: 200, fontSize: 34, fontWeight: 600, lineHeight: 1.2, color: "#e5e7eb", name: "Date + Location" }),
 				makeShapeElement({ x: 610, y: 420, width: 320, height: 320, fill: "rgba(255,255,255,0.05)", stroke: "#fca5a5", strokeWidth: 2, radius: 24, name: "Image Frame" }),
 				makeTextElement({ text: "{{org.contact}}", x: 90, y: 1175, width: 920, height: 40, fontSize: 22, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
@@ -44,7 +44,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1080, height: 1080, fill: "#111827", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}} needs", x: 80, y: 90, width: 920, height: 90, fontSize: 42, fontWeight: 700, color: "#fca5a5", name: "Heading" }),
-				makeTextElement({ text: "{{need.title}}", x: 80, y: 220, width: 920, height: 170, fontSize: 82, fontWeight: 800, lineHeight: 0.95, color: "#ffffff", name: "Need Title" }),
+				makeTextElement({ text: "{{need.title}}", x: 80, y: 220, width: 920, height: 170, fontSize: 82, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Need Title" }),
 				makeTextElement({ text: "{{need.description}}", x: 80, y: 450, width: 920, height: 250, fontSize: 30, fontWeight: 500, lineHeight: 1.25, color: "#e5e7eb", name: "Need Description" }),
 				makeTextElement({ text: "{{org.contact}}", x: 80, y: 930, width: 920, height: 50, fontSize: 24, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
 			],
@@ -58,7 +58,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1080, height: 1920, fill: "#0b1020", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}}", x: 80, y: 120, width: 920, height: 70, fontSize: 34, fontWeight: 700, letterSpacing: 2, color: "#fca5a5", name: "Org Name" }),
-				makeTextElement({ text: "{{meeting.title}}", x: 80, y: 260, width: 920, height: 260, fontSize: 98, fontWeight: 800, lineHeight: 0.92, color: "#ffffff", name: "Meeting Title" }),
+				makeTextElement({ text: "{{meeting.title}}", x: 80, y: 260, width: 920, height: 260, fontSize: 98, fontWeight: 800, lineHeight: 0.92, color: "#000000", name: "Meeting Title" }),
 				makeTextElement({ text: "{{meeting.date}}", x: 80, y: 630, width: 920, height: 80, fontSize: 38, fontWeight: 700, color: "#e5e7eb", name: "Meeting Date" }),
 				makeTextElement({ text: "{{meeting.location}}", x: 80, y: 730, width: 920, height: 160, fontSize: 42, fontWeight: 600, lineHeight: 1.15, color: "#f9fafb", name: "Meeting Location" }),
 			],
@@ -72,7 +72,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1600, height: 900, fill: "#111827", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}}", x: 100, y: 110, width: 1320, height: 50, fontSize: 28, fontWeight: 700, letterSpacing: 1.5, color: "#fca5a5", name: "Org Name" }),
-				makeTextElement({ text: "volunteers needed", x: 100, y: 200, width: 840, height: 180, fontSize: 96, fontWeight: 800, lineHeight: 0.95, color: "#ffffff", name: "Heading" }),
+				makeTextElement({ text: "volunteers needed", x: 100, y: 200, width: 840, height: 180, fontSize: 96, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Heading" }),
 				makeTextElement({ text: "{{need.title}}", x: 100, y: 430, width: 860, height: 120, fontSize: 42, fontWeight: 600, lineHeight: 1.1, color: "#e5e7eb", name: "Need Title" }),
 				makeTextElement({ text: "{{org.contact}}", x: 100, y: 720, width: 860, height: 50, fontSize: 24, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
 			],
@@ -136,7 +136,7 @@ function makeTextElement(patch = {}) {
 		lineHeight: 1.1,
 		letterSpacing: 0,
 		align: "left",
-		color: "#ffffff",
+		color: "#000000",
 		...patch,
 	};
 }
@@ -145,6 +145,7 @@ function makeShapeElement(patch = {}) {
 	return {
 		id: uid(),
 		type: "shape",
+		shape: "rect",
 		name: patch.name || "Shape",
 		locked: false,
 		hidden: false,
@@ -588,14 +589,24 @@ export default function Studio() {
 		setSelectedIds([element.id]);
 	};
 
-	const addShape = () => {
-		const docId = ensureDoc("flyer");
-		snapshot();
-		const element = makeShapeElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
-		setCurrentId(docId);
-		setSelectedIds([element.id]);
+	const addShape = (shape = "rect") => {
+	const docId = ensureDoc("flyer");
+	snapshot();
+	const presets = {
+		rect: { shape: "rect", name: "Rectangle", width: 240, height: 160, radius: 16 },
+		circle: { shape: "circle", name: "Circle", width: 180, height: 180, radius: 999 },
+		triangle: { shape: "triangle", name: "Triangle", width: 200, height: 180, radius: 0 },
+		line: { shape: "line", name: "Line", width: 240, height: 4, radius: 0 },
 	};
+	const element = makeShapeElement(presets[shape] || presets.rect);
+	commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : {
+		...doc,
+		updatedAt: Date.now(),
+		elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element]
+	}));
+	setCurrentId(docId);
+	setSelectedIds([element.id]);
+};
 
 	const addImageFromSrc = React.useCallback((src, name = "Image") => {
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
@@ -1394,7 +1405,12 @@ export default function Studio() {
 						{leftPanel === "create" ? (
 							<div style={{ display: "grid", gap: 8 }}>
 								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
-								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
+								<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+	<button style={panelButtonStyle(false)} onClick={() => addShape("rect")}>Rectangle</button>
+	<button style={panelButtonStyle(false)} onClick={() => addShape("circle")}>Circle</button>
+	<button style={panelButtonStyle(false)} onClick={() => addShape("triangle")}>Triangle</button>
+	<button style={panelButtonStyle(false)} onClick={() => addShape("line")}>Line</button>
+</div>
 								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
@@ -1533,7 +1549,8 @@ export default function Studio() {
 											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 										}
 										if (el.type === "shape") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.shape === "circle" ? "50%" : (el.radius || 0),
+		clipPath: el.shape === "triangle" ? "polygon(50% 0%, 100% 100%, 0% 100%)" : "none"  }} />;
 										}
 										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 									})}
