@@ -587,7 +587,7 @@ export default function Studio() {
 		setZoom(nextZoom);
 		setPan({
 			x: Math.max(40, (rect.width - doc.width * nextZoom) / 2),
-			y: 0,
+			y: Math.max(40, 56),
 		});
 	}, [currentPage, currentDoc]);
 
@@ -866,6 +866,48 @@ export default function Studio() {
 			updatedAt: Date.now(),
 		})));
 		setActivePageIndex(currentPages.length);
+		setSelectedIds([]);
+	};
+
+	const duplicatePage = (pageIndex) => {
+		if (!currentDoc || !currentPages[pageIndex]) return;
+		snapshot();
+		const sourcePage = currentPages[pageIndex];
+		const copyPage = {
+			...clone(sourcePage),
+			id: uid(),
+			elements: withNewIds(sourcePage.elements || []),
+			guides: (sourcePage.guides || []).map((guide) => ({ ...guide, id: uid() })),
+		};
+		commitDocs((prev) => prev.map((doc) => {
+			if (doc.id !== currentDoc.id) return doc;
+			const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || currentDoc.preset || "flyer", {
+				width: doc.width,
+				height: doc.height,
+				background: doc.background,
+				elements: doc.elements || [],
+				guides: doc.guides || [],
+			})];
+			pages.splice(pageIndex + 1, 0, copyPage);
+			return normalizeDoc({ ...doc, pages, updatedAt: Date.now() });
+		}));
+		setActivePageIndex(pageIndex + 1);
+		setSelectedIds([]);
+	};
+
+	const deletePage = (pageIndex) => {
+		if (!currentDoc || currentPages.length <= 1) return;
+		snapshot();
+		commitDocs((prev) => prev.map((doc) => {
+			if (doc.id !== currentDoc.id) return doc;
+			const pages = (Array.isArray(doc.pages) ? doc.pages : []).filter((_, index) => index !== pageIndex);
+			return normalizeDoc({ ...doc, pages, updatedAt: Date.now() });
+		}));
+		setActivePageIndex((prev) => {
+			if (prev > pageIndex) return prev - 1;
+			if (prev === pageIndex) return Math.max(0, pageIndex - 1);
+			return prev;
+		});
 		setSelectedIds([]);
 	};
 
@@ -1410,7 +1452,7 @@ export default function Studio() {
 	}, [zoom]);
 	const pageGap = 32;
 	const pageLayouts = React.useMemo(() => {
-		let offsetTop = RULER_SIZE + 36;
+		let offsetTop = pan.y + RULER_SIZE;
 		return currentPages.map((page) => {
 			const layout = {
 				left: pan.x + RULER_SIZE,
@@ -1693,8 +1735,23 @@ export default function Studio() {
 								const isActive = pageIndex === activePageIndex;
 								return (
 									<React.Fragment key={page.id}>
-										<div style={{ position: "absolute", left: layout.left, top: layout.top - 28, color: "rgba(17,24,39,0.95)", fontSize: 13, fontWeight: 800, zIndex: 16 }}>
-											Page {pageIndex + 1}
+										<div style={{ position: "absolute", left: layout.left, top: layout.top - 32, width: layout.width, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, color: "rgba(255,255,255,0.96)", fontSize: 13, fontWeight: 800, zIndex: 16 }}>
+											<div style={{ textShadow: "0 1px 2px rgba(0,0,0,0.45)" }}>Page {pageIndex + 1}</div>
+											<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+												<button
+													onClick={(e) => { e.stopPropagation(); duplicatePage(pageIndex); }}
+													style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(17,24,39,0.92)", color: "white", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+												>
+													Duplicate
+												</button>
+												<button
+													onClick={(e) => { e.stopPropagation(); deletePage(pageIndex); }}
+													disabled={currentPages.length <= 1}
+													style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: currentPages.length <= 1 ? "rgba(107,114,128,0.4)" : "rgba(17,24,39,0.92)", color: "white", fontSize: 12, fontWeight: 700, cursor: currentPages.length <= 1 ? "not-allowed" : "pointer", opacity: currentPages.length <= 1 ? 0.65 : 1 }}
+												>
+													Delete
+												</button>
+											</div>
 										</div>
 										<div
 											ref={isActive ? canvasShellRef : null}
