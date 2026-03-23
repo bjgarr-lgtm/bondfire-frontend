@@ -1709,6 +1709,78 @@ export default function Studio() {
 									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 								</div>
 							</div>
+
+							{currentPages.slice(1).map((page, index) => {
+								const pageNumber = index + 1;
+								const layout = pageLayouts[pageNumber];
+								if (!layout) return null;
+								const isActive = activePageIndex === pageNumber;
+								return (
+									<div
+										key={page.id}
+										onClick={() => { setActivePageIndex(pageNumber); setSelectedIds([]); setTimeout(() => fitCanvas(page), 0); }}
+										style={{
+											position: "absolute",
+											left: layout.left,
+											top: layout.top,
+											width: layout.width,
+											height: layout.height,
+											background: page.background || "#ffffff",
+											borderRadius: 18,
+											overflow: "visible",
+											boxShadow: isActive ? "0 0 0 2px rgba(239,68,68,0.85), 0 24px 80px rgba(0,0,0,0.35)" : "0 24px 80px rgba(0,0,0,0.22)",
+											cursor: "pointer",
+										}}
+									>
+										<div style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+											<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: isActive ? "rgba(239,68,68,0.92)" : "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700, zIndex: 11 }}>Page {pageNumber + 1}</div>
+											{(page.elements || []).map((el) => {
+												if (el.hidden) return null;
+												const common = {
+													position: "absolute",
+													left: el.x,
+													top: el.y,
+													width: el.width,
+													height: el.height,
+													opacity: el.opacity ?? 1,
+													transform: `rotate(${el.rotation || 0}deg)`,
+													boxSizing: "border-box",
+													pointerEvents: "none",
+												};
+												if (el.type === "text") {
+													return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+												}
+												if (el.type === "shape") {
+													return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+												}
+												return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+											})}
+										</div>
+									</div>
+								);
+							})}
+
+							{pageLayouts.length ? (
+								<button
+									onClick={(e) => { e.stopPropagation(); addPage(); }}
+									style={{
+										position: "absolute",
+										left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 76,
+										top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 18,
+										width: 152,
+										padding: "10px 14px",
+										borderRadius: 999,
+										border: "1px dashed rgba(255,255,255,0.24)",
+										background: "rgba(17,24,39,0.96)",
+										color: "white",
+										fontWeight: 700,
+										zIndex: 18,
+										cursor: "pointer",
+									}}
+								>
+									+ Add Page
+								</button>
+							) : null}
 						</div>
 					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
