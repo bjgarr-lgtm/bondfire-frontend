@@ -1253,8 +1253,10 @@ export default function Studio() {
 		};
 	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
 
-	const handleWheel = (e) => {
+	const handleWheel = React.useCallback((e) => {
+		if (!(e.ctrlKey || e.metaKey)) return;
 		e.preventDefault();
+		e.stopPropagation();
 		if (!currentDoc || !workspaceRef.current) return;
 		const rect = workspaceRef.current.getBoundingClientRect();
 		const pointX = e.clientX - rect.left;
@@ -1267,7 +1269,7 @@ export default function Studio() {
 			x: pointX - worldX * nextZoom - RULER_SIZE,
 			y: pointY - worldY * nextZoom - RULER_SIZE,
 		});
-	};
+	}, [currentDoc, pan.x, pan.y, zoom]);
 
 	const onWorkspaceDrop = (e) => {
 		e.preventDefault();
@@ -1290,6 +1292,18 @@ export default function Studio() {
 	const onWorkspaceDragOver = (e) => {
 		e.preventDefault();
 	};
+
+	React.useEffect(() => {
+		const node = workspaceRef.current;
+		if (!node) return;
+		const onNativeWheel = (e) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			handleWheel(e);
+		};
+		node.addEventListener("wheel", onNativeWheel, { passive: false });
+		return () => node.removeEventListener("wheel", onNativeWheel);
+	}, [handleWheel]);
+
 
 	const openContextMenu = (e, el) => {
 		e.preventDefault();
@@ -1647,7 +1661,6 @@ export default function Studio() {
 					onClick={(e) => {
 						if (e.target === e.currentTarget) closeMenus();
 					}}
-					onWheel={handleWheel}
 					onDrop={onWorkspaceDrop}
 					onDragOver={onWorkspaceDragOver}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
