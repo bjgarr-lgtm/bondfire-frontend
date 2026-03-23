@@ -433,8 +433,7 @@ export default function Studio() {
 	const [history, setHistory] = React.useState([]);
 	const [future, setFuture] = React.useState([]);
 	const [savedAt, setSavedAt] = React.useState(0);
-	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
-	const [showBoundPreview, setShowBoundPreview] = React.useState(true);
+		const [showBoundPreview, setShowBoundPreview] = React.useState(true);
 	const [leftPanel, setLeftPanel] = React.useState(null);
 	const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
 	const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
@@ -442,6 +441,7 @@ export default function Studio() {
 	const [contextMenu, setContextMenu] = React.useState(null);
 	const [selectedGuideId, setSelectedGuideId] = React.useState(null);
 	const [inspectorOpen, setInspectorOpen] = React.useState(false);
+	const [docSettingsOpen, setDocSettingsOpen] = React.useState(false);
 	const [tool, setTool] = React.useState("select");
 	const [zoom, setZoom] = React.useState(0.42);
 	const [pan, setPan] = React.useState({ x: 84, y: 56 });
@@ -464,7 +464,6 @@ export default function Studio() {
 		setSelectedIds([]);
 		setHistory([]);
 		setFuture([]);
-		setSavedBlocks(readBlocks(orgId));
 	}, [orgId]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
@@ -1207,6 +1206,7 @@ export default function Studio() {
 		setFileMenuOpen(false);
 		setExportMenuOpen(false);
 		setContextMenu(null);
+		setDocSettingsOpen(false);
 	};
 
 	const exportJson = () => {
@@ -1253,6 +1253,7 @@ export default function Studio() {
 				setContextMenu(null);
 				setLeftPanel(null);
 				setFileMenuOpen(false);
+				setDocSettingsOpen(false);
 						setExportMenuOpen(false);
 			}
 		};
@@ -1285,6 +1286,17 @@ export default function Studio() {
 			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
 					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
+					{docSettingsOpen && currentDoc ? (
+						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+							<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
+							<input type="color" value={currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
+							<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+								{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
+									<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
+								))}
+							</div>
+						</div>
+					) : null}
 					{fileMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 							<div style={{ display: "grid", gap: 6 }}>
@@ -1329,18 +1341,17 @@ export default function Studio() {
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
 				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
-					<button style={iconButtonStyle(leftPanel === "create")} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
-					<button style={iconButtonStyle(leftPanel === "content")} onClick={() => setLeftPanel((v) => v === "content" ? null : "content")}>T</button>
-					<button style={iconButtonStyle(leftPanel === "templates")} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>□</button>
-					<button style={iconButtonStyle(leftPanel === "assets")} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>Img</button>
-					<button style={iconButtonStyle(leftPanel === "data")} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>{"{}"}</button>
-					<button style={iconButtonStyle(leftPanel === "docs")} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☷</button>
+					<button title="Add" style={{ ...iconButtonStyle(leftPanel === "create"), display: "grid", placeItems: "center", fontSize: 20, fontWeight: 700 }} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
+					<button title="Templates" style={{ ...iconButtonStyle(leftPanel === "templates"), display: "grid", placeItems: "center", fontSize: 16 }} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>▣</button>
+					<button title="Assets" style={{ ...iconButtonStyle(leftPanel === "assets"), display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, letterSpacing: 0 }} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>IMG</button>
+					<button title="Bondfire Data" style={{ ...iconButtonStyle(leftPanel === "data"), display: "grid", placeItems: "center", fontSize: 14 }} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>{"{}"}</button>
+					<button title="Documents" style={{ ...iconButtonStyle(leftPanel === "docs"), display: "grid", placeItems: "center", fontSize: 16 }} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☰</button>
 				</div>
 
 				{leftPanel ? (
 					<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 56) : 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
-							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Add" : leftPanel === "content" ? "Content" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Drive Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
+							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Add" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
 							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
 						</div>
 
@@ -1360,30 +1371,6 @@ export default function Studio() {
 							</div>
 						) : null}
 
-						{leftPanel === "content" ? (
-							<div style={{ display: "grid", gap: 8 }}>
-								<label style={{ fontSize: 12, opacity: 0.85 }}>Canvas background
-									<input type="color" value={currentDoc?.background || "#ffffff"} onChange={(e) => currentDoc && updateDoc({ background: e.target.value })} style={{ width: "100%", marginTop: 6 }} />
-								</label>
-								<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-									{[brandKit.primary, brandKit.secondary, brandKit.accent, brandKit.text].map((color) => (
-										<button key={color} onClick={() => selected?.type === "text" ? updateElement(selected.id, { color }) : selected?.type === "shape" ? updateElement(selected.id, { fill: color }) : null} style={{ height: 40, background: color, borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)" }} />
-									))}
-								</div>
-								<button style={panelButtonStyle(false)} onClick={saveSelectionAsBlock} disabled={!selected}>Save Selected as Block</button>
-								<div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
-									{savedBlocks.length ? savedBlocks.map((block) => (
-										<div key={block.id} style={{ padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-											<div style={{ fontWeight: 700, marginBottom: 6 }}>{block.name}</div>
-											<div style={{ display: "flex", gap: 8 }}>
-												<button onClick={() => addSavedBlock(block)}>Add</button>
-												<button onClick={() => removeSavedBlock(block.id)}>Delete</button>
-											</div>
-										</div>
-									)) : <div style={{ opacity: 0.7 }}>No saved blocks yet.</div>}
-								</div>
-							</div>
-						) : null}
 
 						{leftPanel === "templates" ? (
 							<div style={{ display: "grid", gap: 8 }}>
