@@ -831,7 +831,27 @@ export default function Studio() {
 
 	const addPage = () => {
 		const nextPreset = currentDoc?.preset || "flyer";
-		createDoc(nextPreset);
+		if (!currentDoc) {
+			createDoc(nextPreset);
+			return;
+		}
+		snapshot();
+		const page = makePage(nextPreset, {
+			width: currentDoc.width,
+			height: currentDoc.height,
+			background: currentDoc.background,
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : normalizeDoc({
+			...doc,
+			pages: [...(Array.isArray(doc.pages) && doc.pages.length ? doc.pages : [makePage(doc.preset || nextPreset, {
+				width: doc.width,
+				height: doc.height,
+				background: doc.background,
+				elements: doc.elements || [],
+				guides: doc.guides || [],
+			})]), page],
+			updatedAt: Date.now(),
+		})));
 	};
 
 	const deleteDoc = (docId) => {
@@ -1353,7 +1373,35 @@ export default function Studio() {
 		const steps = [5, 10, 25, 50, 100, 200, 500, 1000];
 		return steps.find((step) => step * zoom >= 45) || 1000;
 	}, [zoom]);
-
+	const pageGap = 32;
+	const currentPages = React.useMemo(() => {
+		if (!currentDoc) return [];
+		return Array.isArray(currentDoc.pages) && currentDoc.pages.length ? currentDoc.pages : [makePage(currentDoc.preset || "flyer", {
+			width: currentDoc.width,
+			height: currentDoc.height,
+			background: currentDoc.background,
+			elements: currentDoc.elements || [],
+			guides: currentDoc.guides || [],
+		})];
+	}, [currentDoc]);
+	const pageLayouts = React.useMemo(() => {
+		let offsetTop = pan.y + RULER_SIZE;
+		return currentPages.map((page) => {
+			const layout = {
+				left: pan.x + RULER_SIZE,
+				top: offsetTop,
+				width: Number(page.width || currentDoc?.width || 1080) * zoom,
+				height: Number(page.height || currentDoc?.height || 1350) * zoom,
+			};
+			offsetTop += layout.height + pageGap;
+			return layout;
+		});
+	}, [currentPages, pan.x, pan.y, zoom, currentDoc]);
+	const pageStackHeight = React.useMemo(() => {
+		if (!pageLayouts.length) return 900;
+		const last = pageLayouts[pageLayouts.length - 1];
+		return Math.max(900, last.top + last.height + 120);
+	}, [pageLayouts]);
 
 	return (
 		<div style={{ padding: 8, display: "grid", gap: 8 }}>
@@ -1372,6 +1420,31 @@ export default function Studio() {
 								))}
 							</div>
 						</div>
+						{currentPages.slice(1).map((page, pageIndex) => {
+							const layout = pageLayouts[pageIndex + 1];
+							if (!layout) return null;
+							return (
+								<div key={page.id} style={{ position: "absolute", left: layout.left, top: layout.top, width: layout.width, height: layout.height, background: page.background || "#ffffff", borderRadius: 18, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.22)" }}>
+									<div style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+										{(page.elements || []).map((el) => {
+											if (el.hidden) return null;
+											const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", userSelect: "none", pointerEvents: "none" };
+											if (el.type === "text") {
+												return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+											}
+											if (el.type === "shape") {
+												return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+											}
+											return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+										})}
+									</div>
+									<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700 }}>Page {pageIndex + 2}</div>
+								</div>
+							);
+						})}
+						{pageLayouts.length ? (
+							<button onClick={addPage} style={{ position: "absolute", left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 70, top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 18, width: 140, padding: "10px 14px", borderRadius: 999, border: "1px dashed rgba(255,255,255,0.18)", background: "rgba(17,24,39,0.96)", color: "white", fontWeight: 700, zIndex: 18 }}>+ Add Page</button>
+						) : null}
 					) : null}
 					{fileMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
@@ -1394,6 +1467,7 @@ export default function Studio() {
 				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
 					<div style={{ display: "grid", lineHeight: 1.05, textAlign: "right", marginRight: 6 }}>
 						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+						<div style={{ fontSize: 10, opacity: 0.7 }}>{currentDoc ? `${currentPages.length} page${currentPages.length === 1 ? "" : "s"}` : ""}</div>
 						<div style={{ fontSize: 10, opacity: 0.7 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
 					</div>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>↶</button>
@@ -1564,9 +1638,9 @@ export default function Studio() {
 					onDrop={onWorkspaceDrop}
 					onDragOver={onWorkspaceDragOver}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
-					style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
-						<>
+						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight }}>
 							{showRulers ? (
 								<>
 									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
@@ -1587,7 +1661,7 @@ export default function Studio() {
 								</>
 							) : null}
 
-							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
+							<div ref={canvasShellRef} style={{ position: "absolute", left: pageLayouts[0]?.left || (pan.x + RULER_SIZE), top: pageLayouts[0]?.top || (pan.y + RULER_SIZE), width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
 								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: currentDoc.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
 									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
@@ -1621,7 +1695,7 @@ export default function Studio() {
 									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 								</div>
 							</div>
-						</>
+						</div>
 					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
 
