@@ -492,6 +492,7 @@ export default function Studio() {
 
 	const [docs, setDocs] = React.useState(() => readDocs(orgId));
 	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
+	const [activePageIndex, setActivePageIndex] = React.useState(0);
 	const [selectedIds, setSelectedIds] = React.useState([]);
 	const [history, setHistory] = React.useState([]);
 	const [future, setFuture] = React.useState([]);
@@ -524,6 +525,7 @@ export default function Studio() {
 		const nextDocs = normalizeDocs(readDocs(orgId));
 		setDocs(nextDocs);
 		setCurrentId(nextDocs[0]?.id || null);
+		setActivePageIndex(0);
 		setSelectedIds([]);
 		setHistory([]);
 		setFuture([]);
@@ -532,10 +534,24 @@ export default function Studio() {
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
 	const currentDoc = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
-	const selectedElements = React.useMemo(() => (currentDoc?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentDoc, selectedIds]);
+	const currentPages = React.useMemo(() => {
+		if (!currentDoc) return [];
+		return Array.isArray(currentDoc.pages) && currentDoc.pages.length ? currentDoc.pages : [makePage(currentDoc.preset || "flyer", {
+			width: currentDoc.width,
+			height: currentDoc.height,
+			background: currentDoc.background,
+			elements: currentDoc.elements || [],
+			guides: currentDoc.guides || [],
+		})];
+	}, [currentDoc]);
+	const currentPage = React.useMemo(() => {
+		if (!currentPages.length) return null;
+		return currentPages[Math.max(0, Math.min(activePageIndex, currentPages.length - 1))] || currentPages[0] || null;
+	}, [currentPages, activePageIndex]);
+	const selectedElements = React.useMemo(() => (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentPage, selectedIds]);
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
-	const orderedLayers = React.useMemo(() => (currentDoc?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentDoc]);
+	const orderedLayers = React.useMemo(() => (currentPage?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentPage]);
 
 	const commitDocs = React.useCallback((updater) => {
 		setDocs((prev) => {
@@ -562,7 +578,7 @@ export default function Studio() {
 		return doc.id;
 	}, [currentDoc, orgId]);
 
-	const fitCanvas = React.useCallback((doc = currentDoc) => {
+	const fitCanvas = React.useCallback((doc = currentPage || currentDoc) => {
 		if (!doc || !workspaceRef.current) return;
 		const rect = workspaceRef.current.getBoundingClientRect();
 		const availableWidth = Math.max(320, rect.width - 120);
@@ -571,18 +587,18 @@ export default function Studio() {
 		setZoom(nextZoom);
 		setPan({
 			x: Math.max(40, (rect.width - doc.width * nextZoom) / 2),
-			y: Math.max(40, (rect.height - doc.height * nextZoom) / 2),
+			y: Math.max(40, 56),
 		});
-	}, [currentDoc]);
+	}, [currentPage, currentDoc]);
 
 	React.useEffect(() => {
 		if (currentDoc) {
-			setTimeout(() => fitCanvas(currentDoc), 0);
+			setTimeout(() => fitCanvas(currentPage || currentDoc), 0);
 		}
-	}, [currentId]);
+	}, [currentId, activePageIndex, currentPage, currentDoc, fitCanvas]);
 
 	React.useEffect(() => {
-		const onResize = () => fitCanvas(currentDoc);
+		const onResize = () => fitCanvas(currentPage || currentDoc);
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
 	}, [fitCanvas, currentDoc]);
@@ -592,6 +608,7 @@ export default function Studio() {
 		const doc = makeDoc(preset);
 		commitDocs((prev) => [doc, ...prev]);
 		setCurrentId(doc.id);
+		setActivePageIndex(0);
 		setSelectedIds([]);
 		setTimeout(() => fitCanvas(doc), 0);
 	}, [snapshot, commitDocs, fitCanvas]);
@@ -619,25 +636,24 @@ export default function Studio() {
 
 	const updateDoc = React.useCallback((patch) => {
 		if (!currentDoc) return;
-		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? { ...doc, ...patch, updatedAt: Date.now() } : doc));
-	}, [currentDoc, commitDocs]);
+		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? commitToActivePage(doc, patch) : doc));
+	}, [currentDoc, commitDocs, commitToActivePage]);
 
 	const updateElements = React.useCallback((ids, patchOrFn) => {
 		if (!currentDoc || !ids?.length) return;
 		const idSet = new Set(ids);
 		commitDocs((prev) => prev.map((doc) => {
 			if (doc.id !== currentDoc.id) return doc;
-			return {
-				...doc,
-				updatedAt: Date.now(),
-				elements: doc.elements.map((el) => {
+			return commitToActivePage(doc, (page) => ({
+				...page,
+				elements: (page.elements || []).map((el) => {
 					if (!idSet.has(el.id)) return el;
 					const patch = typeof patchOrFn === "function" ? patchOrFn(el) : patchOrFn;
 					return { ...el, ...patch };
 				}),
-			};
+			}));
 		}));
-	}, [currentDoc, commitDocs]);
+	}, [currentDoc, commitDocs, commitToActivePage]);
 
 	const updateElement = React.useCallback((elementId, patchOrFn) => {
 		updateElements([elementId], patchOrFn);
@@ -647,7 +663,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeTextElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -656,7 +672,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeShapeElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -665,10 +681,10 @@ export default function Studio() {
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
 		const element = makeImageElement({ src, name });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
-	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs, commitToActivePage]);
 
 	const addImage = () => {
 		fileInputRef.current?.click();
@@ -711,14 +727,14 @@ export default function Studio() {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
 		const selectedSet = new Set(selectedIds);
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: doc.elements.filter((el) => !selectedSet.has(el.id)) }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: (page.elements || []).filter((el) => !selectedSet.has(el.id)) }))));
 		setSelectedIds([]);
 	};
 
 	const duplicateSelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
-		const toDup = currentDoc.elements.filter((el) => selectedIds.includes(el.id));
+		const toDup = (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id));
 		const dupes = withNewIds(toDup).map((el) => ({ ...el, name: `${el.name || el.type} Copy` }));
 		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...dupes] }));
 		setSelectedIds(dupes.map((el) => el.id));
@@ -726,7 +742,7 @@ export default function Studio() {
 
 	const copySelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
-		const copied = currentDoc.elements.filter((el) => selectedIds.includes(el.id)).map((el) => clone(el));
+		const copied = (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)).map((el) => clone(el));
 		setClipboard(copied);
 	};
 
@@ -739,11 +755,7 @@ export default function Studio() {
 			y: Number(el.y || 0) + 24,
 			name: `${el.name || el.type} Copy`,
 		}));
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : {
-			...doc,
-			updatedAt: Date.now(),
-			elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...pasted],
-		}));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), ...pasted] }))));
 		setSelectedIds(pasted.map((el) => el.id));
 	};
 
@@ -757,7 +769,7 @@ export default function Studio() {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
 		const selectedSet = new Set(selectedIds);
-		const elements = currentDoc.elements.slice();
+		const elements = (currentPage?.elements || []).slice();
 		if (dir === "up") {
 			for (let i = elements.length - 2; i >= 0; i -= 1) {
 				if (selectedSet.has(elements[i].id) && !selectedSet.has(elements[i + 1].id)) {
@@ -771,7 +783,7 @@ export default function Studio() {
 				}
 			}
 		}
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, { elements })));
 	};
 
 	const setFlagOnSelection = (key, value) => {
@@ -795,8 +807,8 @@ export default function Studio() {
 	const addBoundText = (token, label) => {
 		const docId = ensureDoc("flyer");
 		snapshot();
-		const element = makeTextElement({ name: label, text: `{{${token}}}`, x: 80, y: 80 + ((currentDoc?.elements?.length || 0) * 24), width: 420, height: 80 });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		const element = makeTextElement({ name: label, text: `{{${token}}}`, x: 80, y: 80 + ((currentPage?.elements?.length || 0) * 24), width: 420, height: 80 });
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -823,6 +835,7 @@ export default function Studio() {
 		}));
 		commitDocs((prev) => [copy, ...prev]);
 		setCurrentId(copy.id);
+		setActivePageIndex(0);
 		setSelectedIds([]);
 		setFileMenuOpen(false);
 		setLeftPanel(null);
@@ -852,6 +865,8 @@ export default function Studio() {
 			})]), page],
 			updatedAt: Date.now(),
 		})));
+		setActivePageIndex(currentPages.length);
+		setSelectedIds([]);
 	};
 
 	const deleteDoc = (docId) => {
@@ -883,7 +898,7 @@ export default function Studio() {
 		const element = { ...clone(block.element), id: uid(), x: Number(block.element?.x || 80) + 24, y: Number(block.element?.y || 80) + 24, name: `${block.name} Copy` };
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -905,7 +920,7 @@ export default function Studio() {
 		const groups = [...new Set(selectedElements.map((el) => el.groupId).filter(Boolean))];
 		if (!groups.length) return;
 		snapshot();
-		const ids = currentDoc.elements.filter((el) => groups.includes(el.groupId)).map((el) => el.id);
+		const ids = (currentPage?.elements || []).filter((el) => groups.includes(el.groupId)).map((el) => el.id);
 		updateElements(ids, { groupId: null, groupName: null });
 	};
 
@@ -922,9 +937,9 @@ export default function Studio() {
 		const clean = [...new Set((ids || []).filter(Boolean))];
 		if (!clean.length) return;
 		snapshot();
-		const groupIds = [...new Set((currentDoc?.elements || []).filter((el) => clean.includes(el.id)).map((el) => el.groupId).filter(Boolean))];
+		const groupIds = [...new Set((currentPage?.elements || []).filter((el) => clean.includes(el.id)).map((el) => el.groupId).filter(Boolean))];
 		if (!groupIds.length) return;
-		const allIds = (currentDoc?.elements || []).filter((el) => groupIds.includes(el.groupId)).map((el) => el.id);
+		const allIds = (currentPage?.elements || []).filter((el) => groupIds.includes(el.groupId)).map((el) => el.id);
 		updateElements(allIds, { groupId: null, groupName: null });
 		setSelectedIds(allIds);
 	};
@@ -1046,7 +1061,7 @@ export default function Studio() {
 
 	const selectElement = React.useCallback((el, add = false) => {
 		if (!el) return;
-		const idsForElement = el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id];
+		const idsForElement = el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id];
 		setSelectedIds((prev) => {
 			if (!add) return idsForElement;
 			const next = new Set(prev);
@@ -1073,21 +1088,21 @@ export default function Studio() {
 			selectElement(el, true);
 			return;
 		}
-		const groupSize = el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1;
+		const groupSize = el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).length : 1;
 		if (!selectedIds.includes(el.id) || selectedIds.length !== groupSize) {
 			selectElement(el, false);
 		}
 		const activeIds = el.groupId
-			? currentDoc.elements.filter((item) => item.groupId === el.groupId).map((item) => item.id)
+			? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id)
 			: (selectedIds.includes(el.id) ? selectedIds : [el.id]);
 		const ids = activeIds.filter((id) => {
-			const item = currentDoc.elements.find((x) => x.id === id);
+			const item = (currentPage?.elements || []).find((x) => x.id === id);
 			return item && !item.locked;
 		});
 		if (!ids.length) return;
 		const point = getCanvasPoint(e.clientX, e.clientY);
 		const origins = Object.fromEntries(ids.map((id) => {
-			const item = currentDoc.elements.find((x) => x.id === id);
+			const item = (currentPage?.elements || []).find((x) => x.id === id);
 			return [id, { x: Number(item?.x || 0), y: Number(item?.y || 0) }];
 		}));
 		const anchorOrigin = origins[el.id] || { x: Number(el.x || 0), y: Number(el.y || 0) };
@@ -1163,8 +1178,8 @@ export default function Studio() {
 					};
 				});
 			}
-			if (resizeState && currentDoc) {
-				const el = currentDoc.elements.find((item) => item.id === resizeState.id);
+			if (resizeState && currentPage) {
+				const el = (currentPage?.elements || []).find((item) => item.id === resizeState.id);
 				if (!el) return;
 				const dx = (e.clientX - resizeState.startX) / zoom;
 				const dy = (e.clientY - resizeState.startY) / zoom;
@@ -1193,10 +1208,10 @@ export default function Studio() {
 					if (handle.includes("n")) nextY -= (minH - nextHeight);
 					nextHeight = minH;
 				}
-				nextX = clamp(nextX, 0, currentDoc.width - minW);
-				nextY = clamp(nextY, 0, currentDoc.height - minH);
-				nextWidth = clamp(nextWidth, minW, currentDoc.width - nextX);
-				nextHeight = clamp(nextHeight, minH, currentDoc.height - nextY);
+				nextX = clamp(nextX, 0, currentPage.width - minW);
+				nextY = clamp(nextY, 0, currentPage.height - minH);
+				nextWidth = clamp(nextWidth, minW, currentPage.width - nextX);
+				nextHeight = clamp(nextHeight, minH, currentPage.height - nextY);
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
@@ -1210,9 +1225,9 @@ export default function Studio() {
 				};
 				setMarquee(next);
 			}
-			if (guideDrag && currentDoc) {
+			if (guideDrag && currentPage) {
 				const point = getCanvasPoint(e.clientX, e.clientY);
-				const position = guideDrag.orientation === "vertical" ? clamp(point.x, 0, currentDoc.width) : clamp(point.y, 0, currentDoc.height);
+				const position = guideDrag.orientation === "vertical" ? clamp(point.x, 0, currentPage.width) : clamp(point.y, 0, currentPage.height);
 				updateDoc({
 					guides: (currentDoc.guides || []).map((guide) => guide.id === guideDrag.id ? { ...guide, position } : guide),
 				});
@@ -1221,7 +1236,7 @@ export default function Studio() {
 		const onUp = () => {
 			if (marquee && currentDoc) {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const ids = currentDoc.elements.filter((el) => intersectsRect(el, rect)).map((el) => el.id);
+				const ids = (currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
 			}
 			setDragState(null);
@@ -1265,7 +1280,7 @@ export default function Studio() {
 			const docId = ensureDoc(currentDoc?.preset || "flyer");
 			snapshot();
 			const element = makeImageElement({ src: String(reader.result || ""), name: file.name || "Image", x: Math.max(0, point.x - 160), y: Math.max(0, point.y - 120) });
-			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 			setCurrentId(docId);
 			setSelectedIds([element.id]);
 		};
@@ -1280,13 +1295,13 @@ export default function Studio() {
 		e.preventDefault();
 		e.stopPropagation();
 		if (el) {
-			const alreadySelected = selectedIds.includes(el.id) || (el.groupId && (currentDoc?.elements || []).some((item) => item.groupId === el.groupId && selectedIds.includes(item.id)));
+			const alreadySelected = selectedIds.includes(el.id) || (el.groupId && (currentPage?.elements || []).some((item) => item.groupId === el.groupId && selectedIds.includes(item.id)));
 			if (!alreadySelected) {
 				selectElement(el, false);
 			}
 		}
 		const targetIds = el
-			? (el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
+			? (el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
 			: [];
 		setContextMenu({
 			x: e.clientX,
@@ -1311,17 +1326,23 @@ export default function Studio() {
 	};
 
 	const exportPng = async () => {
-		if (!currentDoc) return;
-		const canvas = await renderDocToCanvas(currentDoc, bindings);
+		if (!currentDoc || !currentPage) return;
+		const pageDoc = normalizeDoc({ ...currentDoc, width: currentPage.width, height: currentPage.height, background: currentPage.background, elements: currentPage.elements || [], guides: currentPage.guides || [] });
+		const canvas = await renderDocToCanvas(pageDoc, bindings);
 		canvas.toBlob((png) => {
-			if (png) downloadBlob(`${printableName(currentDoc.name)}.png`, png);
+			if (png) downloadBlob(`${printableName(currentDoc.name)}-page-${activePageIndex + 1}.png`, png);
 		}, "image/png");
 	};
 
 	const exportPdf = async () => {
-		if (!currentDoc) return;
-		const canvas = await renderDocToCanvas(currentDoc, bindings);
-		const dataUrl = canvas.toDataURL("image/png");
+		if (!currentDoc || !currentPages.length) return;
+		const pageDataUrls = [];
+		for (const page of currentPages) {
+			const pageDoc = normalizeDoc({ ...currentDoc, width: page.width, height: page.height, background: page.background, elements: page.elements || [], guides: page.guides || [] });
+			const canvas = await renderDocToCanvas(pageDoc, bindings);
+			pageDataUrls.push({ url: canvas.toDataURL("image/png"), width: page.width, height: page.height });
+		}
+		const dataUrl = pageDataUrls[0]?.url || "";
 		const frame = document.createElement("iframe");
 		frame.style.position = "fixed";
 		frame.style.right = "0";
@@ -1333,7 +1354,7 @@ export default function Studio() {
 		const doc = frame.contentWindow?.document;
 		if (!doc) return;
 		doc.open();
-		doc.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#fff;}img{display:block;width:100%;height:auto;}@page{size:auto;margin:0;}</style></head><body><img src="${dataUrl}" alt="" /></body></html>`);
+		doc.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#fff;} .page-break{break-after:page;page-break-after:always;} img{display:block;width:100%;height:auto;} @page{size:auto;margin:0;}</style></head><body>${pageDataUrls.map((item, index) => `<div class="${index < pageDataUrls.length - 1 ? "page-break" : ""}"><img src="${item.url}" alt="" /></div>`).join("")}</body></html>`);
 		doc.close();
 		setTimeout(() => {
 			frame.contentWindow?.focus();
@@ -1368,22 +1389,12 @@ export default function Studio() {
 	}, [driveAssets, assetSearch]);
 
 	const multiSelection = selectedIds.length > 1;
-	const currentGuides = currentDoc?.guides || [];
+	const currentGuides = currentPage?.guides || [];
 	const rulerStep = React.useMemo(() => {
 		const steps = [5, 10, 25, 50, 100, 200, 500, 1000];
 		return steps.find((step) => step * zoom >= 45) || 1000;
 	}, [zoom]);
 	const pageGap = 32;
-	const currentPages = React.useMemo(() => {
-		if (!currentDoc) return [];
-		return Array.isArray(currentDoc.pages) && currentDoc.pages.length ? currentDoc.pages : [makePage(currentDoc.preset || "flyer", {
-			width: currentDoc.width,
-			height: currentDoc.height,
-			background: currentDoc.background,
-			elements: currentDoc.elements || [],
-			guides: currentDoc.guides || [],
-		})];
-	}, [currentDoc]);
 	const pageLayouts = React.useMemo(() => {
 		let offsetTop = pan.y + RULER_SIZE;
 		return currentPages.map((page) => {
@@ -1402,8 +1413,35 @@ export default function Studio() {
 		const last = pageLayouts[pageLayouts.length - 1];
 		return Math.max(900, last.top + last.height + 120);
 	}, [pageLayouts]);
+	const activePageLayout = React.useMemo(() => {
+		if (!pageLayouts.length) return null;
+		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
+	}, [pageLayouts, activePageIndex]);
+
+	const commitToActivePage = React.useCallback((doc, pageUpdater) => {
+		const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || "flyer", {
+			width: doc.width,
+			height: doc.height,
+			background: doc.background,
+			elements: doc.elements || [],
+			guides: doc.guides || [],
+		})];
+		const pageIndex = Math.max(0, Math.min(activePageIndex, pages.length - 1));
+		const page = pages[pageIndex];
+		pages[pageIndex] = typeof pageUpdater === "function" ? pageUpdater(page) : { ...page, ...pageUpdater };
+		const nextDoc = { ...doc, pages, updatedAt: Date.now() };
+		if (pageIndex === 0) {
+			nextDoc.width = pages[0].width;
+			nextDoc.height = pages[0].height;
+			nextDoc.background = pages[0].background;
+			nextDoc.elements = pages[0].elements;
+			nextDoc.guides = pages[0].guides;
+		}
+		return normalizeDoc(nextDoc);
+	}, [activePageIndex]);
 
 	return (
+
 		<div style={{ padding: 8, display: "grid", gap: 8 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 
@@ -1411,40 +1449,42 @@ export default function Studio() {
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
 					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
 					{docSettingsOpen && currentDoc ? (
-						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
-							<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
-							<input type="color" value={currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
-							<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-								{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
-									<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
-								))}
-							</div>
-						</div>
-						{currentPages.slice(1).map((page, pageIndex) => {
-							const layout = pageLayouts[pageIndex + 1];
-							if (!layout) return null;
-							return (
-								<div key={page.id} style={{ position: "absolute", left: layout.left, top: layout.top, width: layout.width, height: layout.height, background: page.background || "#ffffff", borderRadius: 18, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.22)" }}>
-									<div style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
-										{(page.elements || []).map((el) => {
-											if (el.hidden) return null;
-											const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", userSelect: "none", pointerEvents: "none" };
-											if (el.type === "text") {
-												return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-											}
-											if (el.type === "shape") {
-												return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-											}
-											return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
-										})}
-									</div>
-									<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700 }}>Page {pageIndex + 2}</div>
+						<>
+							<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+								<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
+								<input type="color" value={currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
+								<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+									{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
+										<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
+									))}
 								</div>
-							);
-						})}
-						{pageLayouts.length ? (
-							<button onClick={addPage} style={{ position: "absolute", left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 70, top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 18, width: 140, padding: "10px 14px", borderRadius: 999, border: "1px dashed rgba(255,255,255,0.18)", background: "rgba(17,24,39,0.96)", color: "white", fontWeight: 700, zIndex: 18 }}>+ Add Page</button>
-						) : null}
+							</div>
+							{currentPages.slice(1).map((page, pageIndex) => {
+								const layout = pageLayouts[pageIndex + 1];
+								if (!layout) return null;
+								return (
+									<div key={page.id} onClick={() => { setActivePageIndex(pageIndex + 1); setSelectedIds([]); }} style={{ position: "absolute", left: layout.left, top: layout.top, width: layout.width, height: layout.height, background: page.background || "#ffffff", borderRadius: 18, overflow: "hidden", boxShadow: pageIndex + 1 === activePageIndex ? "0 0 0 2px #ef4444, 0 24px 80px rgba(0,0,0,0.22)" : "0 24px 80px rgba(0,0,0,0.22)", cursor: "pointer" }}>
+										<div style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+											{(page.elements || []).map((el) => {
+												if (el.hidden) return null;
+												const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", userSelect: "none", pointerEvents: "none" };
+												if (el.type === "text") {
+													return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+												}
+												if (el.type === "shape") {
+													return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+												}
+												return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+											})}
+										</div>
+										<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: pageIndex + 1 === activePageIndex ? "rgba(239,68,68,0.92)" : "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700 }}>Page {pageIndex + 2}</div>
+									</div>
+								);
+							})}
+							{pageLayouts.length ? (
+								<button onClick={addPage} style={{ position: "absolute", left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 70, top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 18, width: 140, padding: "10px 14px", borderRadius: 999, border: "1px dashed rgba(255,255,255,0.18)", background: "rgba(17,24,39,0.96)", color: "white", fontWeight: 700, zIndex: 18 }}>+ Add Page</button>
+							) : null}
+						</>
 					) : null}
 					{fileMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
@@ -1466,8 +1506,8 @@ export default function Studio() {
 				</div>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
 					<div style={{ display: "grid", lineHeight: 1.05, textAlign: "right", marginRight: 6 }}>
-						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
-						<div style={{ fontSize: 10, opacity: 0.7 }}>{currentDoc ? `${currentPages.length} page${currentPages.length === 1 ? "" : "s"}` : ""}</div>
+						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentPage ? `${currentPage.width} × ${currentPage.height}` : currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+						<div style={{ fontSize: 10, opacity: 0.7 }}>{currentDoc ? `page ${activePageIndex + 1} of ${currentPages.length}` : ""}</div>
 						<div style={{ fontSize: 10, opacity: 0.7 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
 					</div>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>↶</button>
@@ -1613,12 +1653,12 @@ export default function Studio() {
 								</div>
 								{docs.length ? docs.map((doc) => (
 									<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
-										<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
+										<button onClick={() => { setCurrentId(doc.id); setActivePageIndex(0); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
 											<div style={{ fontWeight: 700 }}>{doc.name}</div>
 											<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
 										</button>
 										<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-											<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
+											<button onClick={() => { setCurrentId(doc.id); setActivePageIndex(0); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
 											<button onClick={() => deleteDoc(doc.id)}>Delete</button>
 										</div>
 									</div>
@@ -1661,17 +1701,18 @@ export default function Studio() {
 								</>
 							) : null}
 
-							<div ref={canvasShellRef} style={{ position: "absolute", left: pageLayouts[0]?.left || (pan.x + RULER_SIZE), top: pageLayouts[0]?.top || (pan.y + RULER_SIZE), width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
-								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: currentDoc.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+							<div ref={canvasShellRef} onClick={() => { setActivePageIndex(0); }} style={{ position: "absolute", left: activePageLayout?.left || (pan.x + RULER_SIZE), top: activePageLayout?.top || (pan.y + RULER_SIZE), width: (currentPage?.width || currentDoc.width) * zoom, height: (currentPage?.height || currentDoc.height) * zoom, background: currentPage?.background || currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
+								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentPage?.width || currentDoc.width, height: currentPage?.height || currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: currentPage?.background || currentDoc.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+									<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: activePageIndex === 0 ? "rgba(239,68,68,0.92)" : "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700, zIndex: 11 }}>Page 1</div>
 									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
 									) : (
 										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", top: guide.position, left: 0, right: 0, height: 8, marginTop: -4, background: guide.id === selectedGuideId ? "rgba(96,165,250,0.22)" : "transparent", borderTop: `1px solid ${GUIDE_COLORS.horizontal}`, cursor: "ns-resize", zIndex: 9 }} />
 									))}
-									{(currentDoc.elements || []).map((el) => {
+									{(currentPage?.elements || []).map((el) => {
 										if (el.hidden) return null;
 										const isSelected = selectedIds.includes(el.id);
-										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= currentDoc.width && Number(el.height || 0) >= currentDoc.height;
+										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
 									const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
 										if (el.type === "text") {
 											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
@@ -1735,7 +1776,7 @@ export default function Studio() {
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
 							<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-								<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+								<div style={{ fontSize: 12, opacity: 0.7 }}>{currentPage ? `${currentPage.width} × ${currentPage.height}` : currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
 								<button onClick={() => setInspectorOpen(false)} style={{ padding: "4px 8px", borderRadius: 8 }}>✕</button>
 							</div>
 						</div>
