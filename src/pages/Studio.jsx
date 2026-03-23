@@ -1,6 +1,7 @@
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
 	flyer: { label: "Flyer", width: 1080, height: 1350 },
