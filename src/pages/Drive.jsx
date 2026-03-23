@@ -66,6 +66,168 @@ function textToDataUrl(text, mime = "text/plain;charset=utf-8") {
   const safeMime = String(mime || "text/plain;charset=utf-8");
   return `data:${safeMime};base64,${btoa(unescape(encodeURIComponent(String(text || ""))))}`;
 }
+function normalizeTemplateName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+function normalizeHeadingKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+function parseMarkdownSections(body) {
+  const sections = {};
+  let current = "";
+  const lines = String(body || "").split("\n");
+  for (const line of lines) {
+    const heading = line.match(/^##\s+(.+)$/);
+    if (heading) {
+      current = normalizeHeadingKey(heading[1]);
+      if (!sections[current]) sections[current] = [];
+      continue;
+    }
+    if (!current) continue;
+    sections[current].push(line);
+  }
+  return Object.fromEntries(Object.entries(sections).map(([key, value]) => [key, value.join("\n").trim()]));
+}
+function getPropertyValue(properties, key) {
+  const found = (properties || []).find((entry) => String(entry?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase());
+  return found ? String(found.value || "").trim() : "";
+}
+function upsertProperty(properties, key, value) {
+  const next = Array.isArray(properties) ? [...properties] : [];
+  const idx = next.findIndex((entry) => String(entry?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase());
+  const item = { key: String(key || "").trim(), value: String(value || "").trim() };
+  if (idx === -1) next.push(item);
+  else next[idx] = item;
+  return next;
+}
+function stripListMarker(line) {
+  return String(line || "").replace(/^\s*[-*+]\s*(\[[xX ]\]\s*)?/, "").trim();
+}
+function getSectionChecklistValue(sectionText) {
+  const lines = String(sectionText || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(/^[-*+]\s*\[([ xX])\]\s*(.+)$/);
+    if (match && String(match[1]).toLowerCase() === "x") return String(match[2] || "").trim();
+  }
+  return "";
+}
+function getSectionPlainText(sectionText) {
+  const lines = String(sectionText || "").split("\n").map((line) => stripListMarker(line)).filter(Boolean);
+  return lines.join("\n").trim();
+}
+function getSectionList(sectionText) {
+  return String(sectionText || "").split("\n").map((line) => stripListMarker(line)).filter(Boolean);
+}
+function parseQuantityText(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return { qty: 0, unit: "" };
+  const match = raw.match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
+  if (!match) return { qty: 0, unit: raw };
+  return { qty: Number(match[1] || 0) || 0, unit: String(match[2] || "").trim() };
+}
+function buildNeedDescription(title, sections) {
+  const parts = [];
+  const requester = getSectionList(sections.requester || "");
+  if (requester.length) parts.push(`Requester:
+${requester.join("\n")}`);
+  const need = getSectionPlainText(sections.need || "");
+  if (need) parts.push(`Need:
+${need}`);
+  const category = getSectionChecklistValue(sections.category || "") || getSectionPlainText(sections.category || "");
+  if (category) parts.push(`Category: ${category}`);
+  const notes = getSectionPlainText(sections.notes || "");
+  if (notes) parts.push(`Notes:
+${notes}`);
+  if (!parts.length) parts.push(title);
+  return parts.join("\n\n").trim();
+}
+function buildMeetingPayload(noteTitle, sections) {
+  const agendaSource = sections.agenda || sections.topics || "";
+  const agenda = getSectionList(agendaSource).join("\n").trim();
+  const notesChunks = [];
+  [
+    ["attendees", sections.attendees],
+    ["discussion", sections.discussion],
+    ["decisions", sections.decisions],
+    ["action items", sections["action items"]],
+    ["next meeting", sections["next meeting"]],
+    ["time allocations", sections["time allocations"]],
+    ["facilitator", sections.facilitator],
+    ["notes", sections.notes],
+  ].forEach(([label, value]) => {
+    const text = getSectionPlainText(value || "");
+    if (text) notesChunks.push(`${label}:\n${text}`);
+  });
+  return {
+    title: noteTitle,
+    agenda,
+    notes: notesChunks.join("\n\n").trim(),
+  };
+}
+function buildInventoryPayload(noteTitle, sections) {
+  const itemName = getSectionPlainText(sections.item || "") || noteTitle;
+  const quantity = parseQuantityText(getSectionPlainText(sections.quantity || ""));
+  const notesBits = [];
+  const condition = getSectionPlainText(sections.condition || "");
+  if (condition) notesBits.push(`Condition: ${condition}`);
+  const availability = getSectionChecklistValue(sections.availability || "") || getSectionPlainText(sections.availability || "");
+  if (availability) notesBits.push(`Availability: ${availability}`);
+  const notes = getSectionPlainText(sections.notes || "");
+  if (notes) notesBits.push(notes);
+  return {
+    name: itemName,
+    qty: quantity.qty,
+    unit: quantity.unit,
+    location: getSectionPlainText(sections.location || ""),
+    notes: notesBits.join("\n\n").trim(),
+  };
+}
+function extractStructuredSyncPayload(noteTitle, rawContent) {
+  const parsed = parseFrontmatter(rawContent);
+  const properties = parsed.properties || [];
+  const sections = parseMarkdownSections(parsed.body || "");
+  const syncRecord = getPropertyValue(properties, "sync_record") || getPropertyValue(properties, "record_type");
+  const noteType = getPropertyValue(properties, "type");
+  const recordId = getPropertyValue(properties, "record_id");
+  const normalizedType = normalizeHeadingKey(syncRecord || noteType).replace(/ /g, "-");
+  if (["need", "need-intake"].includes(normalizedType)) {
+    return {
+      endpoint: "needs",
+      recordType: "need",
+      recordId,
+      payload: {
+        title: noteTitle,
+        description: buildNeedDescription(noteTitle, sections),
+        urgency: getSectionChecklistValue(sections.urgency || "") || getPropertyValue(properties, "urgency") || "",
+        status: getPropertyValue(properties, "status") || "open",
+      },
+      parsed,
+    };
+  }
+  if (["inventory", "resource-item"].includes(normalizedType)) {
+    return {
+      endpoint: "inventory",
+      recordType: "inventory",
+      recordId,
+      payload: buildInventoryPayload(noteTitle, sections),
+      parsed,
+    };
+  }
+  if (["meeting", "meeting-notes", "meeting-agenda"].includes(normalizedType)) {
+    return {
+      endpoint: "meetings",
+      recordType: "meeting",
+      recordId,
+      payload: buildMeetingPayload(noteTitle, sections),
+      parsed,
+    };
+  }
+  return null;
+}
 
 function buildDriveFileUrls(orgId, fileId) {
   const encodedOrgId = encodeURIComponent(String(orgId || ""));
@@ -76,22 +238,6 @@ function buildDriveFileUrls(orgId, fileId) {
 function withFileUrls(orgId, file) {
   if (!file?.id) return file;
   return { ...file, ...buildDriveFileUrls(orgId, file.id) };
-}
-
-function toggleMarkdownTaskByIndex(text, taskIndex, checked) {
-  const raw = String(text || "").replace(/\r\n/g, "\n");
-  let currentIndex = 0;
-  const next = raw.split("\n").map((line) => {
-    const match = line.match(/^(\s*[-*]\s+\[)([ xX])(\]\s+.*)$/);
-    if (!match) return line;
-    if (currentIndex !== taskIndex) {
-      currentIndex += 1;
-      return line;
-    }
-    currentIndex += 1;
-    return `${match[1]}${checked ? "x" : " "}${match[3]}`;
-  });
-  return next.join("\n");
 }
 
 const STARTER_TEMPLATES = [
@@ -108,21 +254,9 @@ tags: daily
 
 # <% tp.file.title %>
 
-## schedule
-
-- [ ] 
-
 ## notes
 
 <% tp.date.now("HH:mm") %> — 
-
-## wins
-
-- [ ] 
-
-## tomorrow
-
-- [ ] 
 `,
   },
   {
@@ -132,35 +266,273 @@ tags: daily
     body: `<% tp.date.now("HH:mm") %> — `,
   },
   {
-    id: "tpl_weekly_checkin",
-    name: "weekly check-in",
-    title: '<% tp.date.now("YYYY-[W]WW") %> weekly check-in',
+    id: "tpl_meeting_notes",
+    name: "meeting notes",
+    title: 'meeting — <% tp.date.now("YYYY-MM-DD") %>',
     body: `---
-type: weekly-checkin
-date: <% tp.date.now("YYYY-MM-DD") %>
-tags: weekly, checkin
+type: meeting-notes
+sync_record: meeting
 ---
 
-# weekly relationship accountability check-in
+# <% tp.file.title %>
 
-## what i did well this week
+## attendees
+-
 
+## agenda
+- [ ] topic
+
+## discussion
+-
+
+## decisions
 - [ ] 
 
-## where i fell short
+## action items
+- [ ] task — owner
 
+## next meeting
+-
+`,
+  },
+  {
+    id: "tpl_meeting_agenda",
+    name: "meeting agenda",
+    title: 'agenda — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: meeting-agenda
+sync_record: meeting
+---
+
+# <% tp.file.title %>
+
+## topics
+- [ ] topic
+
+## time allocations
+- topic — time
+
+## facilitator
+-
+
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_need_intake",
+    name: "need intake",
+    title: 'need intake — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: need-intake
+sync_record: need
+status: open
+---
+
+# <% tp.file.title %>
+
+## requester
+- name:
+- contact:
+
+## need
+-
+
+## urgency
+- [ ] low
+- [ ] medium
+- [ ] high
+- [ ] critical
+
+## category
+- [ ] food
+- [ ] housing
+- [ ] medical
+- [ ] transport
+- [ ] other:
+
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_resource_item",
+    name: "resource / inventory item",
+    title: 'resource — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: resource-item
+sync_record: inventory
+status: available
+---
+
+# <% tp.file.title %>
+
+## item
+-
+
+## quantity
+-
+
+## location
+-
+
+## condition
+-
+
+## availability
+- [ ] available
+- [ ] reserved
+- [ ] in use
+- [ ] unavailable
+
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_distribution_log",
+    name: "distribution log",
+    title: 'distribution — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: distribution-log
+---
+
+# <% tp.file.title %>
+
+## items distributed
+- item — quantity
+
+## recipients
+-
+
+## handled by
+-
+
+## location
+-
+
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_volunteer_shift",
+    name: "volunteer shift log",
+    title: 'volunteer shift — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: volunteer-shift
+---
+
+# <% tp.file.title %>
+
+## volunteers
+-
+
+## roles
+- name — role
+
+## hours
+-
+
+## tasks completed
 - [ ] 
 
-## one concrete change for next week
+## issues
+-
 
-- [ ] 
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_incident_log",
+    name: "incident log",
+    title: 'incident — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: incident-log
+---
 
-## evidence i am becoming safer, not just apologetic
+# <% tp.file.title %>
 
+## what happened
+-
+
+## where
+-
+
+## who was involved
+-
+
+## impact
+-
+
+## response taken
+-
+
+## follow up
 - [ ] 
 `,
   },
+  {
+    id: "tpl_project_initiative",
+    name: "project / initiative",
+    title: 'project — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: project-initiative
+---
+
+# <% tp.file.title %>
+
+## goal
+-
+
+## scope
+-
+
+## team
+-
+
+## current status
+-
+
+## tasks
+- [ ] 
+
+## blockers
+-
+
+## notes
+-
+`,
+  },
+  {
+    id: "tpl_supply_run",
+    name: "supply run",
+    title: 'supply run — <% tp.date.now("YYYY-MM-DD") %>',
+    body: `---
+type: supply-run
+---
+
+# <% tp.file.title %>
+
+## purchased items
+- item — quantity — cost
+
+## total cost
+-
+
+## purchased by
+-
+
+## destination
+-
+
+## notes
+-
+`,
+  },
 ];
+const TEMPLATE_REMOVALS = new Set(["weekly check-in"]);
 
 export default function Drive() {
   const { orgId = "" } = useParams();
@@ -195,6 +567,8 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
+  const templateSyncState = useRef({ running: false, done: false });
+  const structuredSyncState = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -280,6 +654,47 @@ export default function Drive() {
   useEffect(() => {
     loadDrive({ preserveSelection: false });
   }, [orgId]);
+
+  useEffect(() => {
+    templateSyncState.current = { running: false, done: false };
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!orgId || loadState !== "ready" || templateSyncState.current.done || templateSyncState.current.running) return;
+    templateSyncState.current.running = true;
+    (async () => {
+      try {
+        const currentTemplates = Array.isArray(templates) ? templates : [];
+        const byName = new Map(currentTemplates.map((template) => [normalizeTemplateName(template.name), template]));
+        for (const template of currentTemplates) {
+          if (!TEMPLATE_REMOVALS.has(normalizeTemplateName(template.name))) continue;
+          await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(template.id)}`, { method: "DELETE" });
+        }
+        for (const template of STARTER_TEMPLATES) {
+          const existing = byName.get(normalizeTemplateName(template.name));
+          if (!existing) {
+            await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates`, {
+              method: "POST",
+              body: JSON.stringify({ name: template.name, title: template.title, body: template.body }),
+            });
+            continue;
+          }
+          if (String(existing.title || "") !== String(template.title || "") || String(existing.body || "") !== String(template.body || "")) {
+            await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(existing.id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ name: template.name, title: template.title, body: template.body }),
+            });
+          }
+        }
+        await loadDrive({ preserveSelection: true });
+      } catch (e) {
+        console.error("template sync failed", e);
+      } finally {
+        templateSyncState.current.running = false;
+        templateSyncState.current.done = true;
+      }
+    })();
+  }, [orgId, loadState, templates]);
 
   useEffect(() => {
     const folderInput = folderInputRef.current;
@@ -541,6 +956,31 @@ export default function Drive() {
     a.click();
   }
 
+  async function syncStructuredRecord(noteId, noteTitle, noteContent) {
+    const sync = extractStructuredSyncPayload(noteTitle, noteContent);
+    if (!sync) return { nextContent: noteContent, synced: false };
+
+    const syncKey = JSON.stringify({ endpoint: sync.endpoint, recordId: sync.recordId || "", payload: sync.payload });
+    const lastKey = structuredSyncState.current.get(noteId);
+    if (lastKey === syncKey) return { nextContent: noteContent, synced: false };
+
+    const method = sync.recordId ? "PUT" : "POST";
+    const body = method === "PUT" ? { id: sync.recordId, ...sync.payload } : sync.payload;
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/${sync.endpoint}`, {
+      method,
+      body: JSON.stringify(body),
+    });
+
+    const nextRecordId = sync.recordId || String(res?.id || res?.item?.id || "").trim();
+    structuredSyncState.current.set(noteId, JSON.stringify({ endpoint: sync.endpoint, recordId: nextRecordId, payload: sync.payload }));
+
+    if (nextRecordId && nextRecordId !== sync.recordId) {
+      const nextProperties = upsertProperty(upsertProperty(sync.parsed.properties || [], "record_type", sync.recordType), "record_id", nextRecordId);
+      return { nextContent: serializeFrontmatter(nextProperties, sync.parsed.body || ""), synced: true };
+    }
+    return { nextContent: noteContent, synced: true };
+  }
+
   async function saveNow() {
     if (!selectedId) return;
     try {
@@ -548,12 +988,26 @@ export default function Drive() {
         const parsed = parseFrontmatter(content);
         const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
         const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
-        const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
+        let nextBody = content;
+        let res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
-          body: JSON.stringify({ title, body: content, tags: combinedTags }),
+          body: JSON.stringify({ title, body: nextBody, tags: combinedTags }),
         });
+        const syncResult = await syncStructuredRecord(selectedId, title, nextBody);
+        if (syncResult?.nextContent && syncResult.nextContent !== nextBody) {
+          nextBody = syncResult.nextContent;
+          const nextParsed = parseFrontmatter(nextBody);
+          const nextPropertyTags = nextParsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
+          const nextCombinedTags = [...new Set([...parseTags(nextParsed.body), ...String(nextPropertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
+          res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ title, body: nextBody, tags: nextCombinedTags }),
+          });
+          skipNextSave.current = true;
+          setContent(nextBody);
+        }
         if (res?.note) {
-          setNotes((prev) => prev.map((n) => (n.id === selectedId ? res.note : n)));
+          setNotes((prev) => prev.map((n) => (n.id === selectedId ? { ...res.note, body: nextBody } : n)));
         }
         setStatus("saved");
         return;
@@ -798,21 +1252,6 @@ export default function Drive() {
     const parsed = parseFrontmatter(content);
     setContent(serializeFrontmatter(parsed.properties.filter((p) => p.key !== key), parsed.body));
   }
-  function toggleRenderedTask(taskIndex, checked) {
-    if (!Number.isFinite(taskIndex)) return;
-    if (selectedKind === "note") {
-      const parsed = parseFrontmatter(content);
-      const nextBody = toggleMarkdownTaskByIndex(parsed.body, taskIndex, checked);
-      if (nextBody === parsed.body) return;
-      setContent(serializeFrontmatter(parsed.properties, nextBody));
-      return;
-    }
-    if (selectedKind === "file" && fileIsEditable) {
-      const nextContent = toggleMarkdownTaskByIndex(content, taskIndex, checked);
-      if (nextContent === content) return;
-      setContent(nextContent);
-    }
-  }
   async function saveCurrentAsTemplate() {
     if (!content) return;
     const name = prompt("Template name?", title || "Untitled template");
@@ -982,7 +1421,7 @@ export default function Drive() {
                     {selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (
-                      <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} onToggleTask={toggleRenderedTask} compact />
+                      <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact />
                     )}
                   </div>
                 ) : null}
