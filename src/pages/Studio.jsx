@@ -1,7 +1,6 @@
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
-import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
 	flyer: { label: "Flyer", width: 1080, height: 1350 },
@@ -19,6 +18,19 @@ const FONT_OPTIONS = [
 	"Courier New, monospace",
 	"Impact, sans-serif",
 ];
+
+const RailIconWrap = ({ children }) => (
+	<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+		{children}
+	</svg>
+);
+
+const AddIcon = () => <RailIconWrap><path d="M12 5v14" /><path d="M5 12h14" /></RailIconWrap>;
+const TemplatesIcon = () => <RailIconWrap><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></RailIconWrap>;
+const AssetsIcon = () => <RailIconWrap><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 13l2.5-2.5L14 14l2.5-2.5L20 15" /><circle cx="9" cy="9" r="1.25" /></RailIconWrap>;
+const DataIcon = () => <RailIconWrap><ellipse cx="12" cy="6" rx="6.5" ry="2.5" /><path d="M5.5 6v6c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5V6" /><path d="M5.5 12v6c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5v-6" /></RailIconWrap>;
+const DocsIcon = () => <RailIconWrap><path d="M8 4h6l4 4v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /><path d="M14 4v4h4" /><path d="M9 13h6" /><path d="M9 17h6" /></RailIconWrap>;
+
 
 const TEMPLATE_LIBRARY = {
 	eventFlyer: {
@@ -1347,35 +1359,35 @@ export default function Studio() {
 						style={{ ...iconButtonStyle(leftPanel === "create"), display: "grid", placeItems: "center" }}
 						onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}
 					>
-						<Plus size={18} strokeWidth={2.25} />
+						<AddIcon />
 					</button>
 					<button
 						title="Templates"
 						style={{ ...iconButtonStyle(leftPanel === "templates"), display: "grid", placeItems: "center" }}
 						onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}
 					>
-						<LayoutGrid size={18} strokeWidth={2.1} />
+						<TemplatesIcon />
 					</button>
 					<button
 						title="Assets"
 						style={{ ...iconButtonStyle(leftPanel === "assets"), display: "grid", placeItems: "center" }}
 						onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}
 					>
-						<ImageIcon size={18} strokeWidth={2.1} />
+						<AssetsIcon />
 					</button>
 					<button
 						title="Bondfire Data"
 						style={{ ...iconButtonStyle(leftPanel === "data"), display: "grid", placeItems: "center" }}
 						onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}
 					>
-						<Database size={18} strokeWidth={2.1} />
+						<DataIcon />
 					</button>
 					<button
 						title="Documents"
 						style={{ ...iconButtonStyle(leftPanel === "docs"), display: "grid", placeItems: "center" }}
 						onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}
 					>
-						<FileText size={18} strokeWidth={2.1} />
+						<DocsIcon />
 					</button>
 				</div>
 
