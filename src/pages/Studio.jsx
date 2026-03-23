@@ -20,7 +20,7 @@ const FONT_OPTIONS = [
 ];
 
 const RailIconWrap = ({ children }) => (
-	<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+	<svg viewBox="0 0 24 24" width="18" height="18" style={{ display: "block", transform: "translate(0.5px,0.5px)" }} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
 		{children}
 	</svg>
 );
