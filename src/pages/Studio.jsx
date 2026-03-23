@@ -637,7 +637,7 @@ export default function Studio() {
 	const updateDoc = React.useCallback((patch) => {
 		if (!currentDoc) return;
 		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? commitToActivePage(doc, patch) : doc));
-	}, [currentDoc, commitDocs, commitToActivePage]);
+	}, [currentDoc, commitDocs]);
 
 	const updateElements = React.useCallback((ids, patchOrFn) => {
 		if (!currentDoc || !ids?.length) return;
@@ -653,7 +653,7 @@ export default function Studio() {
 				}),
 			}));
 		}));
-	}, [currentDoc, commitDocs, commitToActivePage]);
+	}, [currentDoc, commitDocs]);
 
 	const updateElement = React.useCallback((elementId, patchOrFn) => {
 		updateElements([elementId], patchOrFn);
@@ -684,7 +684,7 @@ export default function Studio() {
 		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
-	}, [ensureDoc, currentDoc, snapshot, commitDocs, commitToActivePage]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
 
 	const addImage = () => {
 		fileInputRef.current?.click();
@@ -1418,7 +1418,7 @@ export default function Studio() {
 		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
 	}, [pageLayouts, activePageIndex]);
 
-	const commitToActivePage = React.useCallback((doc, pageUpdater) => {
+	function commitToActivePage(doc, pageUpdater) {
 		const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || "flyer", {
 			width: doc.width,
 			height: doc.height,
@@ -1438,7 +1438,7 @@ export default function Studio() {
 			nextDoc.guides = pages[0].guides;
 		}
 		return normalizeDoc(nextDoc);
-	}, [activePageIndex]);
+	}
 
 	return (
 
