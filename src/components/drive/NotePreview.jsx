@@ -36,6 +36,7 @@ function flushList(stack, targetIndent = -1) {
   return html;
 }
 function markdownToHtml(md) {
+  let taskIndex = 0;
   const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
   let html = "";
   let i = 0;
@@ -72,7 +73,8 @@ function markdownToHtml(md) {
       if (!listStack.length || indent > listStack[listStack.length - 1].indent || listStack[listStack.length - 1].tag !== tag) { html += `<${tag}>`; listStack.push({ indent, tag }); }
       if (task) {
         const checked = String(task[1] || "").toLowerCase() === "x";
-        html += `<li class="task-list-item"><label><input type="checkbox" disabled ${checked ? "checked" : ""} /> <span>${applyInlineMarkdown(content)}</span></label></li>`;
+        html += `<li class="task-list-item"><label><input type="checkbox" data-task-index="${taskIndex}" ${checked ? "checked" : ""} /> <span>${applyInlineMarkdown(content)}</span></label></li>`;
+        taskIndex += 1;
       } else html += `<li>${applyInlineMarkdown(content)}</li>`;
       i += 1; continue;
     }
@@ -85,14 +87,23 @@ function markdownToHtml(md) {
   return html;
 }
 
-export default function NotePreview({ content, onOpenLink, focusMode, onUpdateProperty, onAddProperty, onRemoveProperty, propertiesCollapsed, onToggleProperties }) {
+export default function NotePreview({ content, onOpenLink, focusMode, onUpdateProperty, onAddProperty, onRemoveProperty, propertiesCollapsed, onToggleProperties, onToggleTask }) {
   const parsed = parseFrontmatter(content);
   return (
     <div onClick={(e) => {
+      const checkbox = e.target.closest('input[type="checkbox"][data-task-index]');
+      if (checkbox) return;
       const link = e.target.closest("a[data-note-title]");
       if (!link) return;
       e.preventDefault();
       onOpenLink?.(link.dataset.noteTitle || "");
+    }} onChange={(e) => {
+      const checkbox = e.target.closest('input[type="checkbox"][data-task-index]');
+      if (!checkbox) return;
+      e.stopPropagation();
+      const taskIndex = Number(checkbox.dataset.taskIndex);
+      if (!Number.isFinite(taskIndex)) return;
+      onToggleTask?.(taskIndex, checkbox.checked);
     }} style={{ maxWidth: 920, margin: "0 auto", background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: focusMode ? 12 : 10, minHeight: focusMode ? "84vh" : "72vh" }}>
       {parsed.hasFrontmatter ? <div className="card" style={{ padding: 8, marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: propertiesCollapsed ? 0 : 8 }}>
