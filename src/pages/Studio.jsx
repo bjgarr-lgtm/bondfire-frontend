@@ -587,7 +587,7 @@ export default function Studio() {
 		setZoom(nextZoom);
 		setPan({
 			x: Math.max(40, (rect.width - doc.width * nextZoom) / 2),
-			y: Math.max(40, 56),
+			y: 0,
 		});
 	}, [currentPage, currentDoc]);
 
@@ -1410,7 +1410,7 @@ export default function Studio() {
 	}, [zoom]);
 	const pageGap = 32;
 	const pageLayouts = React.useMemo(() => {
-		let offsetTop = pan.y + RULER_SIZE;
+		let offsetTop = RULER_SIZE + 36;
 		return currentPages.map((page) => {
 			const layout = {
 				left: pan.x + RULER_SIZE,
