@@ -1,6 +1,7 @@
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
 	flyer: { label: "Flyer", width: 1080, height: 1350 },
@@ -1341,11 +1342,41 @@ export default function Studio() {
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
 				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
-					<button title="Add" style={{ ...iconButtonStyle(leftPanel === "create"), display: "grid", placeItems: "center", fontSize: 20, fontWeight: 700 }} onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}>＋</button>
-					<button title="Templates" style={{ ...iconButtonStyle(leftPanel === "templates"), display: "grid", placeItems: "center", fontSize: 16 }} onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}>▣</button>
-					<button title="Assets" style={{ ...iconButtonStyle(leftPanel === "assets"), display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, letterSpacing: 0 }} onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}>IMG</button>
-					<button title="Bondfire Data" style={{ ...iconButtonStyle(leftPanel === "data"), display: "grid", placeItems: "center", fontSize: 14 }} onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}>{"{}"}</button>
-					<button title="Documents" style={{ ...iconButtonStyle(leftPanel === "docs"), display: "grid", placeItems: "center", fontSize: 16 }} onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}>☰</button>
+					<button
+						title="Add"
+						style={{ ...iconButtonStyle(leftPanel === "create"), display: "grid", placeItems: "center" }}
+						onClick={() => setLeftPanel((v) => v === "create" ? null : "create")}
+					>
+						<Plus size={18} strokeWidth={2.25} />
+					</button>
+					<button
+						title="Templates"
+						style={{ ...iconButtonStyle(leftPanel === "templates"), display: "grid", placeItems: "center" }}
+						onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")}
+					>
+						<LayoutGrid size={18} strokeWidth={2.1} />
+					</button>
+					<button
+						title="Assets"
+						style={{ ...iconButtonStyle(leftPanel === "assets"), display: "grid", placeItems: "center" }}
+						onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")}
+					>
+						<ImageIcon size={18} strokeWidth={2.1} />
+					</button>
+					<button
+						title="Bondfire Data"
+						style={{ ...iconButtonStyle(leftPanel === "data"), display: "grid", placeItems: "center" }}
+						onClick={() => setLeftPanel((v) => v === "data" ? null : "data")}
+					>
+						<Database size={18} strokeWidth={2.1} />
+					</button>
+					<button
+						title="Documents"
+						style={{ ...iconButtonStyle(leftPanel === "docs"), display: "grid", placeItems: "center" }}
+						onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")}
+					>
+						<FileText size={18} strokeWidth={2.1} />
+					</button>
 				</div>
 
 				{leftPanel ? (
