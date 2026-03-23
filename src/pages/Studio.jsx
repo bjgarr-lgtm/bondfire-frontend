@@ -1449,42 +1449,15 @@ export default function Studio() {
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
 					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
 					{docSettingsOpen && currentDoc ? (
-						<>
-							<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
-								<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
-								<input type="color" value={currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
-								<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-									{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
-										<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
-									))}
-								</div>
+						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+							<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
+							<input type="color" value={currentPage?.background || currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
+							<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+								{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
+									<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
+								))}
 							</div>
-							{currentPages.slice(1).map((page, pageIndex) => {
-								const layout = pageLayouts[pageIndex + 1];
-								if (!layout) return null;
-								return (
-									<div key={page.id} onClick={() => { setActivePageIndex(pageIndex + 1); setSelectedIds([]); }} style={{ position: "absolute", left: layout.left, top: layout.top, width: layout.width, height: layout.height, background: page.background || "#ffffff", borderRadius: 18, overflow: "hidden", boxShadow: pageIndex + 1 === activePageIndex ? "0 0 0 2px #ef4444, 0 24px 80px rgba(0,0,0,0.22)" : "0 24px 80px rgba(0,0,0,0.22)", cursor: "pointer" }}>
-										<div style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
-											{(page.elements || []).map((el) => {
-												if (el.hidden) return null;
-												const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", userSelect: "none", pointerEvents: "none" };
-												if (el.type === "text") {
-													return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-												}
-												if (el.type === "shape") {
-													return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-												}
-												return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
-											})}
-										</div>
-										<div style={{ position: "absolute", left: 12, top: 12, padding: "6px 10px", borderRadius: 999, background: pageIndex + 1 === activePageIndex ? "rgba(239,68,68,0.92)" : "rgba(17,24,39,0.82)", color: "white", fontSize: 12, fontWeight: 700 }}>Page {pageIndex + 2}</div>
-									</div>
-								);
-							})}
-							{pageLayouts.length ? (
-								<button onClick={addPage} style={{ position: "absolute", left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 70, top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 18, width: 140, padding: "10px 14px", borderRadius: 999, border: "1px dashed rgba(255,255,255,0.18)", background: "rgba(17,24,39,0.96)", color: "white", fontWeight: 700, zIndex: 18 }}>+ Add Page</button>
-							) : null}
-						</>
+						</div>
 					) : null}
 					{fileMenuOpen ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 36, left: 0, width: 200, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
