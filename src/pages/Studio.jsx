@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { STUDIO_ASSETS } from "../data/studioAssets.js";
 import { searchPixabayImages } from "../utils/pixabay.js";
+import { useStudioFonts } from "../hooks/useStudioFonts.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
@@ -12,15 +13,8 @@ const PRESETS = {
 	banner: { label: "Banner", width: 1600, height: 900 },
 };
 
-const FONT_OPTIONS = [
-	"Inter, system-ui, sans-serif",
-	"Arial, sans-serif",
-	"Georgia, serif",
-	"Times New Roman, serif",
-	"Trebuchet MS, sans-serif",
-	"Courier New, monospace",
-	"Impact, sans-serif",
-];
+const FALLBACK_FONT = "Inter";
+
 
 const TEMPLATE_LIBRARY = {
 	eventFlyer: {
@@ -191,7 +185,7 @@ function makeTextElement(patch = {}) {
 		opacity: 1,
 		fontSize: 36,
 		fontWeight: 700,
-		fontFamily: FONT_OPTIONS[0],
+		fontFamily: FALLBACK_FONT,
 		lineHeight: 1.1,
 		letterSpacing: 0,
 		align: "left",
@@ -512,7 +506,7 @@ async function renderDocToCanvas(doc, bindings) {
 			const text = applyBindings(el.text || "", bindings);
 			ctx.fillStyle = el.color || "#fff";
 			ctx.textBaseline = "top";
-			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || FONT_OPTIONS[0]}`;
+			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || FALLBACK_FONT}`;
 			const lines = String(text).split("\n");
 			const lineHeight = Number(el.fontSize || 36) * Number(el.lineHeight || 1.1);
 			for (let i = 0; i < lines.length; i += 1) {
@@ -534,6 +528,7 @@ export default function Studio() {
 	const workspaceRef = React.useRef(null);
 	const canvasShellRef = React.useRef(null);
 	const fileInputRef = React.useRef(null);
+	const fontUploadRef = React.useRef(null);
 
 	const [docs, setDocs] = React.useState(() => readDocs(orgId));
 	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
@@ -563,6 +558,7 @@ export default function Studio() {
 	const [pixabayResults, setPixabayResults] = React.useState([]);
 	const [pixabayLoading, setPixabayLoading] = React.useState(false);
 	const [pixabayError, setPixabayError] = React.useState("");
+	const [fontSearch, setFontSearch] = React.useState("");
 	const [dragState, setDragState] = React.useState(null);
 	const [resizeState, setResizeState] = React.useState(null);
 	const [marquee, setMarquee] = React.useState(null);
@@ -582,6 +578,16 @@ export default function Studio() {
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
+	const {
+		availableFonts,
+		uploadedFonts,
+		recentFonts,
+		ensureFontLoaded,
+		markFontRecent,
+		uploadFontFile,
+		fontStatus,
+	} = useStudioFonts({ orgId, search: fontSearch });
+
 	const currentDoc = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
 	const currentPages = React.useMemo(() => {
 		if (!currentDoc) return [];
@@ -601,6 +607,12 @@ export default function Studio() {
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
 	const orderedLayers = React.useMemo(() => (currentPage?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentPage]);
+
+	React.useEffect(() => {
+		if (selected?.type === "text" && selected?.fontFamily) {
+			ensureFontLoaded(selected.fontFamily);
+		}
+	}, [selected?.id, selected?.type, selected?.fontFamily, ensureFontLoaded]);
 
 	const commitDocs = React.useCallback((updater) => {
 		setDocs((prev) => {
@@ -775,6 +787,21 @@ const addImage = () => {
 		const reader = new FileReader();
 		reader.onload = () => addImageFromSrc(String(reader.result || ""), file.name || "Image");
 		reader.readAsDataURL(file);
+		e.target.value = "";
+	};
+
+	const onUploadFont = async (e) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		try {
+			const uploaded = await uploadFontFile(file);
+			if (selected?.type === "text" && uploaded?.family) {
+				updateElement(selected.id, { fontFamily: uploaded.family });
+				markFontRecent(uploaded.family);
+			}
+		} catch (err) {
+			window.alert(String(err?.message || err || "Failed to upload font"));
+		}
 		e.target.value = "";
 	};
 
@@ -1590,6 +1617,7 @@ const addImage = () => {
 
 		<div style={{ padding: 8, display: "grid", gap: 8 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
+			<input ref={fontUploadRef} type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/x-font-ttf,application/x-font-otf" onChange={onUploadFont} style={{ display: "none" }} />
 
 			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
@@ -1927,7 +1955,7 @@ const addImage = () => {
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
 															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
-															if (el.type === "text") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+															if (el.type === "text") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
@@ -1969,7 +1997,7 @@ const addImage = () => {
 													(page.elements || []).map((el) => {
 														if (el.hidden) return null;
 														const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", pointerEvents: "none" };
-														if (el.type === "text") return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+														if (el.type === "text") return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 														if (el.type === "shape") return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 														return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 													})
@@ -2063,7 +2091,24 @@ const addImage = () => {
 										<label>Line height<input type="number" step="0.05" value={selected.lineHeight || 1.1} onChange={(e) => updateElement(selected.id, { lineHeight: Number(e.target.value || 1.1) })} style={{ width: "100%" }} /></label>
 										<label>Letter spacing<input type="number" value={selected.letterSpacing || 0} onChange={(e) => updateElement(selected.id, { letterSpacing: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
 									</div>
-									<label>Font family<select value={selected.fontFamily || FONT_OPTIONS[0]} onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })} style={{ width: "100%" }}>{FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
+									<div style={{ display: "grid", gap: 8 }}>
+										<label>Font search<input value={fontSearch} onChange={(e) => setFontSearch(e.target.value)} placeholder="Search Google or uploaded fonts" style={{ width: "100%" }} /></label>
+										<label>Font family<select value={selected.fontFamily || FALLBACK_FONT} onChange={(e) => { const nextFont = e.target.value; updateElement(selected.id, { fontFamily: nextFont }); ensureFontLoaded(nextFont); markFontRecent(nextFont); }} style={{ width: "100%" }}>
+											<optgroup label="Recent">
+												{recentFonts.map((font) => <option key={`recent_${font.family}`} value={font.family}>{font.family}</option>)}
+											</optgroup>
+											<optgroup label="Uploaded">
+												{uploadedFonts.map((font) => <option key={`uploaded_${font.id}`} value={font.family}>{font.family}</option>)}
+											</optgroup>
+											<optgroup label="Google Fonts">
+												{availableFonts.map((font) => <option key={font.family} value={font.family}>{font.family}</option>)}
+											</optgroup>
+										</select></label>
+										<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+											<button type="button" onClick={() => fontUploadRef.current?.click()}>Upload font</button>
+											<div style={{ fontSize: 12, opacity: 0.72 }}>{fontStatus}</div>
+										</div>
+									</div>
 									<label>Alignment<select value={selected.align || "left"} onChange={(e) => updateElement(selected.id, { align: e.target.value })} style={{ width: "100%" }}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
 									<label>Text color<input type="color" value={selected.color || "#ffffff"} onChange={(e) => updateElement(selected.id, { color: e.target.value })} style={{ width: "100%" }} /></label>
 								</>) : null}
