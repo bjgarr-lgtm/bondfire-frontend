@@ -54,7 +54,10 @@ function isMarkdownFile(file) {
 }
 function isEditableTextFile(file) {
   const ext = getFileExtension(file?.name);
-  return String(file?.mime || "").startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext);
+  const mime = String(file?.mime || "");
+  if (mime === "application/vnd.bondfire.sheet+json") return true;
+  if (mime === "application/vnd.bondfire.form+json") return true;
+  return mime.startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv", "bfsheet", "bfform"].includes(ext);
 }
 function canPreviewFileInApp(file) {
   const mime = String(file?.mime || "");
@@ -62,6 +65,8 @@ function canPreviewFileInApp(file) {
   if (mime === "application/pdf") return true;
   if (mime.startsWith("audio/")) return true;
   if (mime.startsWith("video/")) return true;
+  if (mime === "application/vnd.bondfire.sheet+json") return true;
+  if (mime === "application/vnd.bondfire.form+json") return true;
   if (isEditableTextFile(file)) return true;
   return false;
 }
@@ -585,7 +590,7 @@ export default function Drive() {
   async function openFile(file) {
     let nextFile = withFileUrls(orgId, file);
     if (!nextFile) return;
-    if ((isEditableTextFile(nextFile) || isBondfireSheetFile(nextFile, nextFile?.textContent || "") || isBondfireFormFile(nextFile, nextFile?.textContent || "")) && !nextFile.textContent && !nextFile.dataUrl) {
+    if (isEditableTextFile(nextFile) && !nextFile.textContent && !nextFile.dataUrl) {
       nextFile = await hydrateFile(nextFile.id);
       if (!nextFile) return;
       nextFile = withFileUrls(orgId, nextFile);
@@ -626,13 +631,7 @@ export default function Drive() {
         return;
       }
       if (selectedKind === "file" && fileIsEditable) {
-        const mime = selectedFile?.mime || (fileIsBondfireSheet
-          ? "application/vnd.bondfire.sheet+json"
-          : fileIsBondfireForm
-            ? "application/vnd.bondfire.form+json"
-            : fileIsMarkdown
-              ? "text/markdown;charset=utf-8"
-              : "text/plain;charset=utf-8");
+        const mime = selectedFile?.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
         const dataUrl = textToDataUrl(content, mime);
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
@@ -926,7 +925,6 @@ export default function Drive() {
   }
 
   const showEditableDocument = selectedKind === "note" || (selectedKind === "file" && fileIsEditable);
-  const showStructuredDoc = selectedKind === "file" && fileIsStructuredDoc;
   const showEditor = showEditableDocument && viewMode !== "read";
   const showPreview = showEditableDocument && viewMode !== "edit";
   const workspaceHeight = focusMode ? "100vh" : "calc(100vh - 86px)";
@@ -1062,7 +1060,7 @@ export default function Drive() {
                     {selectedFileSubtype === "sheet" ? (
                       <SpreadsheetFileView value={content} mode="preview" />
                     ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} mode="preview" />
+                      <FormFileView value={content} onChange={setContent} mode="preview" />
                     ) : selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (
