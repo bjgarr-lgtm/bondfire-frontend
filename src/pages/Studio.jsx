@@ -1,6 +1,8 @@
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { STUDIO_ASSETS } from "../data/studioAssets.js";
+import { searchPixabayImages } from "../utils/pixabay.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
@@ -215,6 +217,8 @@ function makeShapeElement(patch = {}) {
 		stroke: "#ffffff",
 		strokeWidth: 0,
 		radius: 16,
+		flipX: false,
+		flipY: false,
 		...patch,
 	};
 }
@@ -234,6 +238,8 @@ function makeImageElement(patch = {}) {
 		opacity: 1,
 		fit: "cover",
 		src: "",
+		flipX: false,
+		flipY: false,
 		...patch,
 	};
 }
@@ -421,6 +427,39 @@ function roundRectPath(ctx, x, y, width, height, radius) {
 	ctx.closePath();
 }
 
+function svgMarkupToDataUrl(svg, fill = "#111111") {
+	const safeFill = String(fill || "#111111");
+	const markup = String(svg || "").replace(/currentColor/g, safeFill);
+	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+}
+
+function makeSvgElement(asset, patch = {}) {
+	return {
+		id: uid(),
+		type: "svg",
+		name: patch.name || asset?.label || "Asset",
+		locked: false,
+		hidden: false,
+		x: 140,
+		y: 140,
+		width: Number(patch.width || asset?.width || 180),
+		height: Number(patch.height || asset?.height || 180),
+		rotation: 0,
+		opacity: 1,
+		fill: patch.fill || "#111111",
+		svg: asset?.svg || patch.svg || "",
+		flipX: false,
+		flipY: false,
+		...patch,
+	};
+}
+
+function getElementTransform(el) {
+	const scaleX = el?.flipX ? -1 : 1;
+	const scaleY = el?.flipY ? -1 : 1;
+	return `rotate(${el?.rotation || 0}deg) scale(${scaleX}, ${scaleY})`;
+}
+
 async function renderDocToCanvas(doc, bindings) {
 	const canvas = document.createElement("canvas");
 	canvas.width = doc.width;
@@ -434,6 +473,7 @@ async function renderDocToCanvas(doc, bindings) {
 		ctx.globalAlpha = Number(el.opacity ?? 1);
 		ctx.translate(Number(el.x || 0) + Number(el.width || 0) / 2, Number(el.y || 0) + Number(el.height || 0) / 2);
 		ctx.rotate((Number(el.rotation || 0) * Math.PI) / 180);
+		ctx.scale(el.flipX ? -1 : 1, el.flipY ? -1 : 1);
 		ctx.translate(-Number(el.width || 0) / 2, -Number(el.height || 0) / 2);
 		if (el.type === "shape") {
 			roundRectPath(ctx, 0, 0, Number(el.width || 0), Number(el.height || 0), Number(el.radius || 0));
@@ -444,6 +484,11 @@ async function renderDocToCanvas(doc, bindings) {
 				ctx.strokeStyle = el.stroke || "transparent";
 				ctx.stroke();
 			}
+		} else if (el.type === "svg" && el.svg) {
+			try {
+				const img = await loadImageData(svgMarkupToDataUrl(el.svg, el.fill));
+				ctx.drawImage(img, 0, 0, Number(el.width || 0), Number(el.height || 0));
+			} catch {}
 		} else if (el.type === "image" && el.src) {
 			try {
 				const img = await loadImageData(el.src);
@@ -514,6 +559,10 @@ export default function Studio() {
 	const [driveLoading, setDriveLoading] = React.useState(false);
 	const [driveError, setDriveError] = React.useState("");
 	const [assetSearch, setAssetSearch] = React.useState("");
+	const [assetTab, setAssetTab] = React.useState("builtins");
+	const [pixabayResults, setPixabayResults] = React.useState([]);
+	const [pixabayLoading, setPixabayLoading] = React.useState(false);
+	const [pixabayError, setPixabayError] = React.useState("");
 	const [dragState, setDragState] = React.useState(null);
 	const [resizeState, setResizeState] = React.useState(null);
 	const [marquee, setMarquee] = React.useState(null);
@@ -689,7 +738,34 @@ export default function Studio() {
 		setSelectedIds([element.id]);
 	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
 
-	const addImage = () => {
+	
+	const addSvgAsset = (asset) => {
+		if (!asset) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeSvgElement(asset, { name: asset.label, fill: brandKit.primary || "#111111" });
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	};
+
+	const loadPixabayAssets = React.useCallback(async () => {
+		const query = assetSearch.trim() || "community poster";
+		setPixabayLoading(true);
+		setPixabayError("");
+		try {
+			const results = await searchPixabayImages(query);
+			setPixabayResults(results);
+		} catch (err) {
+			setPixabayError(String(err?.message || err || "Failed to load Pixabay results"));
+		} finally {
+			setPixabayLoading(false);
+		}
+	}, [assetSearch]);
+const addImage = () => {
 		fileInputRef.current?.click();
 	};
 
@@ -721,10 +797,10 @@ export default function Studio() {
 	}, [orgId]);
 
 	React.useEffect(() => {
-		if (leftPanel === "assets" && !driveAssets.length && !driveLoading) {
+		if (leftPanel === "assets" && assetTab === "drive" && !driveAssets.length && !driveLoading) {
 			loadDriveAssets();
 		}
-	}, [leftPanel, driveAssets.length, driveLoading, loadDriveAssets]);
+	}, [leftPanel, assetTab, driveAssets.length, driveLoading, loadDriveAssets]);
 
 	const removeSelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
@@ -739,7 +815,7 @@ export default function Studio() {
 		snapshot();
 		const toDup = (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id));
 		const dupes = withNewIds(toDup).map((el) => ({ ...el, name: `${el.name || el.type} Copy` }));
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...dupes] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), ...dupes] }))));
 		setSelectedIds(dupes.map((el) => el.id));
 	};
 
@@ -1446,6 +1522,11 @@ export default function Studio() {
 		if (!q) return driveAssets;
 		return driveAssets.filter((file) => String(file?.name || "").toLowerCase().includes(q));
 	}, [driveAssets, assetSearch]);
+	const filteredBuiltInAssets = React.useMemo(() => {
+		const q = assetSearch.trim().toLowerCase();
+		if (!q) return STUDIO_ASSETS;
+		return STUDIO_ASSETS.filter((asset) => String(asset?.label || "").toLowerCase().includes(q) || String(asset?.category || "").toLowerCase().includes(q));
+	}, [assetSearch]);
 
 	const multiSelection = selectedIds.length > 1;
 	const currentGuides = currentPage?.guides || [];
@@ -1638,25 +1719,69 @@ export default function Studio() {
 						{leftPanel === "assets" ? (
 							<div style={{ display: "grid", gap: 8 }}>
 								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-									<div style={{ fontWeight: 800 }}>Drive Assets</div>
-									<button onClick={loadDriveAssets}>Refresh</button>
+									<div style={{ fontWeight: 800 }}>Assets</div>
+									<button style={panelButtonStyle(false)} onClick={addImage}>Upload</button>
 								</div>
-								<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Search Drive images" style={{ width: "100%" }} />
-								<button style={panelButtonStyle(false)} onClick={addImage}>Upload from device</button>
-								{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
-								{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
-								<div style={{ display: "grid", gap: 8 }}>
-									{filteredAssets.map((file) => (
-										<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-											<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-												<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-											</div>
-											<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
-											<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
+								<div style={{ display: "flex", gap: 6 }}>
+									<button style={{ ...panelButtonStyle(assetTab === "builtins"), textAlign: "center" }} onClick={() => setAssetTab("builtins")}>Built-in</button>
+									<button style={{ ...panelButtonStyle(assetTab === "pixabay"), textAlign: "center" }} onClick={() => setAssetTab("pixabay")}>Pixabay</button>
+									<button style={{ ...panelButtonStyle(assetTab === "drive"), textAlign: "center" }} onClick={() => setAssetTab("drive")}>Drive</button>
+								</div>
+								<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder={assetTab === "pixabay" ? "Search Pixabay images" : assetTab === "drive" ? "Search Drive images" : "Search built-in assets"} style={{ width: "100%" }} />
+								{assetTab === "pixabay" ? <button style={panelButtonStyle(false)} onClick={loadPixabayAssets}>{pixabayLoading ? "Searching..." : "Search Pixabay"}</button> : null}
+								{assetTab === "builtins" ? (
+									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+										{filteredBuiltInAssets.map((asset) => (
+											<button key={asset.id} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left" }}>
+												<div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center", marginBottom: 8, borderRadius: 8, background: "rgba(255,255,255,0.05)", color: brandKit.primary }}>
+													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" style={{ maxWidth: "80%", maxHeight: "80%" }} />
+												</div>
+												<div style={{ fontSize: 11, fontWeight: 700 }}>{asset.label}</div>
+												<div style={{ fontSize: 10, opacity: 0.7 }}>{asset.category}</div>
+											</button>
+										))}
+										{!filteredBuiltInAssets.length ? <div style={{ opacity: 0.7, gridColumn: "1 / -1" }}>No built-in assets match that search.</div> : null}
+									</div>
+								) : null}
+								{assetTab === "pixabay" ? (
+									<div style={{ display: "grid", gap: 8 }}>
+										{pixabayError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{pixabayError}</div> : null}
+										<div style={{ display: "grid", gap: 8 }}>
+											{pixabayResults.map((file) => (
+												<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+														<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+													</div>
+													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+													<button onClick={() => addImageFromSrc(file.fullUrl || file.previewUrl, file.name)}>Place on Canvas</button>
+												</div>
+											))}
+											{!pixabayLoading && !pixabayResults.length ? <div style={{ opacity: 0.7 }}>Search Pixabay to place photos without uploading every image.</div> : null}
 										</div>
-									))}
-									{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
-								</div>
+									</div>
+								) : null}
+								{assetTab === "drive" ? (
+									<div style={{ display: "grid", gap: 8 }}>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+											<div style={{ fontWeight: 800 }}>Drive Assets</div>
+											<button onClick={loadDriveAssets}>Refresh</button>
+										</div>
+										{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
+										{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
+										<div style={{ display: "grid", gap: 8 }}>
+											{filteredAssets.map((file) => (
+												<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+														<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+													</div>
+													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+													<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
+												</div>
+											))}
+											{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
+										</div>
+									</div>
+								) : null}
 							</div>
 						) : null}
 
@@ -1784,12 +1909,33 @@ export default function Studio() {
 															if (el.hidden) return null;
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
-															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
+															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
 															if (el.type === "text") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
+														{selectionBounds ? (
+															<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: selectionBounds.left + (selectionBounds.width / 2), top: selectionBounds.top - 44, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 20 }}>
+																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={duplicateSelected}>Duplicate</button>
+																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={removeSelected}>Delete</button>
+																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => updateElements(selectedIds, (item) => ({ flipX: !item.flipX }))}>Flip H</button>
+																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => updateElements(selectedIds, (item) => ({ flipY: !item.flipY }))}>Flip V</button>
+																<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
+																	<span>Opacity</span>
+																	<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
+																</div>
+																{selected && ["text", "shape", "svg"].includes(selected.type) ? (
+																	<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+																		{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
+																			<button key={swatch} onClick={() => updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch })} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
+																		))}
+																	</div>
+																) : null}
+																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => setInspectorOpen(true)}>Inspector</button>
+															</div>
+														) : null}
 														{selected && !selected.locked ? [
 															{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
 															{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
