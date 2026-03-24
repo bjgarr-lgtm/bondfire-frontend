@@ -108,7 +108,7 @@ function answerSummary(field, value) {
   return String(value || "—");
 }
 
-export default function FormFileView({ value, onChange, mode = "edit", fileId = "" }) {
+export default function FormFileView({ value, onChange, mode = "edit", fileId = "", orgId = "" }) {
   const form = useMemo(() => normalizeForm(safeParse(value)), [value]);
   const readOnly = mode === "preview";
   const [draftAnswers, setDraftAnswers] = useState({});
@@ -123,6 +123,10 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
 
   const publicUrl = form.publicShare.enabled && form.publicShare.token && fileId
     ? `${window.location.origin}/api/public/forms/${encodeURIComponent(fileId)}?token=${encodeURIComponent(form.publicShare.token)}`
+    : "";
+
+  const standaloneEditorUrl = fileId && orgId
+    ? `${window.location.origin}/app/#/org/${encodeURIComponent(orgId)}/drive?file=${encodeURIComponent(fileId)}`
     : "";
 
   const commit = (next) => onChange?.(serialize(next));
@@ -159,6 +163,17 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
     } catch {
       setCopyStatus("Copy failed");
     }
+  };
+
+
+  const openPublicUrl = () => {
+    if (!publicUrl) return;
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const openEditorUrl = () => {
+    if (!standaloneEditorUrl) return;
+    window.open(standaloneEditorUrl, "_blank", "noopener,noreferrer");
   };
 
   const submitResponse = () => {
@@ -213,27 +228,25 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
       </div>
 
       {!readOnly ? (
-        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, display: "grid", gap: 10 }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontWeight: 800 }}>Public response link</div>
-              <div className="helper">Generate a public URL so anyone can submit without a Bondfire account.</div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>Public response link</div>
+              <div className="helper">Anyone with this link can submit without a Bondfire account.</div>
             </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
               <input type="checkbox" checked={form.publicShare.enabled} onChange={(e) => togglePublicShare(e.target.checked)} />
-              Public link enabled
+              Enable public submissions
             </label>
           </div>
-          {form.publicShare.enabled ? (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 8 }}>
-                <input className="input" readOnly value={publicUrl} style={{ padding: "10px 12px" }} />
-                <button className="btn" type="button" onClick={copyPublicUrl}>Copy link</button>
-                <button className="btn" type="button" onClick={regeneratePublicLink}>Regenerate</button>
-              </div>
-              {copyStatus ? <div className="helper">{copyStatus}</div> : null}
-            </>
-          ) : null}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn" type="button" onClick={openEditorUrl} disabled={!standaloneEditorUrl}>Open editor in browser</button>
+            <button className="btn" type="button" onClick={openPublicUrl} disabled={!publicUrl}>Open public form</button>
+            <button className="btn" type="button" onClick={copyPublicUrl} disabled={!publicUrl}>Copy public link</button>
+            <button className="btn" type="button" onClick={regeneratePublicLink} disabled={!form.publicShare.enabled}>Regenerate link</button>
+          </div>
+          <input className="input" readOnly value={publicUrl || "Enable public submissions to generate a public share URL."} style={{ padding: "10px 12px" }} />
+          {copyStatus ? <div className="helper">{copyStatus}</div> : null}
         </div>
       ) : null}
 

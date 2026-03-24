@@ -580,6 +580,39 @@ export default function Drive() {
   }
 
   function openFileInBrowser(file) {
+    const name = String(file?.name || "");
+    const mime = String(file?.mime || "");
+    const textContent = String(file?.textContent || "");
+    if ((/\.bfform$/i.test(name) || mime === "application/vnd.bondfire.form+json") && textContent) {
+      try {
+        const parsed = JSON.parse(textContent);
+        const token = String(parsed?.publicShare?.token || "");
+        if (parsed?.publicShare?.enabled && token) {
+          window.open(`${window.location.origin}/api/public/forms/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token)}`, "_blank", "noopener,noreferrer");
+          return;
+        }
+        const blob = new Blob([`<!doctype html><html><head><meta charset="utf-8" /><title>${name}</title><style>body{font-family:Inter,system-ui,sans-serif;background:#090909;color:#fff;padding:24px}pre{white-space:pre-wrap;background:#111214;border:1px solid #232427;border-radius:12px;padding:16px}</style></head><body><h1>${name}</h1><pre>${textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></body></html>`], { type: "text/html" });
+        window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+        return;
+      } catch {}
+    }
+    if ((/\.bfsheet$/i.test(name) || mime === "application/vnd.bondfire.sheet+json") && textContent) {
+      try {
+        const parsed = JSON.parse(textContent);
+        const sheet = Array.isArray(parsed?.sheets) && parsed.sheets.length ? parsed.sheets[0] : null;
+        const rows = Math.max(25, Number(sheet?.rowCount || 25));
+        const cols = Math.max(10, Number(sheet?.columnCount || 10));
+        const labels = Array.from({ length: cols }, (_, idx) => {
+          let n = idx + 1; let out = ""; while (n > 0) { const rem = (n - 1) % 26; out = String.fromCharCode(65 + rem) + out; n = Math.floor((n - 1) / 26); } return out;
+        });
+        const cells = sheet?.cells || {};
+        const esc = (value) => String(value || "").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const table = `<table><thead><tr><th>#</th>${labels.map((label)=>`<th>${label}</th>`).join("")}</tr></thead><tbody>${Array.from({ length: rows }, (_, r)=>`<tr><th>${r+1}</th>${labels.map((label)=>`<td>${esc(cells[`${label}${r+1}`]?.input || "")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        const blob = new Blob([`<!doctype html><html><head><meta charset="utf-8" /><title>${name}</title><style>body{font-family:Inter,system-ui,sans-serif;background:#090909;color:#fff;padding:24px}table{border-collapse:collapse;background:#111214}th,td{border:1px solid #26282c;padding:8px 10px;min-width:120px}th{background:#15171b;position:sticky;top:0}</style></head><body><h1>${name}</h1>${table}</body></html>`], { type: "text/html" });
+        window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+        return;
+      } catch {}
+    }
     if (file?.dataUrl) {
       const a = document.createElement("a");
       a.href = file.dataUrl;
@@ -1051,7 +1084,7 @@ export default function Drive() {
                     {selectedFileSubtype === "sheet" ? (
                       <SpreadsheetFileView value={content} onChange={setContent} mode="edit" />
                     ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="edit" fileId={selectedFile?.id || ""} />
+                      <FormFileView value={content} onChange={setContent} mode="edit" fileId={selectedFile?.id || ""} orgId={orgId} />
                     ) : (
                       <NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact />
                     )}
@@ -1063,7 +1096,7 @@ export default function Drive() {
                     {selectedFileSubtype === "sheet" ? (
                       <SpreadsheetFileView value={content} mode="preview" />
                     ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="preview" fileId={selectedFile?.id || ""} />
+                      <FormFileView value={content} onChange={setContent} mode="preview" fileId={selectedFile?.id || ""} orgId={orgId} />
                     ) : selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (

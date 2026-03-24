@@ -1450,12 +1450,22 @@ const addImage = () => {
 		e.preventDefault();
 		e.stopPropagation();
 		const point = getCanvasPoint(e.clientX, e.clientY);
-		const pixabayPayload = e.dataTransfer?.getData("application/x-bondfire-image");
-		if (pixabayPayload) {
+		const svgPayload = e.dataTransfer?.getData("application/x-bondfire-svg");
+		if (svgPayload) {
 			try {
-				const data = JSON.parse(pixabayPayload);
+				const data = JSON.parse(svgPayload);
+				if (data?.svg) {
+					placeSvgAtPoint(data, point);
+					return;
+				}
+			} catch {}
+		}
+		const imagePayload = e.dataTransfer?.getData("application/x-bondfire-image");
+		if (imagePayload) {
+			try {
+				const data = JSON.parse(imagePayload);
 				if (data?.src) {
-					placeImageAtPoint(String(data.src), String(data.name || "Pixabay Image"), point);
+					placeImageAtPoint(String(data.src), String(data.name || "Image"), point);
 					return;
 				}
 			} catch {}
@@ -1613,7 +1623,7 @@ const addImage = () => {
 	const pageStackHeight = React.useMemo(() => {
 		if (!pageLayouts.length) return 900;
 		const last = pageLayouts[pageLayouts.length - 1];
-		return Math.max(900, last.top + last.height + 170);
+		return Math.max(980, last.top + last.height + 170);
 	}, [pageLayouts]);
 	const activePageLayout = React.useMemo(() => {
 		if (!pageLayouts.length) return null;
@@ -1796,7 +1806,7 @@ const addImage = () => {
 								{assetTab === "builtins" ? (
 									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
 										{filteredBuiltInAssets.map((asset) => (
-											<button key={asset.id} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left" }}>
+											<button key={asset.id} draggable onDragStart={(e) => { e.dataTransfer.setData("application/x-bondfire-svg", JSON.stringify(asset)); e.dataTransfer.effectAllowed = "copy"; }} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
 												<div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center", marginBottom: 8, borderRadius: 8, background: "rgba(255,255,255,0.05)", color: brandKit.primary }}>
 													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" style={{ maxWidth: "80%", maxHeight: "80%" }} />
 												</div>
@@ -1845,7 +1855,7 @@ const addImage = () => {
 										{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
 										<div style={{ display: "grid", gap: 8 }}>
 											{filteredAssets.map((file) => (
-												<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+												<div key={file.id} draggable onDragStart={(e) => { e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify({ src: file.previewUrl, name: file.name })); e.dataTransfer.effectAllowed = "copy"; }} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
 													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
 														<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
 													</div>
@@ -1956,9 +1966,32 @@ const addImage = () => {
 												</button>
 											</div>
 										</div>
+										{selectionBounds && isActive ? (
+											<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: Math.max(RULER_SIZE + 16, layout.left + 180), top: Math.max(RULER_SIZE + 8, layout.top - 86), display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 22 }}>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
+												<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
+													<span>Opacity</span>
+													<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
+												</div>
+												{selected && ["text", "shape", "svg"].includes(selected.type) ? (
+													<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+														{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
+															<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
+														))}
+													</div>
+												) : null}
+												{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
+											</div>
+										) : null}
 										<div
 											ref={isActive ? canvasShellRef : null}
 											onClick={() => { if (!isActive) { setActivePageIndex(pageIndex); setSelectedIds([]); } else { setSelectedIds([]); } }}
+											onDrop={onWorkspaceDrop}
+											onDragOver={onWorkspaceDragOver}
 											style={{
 												position: "absolute",
 												left: layout.left,
@@ -2000,26 +2033,6 @@ const addImage = () => {
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-														{selectionBounds && isActive ? (
-															<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: layout.left + 120, top: layout.top - 70, display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 20 }}>
-																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
-																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
-																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
-																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
-																<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
-																	<span>Opacity</span>
-																	<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
-																</div>
-																{selected && ["text", "shape", "svg"].includes(selected.type) ? (
-																	<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-																		{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
-																			<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
-																		))}
-																	</div>
-																) : null}
-																{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
-																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
-															</div>
 														) : null}
 														{selected && !selected.locked ? [
 															{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
