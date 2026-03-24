@@ -1,5 +1,5 @@
-import { bad, json, now, uuid } from "../../../_lib/http.js";
-import { ensureDriveSchema, getDb, loadFileBlob, saveFileBlob } from "../../../_lib/drive.js";
+import { bad, json, now, uuid } from "../../_lib/http.js";
+import { ensureDriveSchema, getDb, loadFileBlob, saveFileBlob } from "../../_lib/drive.js";
 
 function htmlEscape(value) {
   return String(value || "")
