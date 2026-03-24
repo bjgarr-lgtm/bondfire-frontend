@@ -585,7 +585,7 @@ export default function Drive() {
   async function openFile(file) {
     let nextFile = withFileUrls(orgId, file);
     if (!nextFile) return;
-    if (isEditableTextFile(nextFile) && !nextFile.textContent && !nextFile.dataUrl) {
+    if ((isEditableTextFile(nextFile) || isBondfireSheetFile(nextFile, nextFile?.textContent || "") || isBondfireFormFile(nextFile, nextFile?.textContent || "")) && !nextFile.textContent && !nextFile.dataUrl) {
       nextFile = await hydrateFile(nextFile.id);
       if (!nextFile) return;
       nextFile = withFileUrls(orgId, nextFile);
@@ -626,7 +626,13 @@ export default function Drive() {
         return;
       }
       if (selectedKind === "file" && fileIsEditable) {
-        const mime = selectedFile?.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
+        const mime = selectedFile?.mime || (fileIsBondfireSheet
+          ? "application/vnd.bondfire.sheet+json"
+          : fileIsBondfireForm
+            ? "application/vnd.bondfire.form+json"
+            : fileIsMarkdown
+              ? "text/markdown;charset=utf-8"
+              : "text/plain;charset=utf-8");
         const dataUrl = textToDataUrl(content, mime);
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
@@ -920,6 +926,7 @@ export default function Drive() {
   }
 
   const showEditableDocument = selectedKind === "note" || (selectedKind === "file" && fileIsEditable);
+  const showStructuredDoc = selectedKind === "file" && fileIsStructuredDoc;
   const showEditor = showEditableDocument && viewMode !== "read";
   const showPreview = showEditableDocument && viewMode !== "edit";
   const workspaceHeight = focusMode ? "100vh" : "calc(100vh - 86px)";

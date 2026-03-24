@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import SpreadsheetFileView from "./SpreadsheetFileView.jsx";
+import FormFileView from "./FormFileView.jsx";
 
 function escapeHtml(str) {
   return String(str || "")
@@ -133,6 +135,28 @@ function markdownToHtml(md) {
   return html;
 }
 
+function safeJsonParse(text, fallback = null) {
+  try { return JSON.parse(String(text || "")); } catch { return fallback; }
+}
+function getFileExtension(name) {
+  const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+function isBondfireSheetFile(file, rawContent = "") {
+  const mime = String(file?.mime || "");
+  if (mime === "application/vnd.bondfire.sheet+json") return true;
+  const ext = getFileExtension(file?.name);
+  if (ext === "bfsheet") return true;
+  return safeJsonParse(rawContent, null)?.type === "bondfire-sheet";
+}
+function isBondfireFormFile(file, rawContent = "") {
+  const mime = String(file?.mime || "");
+  if (mime === "application/vnd.bondfire.form+json") return true;
+  const ext = getFileExtension(file?.name);
+  if (ext === "bfform") return true;
+  return safeJsonParse(rawContent, null)?.type === "bondfire-form";
+}
+
 function pickToken() {
   try {
     return localStorage.getItem("bf_token") || localStorage.getItem("bf_auth_token") || localStorage.getItem("bf_access_token") || localStorage.getItem("bf_accessToken") || "";
@@ -179,10 +203,15 @@ function useProtectedPreviewSrc(file) {
 export default function DriveFilePreview({ file }) {
   const { src, error, loading } = useProtectedPreviewSrc(file);
   if (!file) return null;
+  const rawContent = file?.textContent || "";
+  const isSheet = isBondfireSheetFile(file, rawContent);
+  const isForm = isBondfireFormFile(file, rawContent);
 
   if (loading) return <div className="card" style={{ padding: 16 }}>Loading preview…</div>;
   if (error) return <div className="card" style={{ padding: 16, color: "#ff9a9a", whiteSpace: "pre-wrap" }}>{error}</div>;
 
+  if (isSheet) return <SpreadsheetFileView value={rawContent} mode="preview" />;
+  if (isForm) return <FormFileView value={rawContent} mode="preview" readOnlyPreview />;
   if (String(file.mime || "").startsWith("image/") && src) {
     return <div style={{ display: "flex", justifyContent: "center" }}><img src={src} alt={file.name} style={{ maxWidth: "100%", maxHeight: "78vh", borderRadius: 12, border: "1px solid #1f1f1f" }} /></div>;
   }
