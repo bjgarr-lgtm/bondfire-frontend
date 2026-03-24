@@ -587,8 +587,11 @@ export default function Studio() {
 		setZoom(nextZoom);
 		setPan({
 			x: Math.max(40, (rect.width - doc.width * nextZoom) / 2),
-			y: Math.max(40, 56),
+			y: 0,
 		});
+		if (workspaceRef.current) {
+			workspaceRef.current.scrollTop = 0;
+		}
 	}, [currentPage, currentDoc]);
 
 	React.useEffect(() => {
@@ -1452,7 +1455,7 @@ export default function Studio() {
 	}, [zoom]);
 	const pageGap = 32;
 	const pageLayouts = React.useMemo(() => {
-		let offsetTop = pan.y + RULER_SIZE;
+		let offsetTop = RULER_SIZE + 36;
 		return currentPages.map((page) => {
 			const layout = {
 				left: pan.x + RULER_SIZE,
@@ -1467,7 +1470,7 @@ export default function Studio() {
 	const pageStackHeight = React.useMemo(() => {
 		if (!pageLayouts.length) return 900;
 		const last = pageLayouts[pageLayouts.length - 1];
-		return Math.max(900, last.top + last.height + 120);
+		return Math.max(900, last.top + last.height + 170);
 	}, [pageLayouts]);
 	const activePageLayout = React.useMemo(() => {
 		if (!pageLayouts.length) return null;
@@ -1708,7 +1711,7 @@ export default function Studio() {
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
 					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
-						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight }}>
+						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight, paddingTop: 0 }}>
 							{showRulers ? (
 								<>
 									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
