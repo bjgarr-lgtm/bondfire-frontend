@@ -8,6 +8,9 @@ import DriveFilePreview from "../components/drive/DriveFilePreview.jsx";
 import Breadcrumbs from "../components/drive/Breadcrumbs.jsx";
 import NoteInspector from "../components/drive/NoteInspector.jsx";
 import RichTextToolbar from "../components/drive/RichTextToolbar.jsx";
+import DriveCreateModal from "../components/drive/DriveCreateModal.jsx";
+import SpreadsheetFileView from "../components/drive/SpreadsheetFileView.jsx";
+import FormFileView from "../components/drive/FormFileView.jsx";
 import { renderTemplate } from "../components/drive/templateEngine.js";
 
 const LEGACY_STORAGE_KEY = "bf_drive_v14";
@@ -66,167 +69,44 @@ function textToDataUrl(text, mime = "text/plain;charset=utf-8") {
   const safeMime = String(mime || "text/plain;charset=utf-8");
   return `data:${safeMime};base64,${btoa(unescape(encodeURIComponent(String(text || ""))))}`;
 }
-function normalizeTemplateName(name) {
-  return String(name || "").trim().toLowerCase();
+function safeJsonParse(text, fallback = null) {
+  try { return JSON.parse(String(text || "")); } catch { return fallback; }
 }
-function normalizeHeadingKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+function isBondfireSheetFile(file, rawContent = "") {
+  const mime = String(file?.mime || "");
+  if (mime === "application/vnd.bondfire.sheet+json") return true;
+  const ext = getFileExtension(file?.name);
+  if (ext === "bfsheet") return true;
+  const parsed = safeJsonParse(rawContent, null);
+  return parsed?.type === "bondfire-sheet";
 }
-function parseMarkdownSections(body) {
-  const sections = {};
-  let current = "";
-  const lines = String(body || "").split("\n");
-  for (const line of lines) {
-    const heading = line.match(/^##\s+(.+)$/);
-    if (heading) {
-      current = normalizeHeadingKey(heading[1]);
-      if (!sections[current]) sections[current] = [];
-      continue;
-    }
-    if (!current) continue;
-    sections[current].push(line);
-  }
-  return Object.fromEntries(Object.entries(sections).map(([key, value]) => [key, value.join("\n").trim()]));
+function isBondfireFormFile(file, rawContent = "") {
+  const mime = String(file?.mime || "");
+  if (mime === "application/vnd.bondfire.form+json") return true;
+  const ext = getFileExtension(file?.name);
+  if (ext === "bfform") return true;
+  const parsed = safeJsonParse(rawContent, null);
+  return parsed?.type === "bondfire-form";
 }
-function getPropertyValue(properties, key) {
-  const found = (properties || []).find((entry) => String(entry?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase());
-  return found ? String(found.value || "").trim() : "";
+function buildStarterSheet() {
+  return JSON.stringify({
+    type: "bondfire-sheet",
+    version: 1,
+    columns: ["A", "B", "C", "D"],
+    rows: [["", "", "", ""], ["", "", "", ""], ["", "", "", ""]],
+  }, null, 2);
 }
-function upsertProperty(properties, key, value) {
-  const next = Array.isArray(properties) ? [...properties] : [];
-  const idx = next.findIndex((entry) => String(entry?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase());
-  const item = { key: String(key || "").trim(), value: String(value || "").trim() };
-  if (idx === -1) next.push(item);
-  else next[idx] = item;
-  return next;
-}
-function stripListMarker(line) {
-  return String(line || "").replace(/^\s*[-*+]\s*(\[[xX ]\]\s*)?/, "").trim();
-}
-function getSectionChecklistValue(sectionText) {
-  const lines = String(sectionText || "").split("\n").map((line) => line.trim()).filter(Boolean);
-  for (const line of lines) {
-    const match = line.match(/^[-*+]\s*\[([ xX])\]\s*(.+)$/);
-    if (match && String(match[1]).toLowerCase() === "x") return String(match[2] || "").trim();
-  }
-  return "";
-}
-function getSectionPlainText(sectionText) {
-  const lines = String(sectionText || "").split("\n").map((line) => stripListMarker(line)).filter(Boolean);
-  return lines.join("\n").trim();
-}
-function getSectionList(sectionText) {
-  return String(sectionText || "").split("\n").map((line) => stripListMarker(line)).filter(Boolean);
-}
-function parseQuantityText(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return { qty: 0, unit: "" };
-  const match = raw.match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
-  if (!match) return { qty: 0, unit: raw };
-  return { qty: Number(match[1] || 0) || 0, unit: String(match[2] || "").trim() };
-}
-function buildNeedDescription(title, sections) {
-  const parts = [];
-  const requester = getSectionList(sections.requester || "");
-  if (requester.length) parts.push(`Requester:
-${requester.join("\n")}`);
-  const need = getSectionPlainText(sections.need || "");
-  if (need) parts.push(`Need:
-${need}`);
-  const category = getSectionChecklistValue(sections.category || "") || getSectionPlainText(sections.category || "");
-  if (category) parts.push(`Category: ${category}`);
-  const notes = getSectionPlainText(sections.notes || "");
-  if (notes) parts.push(`Notes:
-${notes}`);
-  if (!parts.length) parts.push(title);
-  return parts.join("\n\n").trim();
-}
-function buildMeetingPayload(noteTitle, sections) {
-  const agendaSource = sections.agenda || sections.topics || "";
-  const agenda = getSectionList(agendaSource).join("\n").trim();
-  const notesChunks = [];
-  [
-    ["attendees", sections.attendees],
-    ["discussion", sections.discussion],
-    ["decisions", sections.decisions],
-    ["action items", sections["action items"]],
-    ["next meeting", sections["next meeting"]],
-    ["time allocations", sections["time allocations"]],
-    ["facilitator", sections.facilitator],
-    ["notes", sections.notes],
-  ].forEach(([label, value]) => {
-    const text = getSectionPlainText(value || "");
-    if (text) notesChunks.push(`${label}:\n${text}`);
-  });
-  return {
-    title: noteTitle,
-    agenda,
-    notes: notesChunks.join("\n\n").trim(),
-  };
-}
-function buildInventoryPayload(noteTitle, sections) {
-  const itemName = getSectionPlainText(sections.item || "") || noteTitle;
-  const quantity = parseQuantityText(getSectionPlainText(sections.quantity || ""));
-  const notesBits = [];
-  const condition = getSectionPlainText(sections.condition || "");
-  if (condition) notesBits.push(`Condition: ${condition}`);
-  const availability = getSectionChecklistValue(sections.availability || "") || getSectionPlainText(sections.availability || "");
-  if (availability) notesBits.push(`Availability: ${availability}`);
-  const notes = getSectionPlainText(sections.notes || "");
-  if (notes) notesBits.push(notes);
-  return {
-    name: itemName,
-    qty: quantity.qty,
-    unit: quantity.unit,
-    location: getSectionPlainText(sections.location || ""),
-    notes: notesBits.join("\n\n").trim(),
-  };
-}
-function extractStructuredSyncPayload(noteTitle, rawContent) {
-  const parsed = parseFrontmatter(rawContent);
-  const properties = parsed.properties || [];
-  const sections = parseMarkdownSections(parsed.body || "");
-  const syncRecord = getPropertyValue(properties, "sync_record") || getPropertyValue(properties, "record_type");
-  const noteType = getPropertyValue(properties, "type");
-  const recordId = getPropertyValue(properties, "record_id");
-  const normalizedType = normalizeHeadingKey(syncRecord || noteType).replace(/ /g, "-");
-  if (["need", "need-intake"].includes(normalizedType)) {
-    return {
-      endpoint: "needs",
-      recordType: "need",
-      recordId,
-      payload: {
-        title: noteTitle,
-        description: buildNeedDescription(noteTitle, sections),
-        urgency: getSectionChecklistValue(sections.urgency || "") || getPropertyValue(properties, "urgency") || "",
-        status: getPropertyValue(properties, "status") || "open",
-      },
-      parsed,
-    };
-  }
-  if (["inventory", "resource-item"].includes(normalizedType)) {
-    return {
-      endpoint: "inventory",
-      recordType: "inventory",
-      recordId,
-      payload: buildInventoryPayload(noteTitle, sections),
-      parsed,
-    };
-  }
-  if (["meeting", "meeting-notes", "meeting-agenda"].includes(normalizedType)) {
-    return {
-      endpoint: "meetings",
-      recordType: "meeting",
-      recordId,
-      payload: buildMeetingPayload(noteTitle, sections),
-      parsed,
-    };
-  }
-  return null;
+function buildStarterForm() {
+  return JSON.stringify({
+    type: "bondfire-form",
+    version: 1,
+    title: "Untitled form",
+    description: "",
+    fields: [
+      { id: "field_1", type: "text", label: "Your name", required: false, options: [] },
+      { id: "field_2", type: "paragraph", label: "Details", required: false, options: [] },
+    ],
+  }, null, 2);
 }
 
 function buildDriveFileUrls(orgId, fileId) {
@@ -254,9 +134,21 @@ tags: daily
 
 # <% tp.file.title %>
 
+## schedule
+
+- [ ] 
+
 ## notes
 
 <% tp.date.now("HH:mm") %> — 
+
+## wins
+
+- [ ] 
+
+## tomorrow
+
+- [ ] 
 `,
   },
   {
@@ -266,273 +158,35 @@ tags: daily
     body: `<% tp.date.now("HH:mm") %> — `,
   },
   {
-    id: "tpl_meeting_notes",
-    name: "meeting notes",
-    title: 'meeting — <% tp.date.now("YYYY-MM-DD") %>',
+    id: "tpl_weekly_checkin",
+    name: "weekly check-in",
+    title: '<% tp.date.now("YYYY-[W]WW") %> weekly check-in',
     body: `---
-type: meeting-notes
-sync_record: meeting
+type: weekly-checkin
+date: <% tp.date.now("YYYY-MM-DD") %>
+tags: weekly, checkin
 ---
 
-# <% tp.file.title %>
+# weekly relationship accountability check-in
 
-## attendees
--
+## what i did well this week
 
-## agenda
-- [ ] topic
-
-## discussion
--
-
-## decisions
 - [ ] 
 
-## action items
-- [ ] task — owner
+## where i fell short
 
-## next meeting
--
-`,
-  },
-  {
-    id: "tpl_meeting_agenda",
-    name: "meeting agenda",
-    title: 'agenda — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: meeting-agenda
-sync_record: meeting
----
-
-# <% tp.file.title %>
-
-## topics
-- [ ] topic
-
-## time allocations
-- topic — time
-
-## facilitator
--
-
-## notes
--
-`,
-  },
-  {
-    id: "tpl_need_intake",
-    name: "need intake",
-    title: 'need intake — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: need-intake
-sync_record: need
-status: open
----
-
-# <% tp.file.title %>
-
-## requester
-- name:
-- contact:
-
-## need
--
-
-## urgency
-- [ ] low
-- [ ] medium
-- [ ] high
-- [ ] critical
-
-## category
-- [ ] food
-- [ ] housing
-- [ ] medical
-- [ ] transport
-- [ ] other:
-
-## notes
--
-`,
-  },
-  {
-    id: "tpl_resource_item",
-    name: "resource / inventory item",
-    title: 'resource — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: resource-item
-sync_record: inventory
-status: available
----
-
-# <% tp.file.title %>
-
-## item
--
-
-## quantity
--
-
-## location
--
-
-## condition
--
-
-## availability
-- [ ] available
-- [ ] reserved
-- [ ] in use
-- [ ] unavailable
-
-## notes
--
-`,
-  },
-  {
-    id: "tpl_distribution_log",
-    name: "distribution log",
-    title: 'distribution — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: distribution-log
----
-
-# <% tp.file.title %>
-
-## items distributed
-- item — quantity
-
-## recipients
--
-
-## handled by
--
-
-## location
--
-
-## notes
--
-`,
-  },
-  {
-    id: "tpl_volunteer_shift",
-    name: "volunteer shift log",
-    title: 'volunteer shift — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: volunteer-shift
----
-
-# <% tp.file.title %>
-
-## volunteers
--
-
-## roles
-- name — role
-
-## hours
--
-
-## tasks completed
 - [ ] 
 
-## issues
--
+## one concrete change for next week
 
-## notes
--
-`,
-  },
-  {
-    id: "tpl_incident_log",
-    name: "incident log",
-    title: 'incident — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: incident-log
----
-
-# <% tp.file.title %>
-
-## what happened
--
-
-## where
--
-
-## who was involved
--
-
-## impact
--
-
-## response taken
--
-
-## follow up
-- [ ] 
-`,
-  },
-  {
-    id: "tpl_project_initiative",
-    name: "project / initiative",
-    title: 'project — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: project-initiative
----
-
-# <% tp.file.title %>
-
-## goal
--
-
-## scope
--
-
-## team
--
-
-## current status
--
-
-## tasks
 - [ ] 
 
-## blockers
--
+## evidence i am becoming safer, not just apologetic
 
-## notes
--
-`,
-  },
-  {
-    id: "tpl_supply_run",
-    name: "supply run",
-    title: 'supply run — <% tp.date.now("YYYY-MM-DD") %>',
-    body: `---
-type: supply-run
----
-
-# <% tp.file.title %>
-
-## purchased items
-- item — quantity — cost
-
-## total cost
--
-
-## purchased by
--
-
-## destination
--
-
-## notes
--
+- [ ] 
 `,
   },
 ];
-const TEMPLATE_REMOVALS = new Set(["weekly check-in"]);
 
 export default function Drive() {
   const { orgId = "" } = useParams();
@@ -559,6 +213,7 @@ export default function Drive() {
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [loadState, setLoadState] = useState("loading");
   const [loadError, setLoadError] = useState("");
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(false);
@@ -567,8 +222,6 @@ export default function Drive() {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const objectUrlRegistry = useRef(new Set());
-  const templateSyncState = useRef({ running: false, done: false });
-  const structuredSyncState = useRef(new Map());
 
   useEffect(() => {
     try {
@@ -656,47 +309,6 @@ export default function Drive() {
   }, [orgId]);
 
   useEffect(() => {
-    templateSyncState.current = { running: false, done: false };
-  }, [orgId]);
-
-  useEffect(() => {
-    if (!orgId || loadState !== "ready" || templateSyncState.current.done || templateSyncState.current.running) return;
-    templateSyncState.current.running = true;
-    (async () => {
-      try {
-        const currentTemplates = Array.isArray(templates) ? templates : [];
-        const byName = new Map(currentTemplates.map((template) => [normalizeTemplateName(template.name), template]));
-        for (const template of currentTemplates) {
-          if (!TEMPLATE_REMOVALS.has(normalizeTemplateName(template.name))) continue;
-          await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(template.id)}`, { method: "DELETE" });
-        }
-        for (const template of STARTER_TEMPLATES) {
-          const existing = byName.get(normalizeTemplateName(template.name));
-          if (!existing) {
-            await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates`, {
-              method: "POST",
-              body: JSON.stringify({ name: template.name, title: template.title, body: template.body }),
-            });
-            continue;
-          }
-          if (String(existing.title || "") !== String(template.title || "") || String(existing.body || "") !== String(template.body || "")) {
-            await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(existing.id)}`, {
-              method: "PATCH",
-              body: JSON.stringify({ name: template.name, title: template.title, body: template.body }),
-            });
-          }
-        }
-        await loadDrive({ preserveSelection: true });
-      } catch (e) {
-        console.error("template sync failed", e);
-      } finally {
-        templateSyncState.current.running = false;
-        templateSyncState.current.done = true;
-      }
-    })();
-  }, [orgId, loadState, templates]);
-
-  useEffect(() => {
     const folderInput = folderInputRef.current;
     if (folderInput) {
       folderInput.setAttribute("webkitdirectory", "true");
@@ -754,6 +366,7 @@ export default function Drive() {
 
   const selectedNote = selectedKind === "note" ? notes.find((n) => n.id === selectedId) || null : null;
   const selectedFile = selectedKind === "file" ? files.find((f) => f.id === selectedId) || null : null;
+  const selectedFileSubtype = selectedKind === "file" && selectedFile ? (isBondfireSheetFile(selectedFile, content) ? "sheet" : isBondfireFormFile(selectedFile, content) ? "form" : null) : null;
   const fileIsEditable = isEditableTextFile(selectedFile);
   const fileIsMarkdown = isMarkdownFile(selectedFile);
 
@@ -821,6 +434,45 @@ export default function Drive() {
   }
   async function createNote() {
     await createNoteWithPayload({ title: "untitled", body: "", parentId: currentFolder, tags: [] });
+  }
+  async function createFileWithPayload(payload) {
+    const mime = String(payload?.mime || "text/plain;charset=utf-8");
+    const textContent = String(payload?.textContent || "");
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: payload?.name || "untitled.txt",
+        parentId: payload?.parentId ?? currentFolder,
+        mime,
+        size: new Blob([textContent], { type: mime }).size,
+        textContent,
+        dataUrl: textToDataUrl(textContent, mime),
+      }),
+    });
+    const file = res?.file ? withFileUrls(orgId, res.file) : null;
+    if (!file) return null;
+    setFiles((prev) => [file, ...prev.filter((existing) => existing.id !== file.id)]);
+    skipNextSave.current = true;
+    setSelectedId(file.id);
+    setSelectedKind("file");
+    setTitle(file.name || "untitled");
+    setContent(file.textContent || textContent);
+    setStatus("saved");
+    return file;
+  }
+  async function createSpreadsheet() {
+    await createFileWithPayload({
+      name: `${new Date().toISOString().slice(0, 10)} sheet.bfsheet`,
+      mime: "application/vnd.bondfire.sheet+json",
+      textContent: buildStarterSheet(),
+    });
+  }
+  async function createForm() {
+    await createFileWithPayload({
+      name: `${new Date().toISOString().slice(0, 10)} form.bfform`,
+      mime: "application/vnd.bondfire.form+json",
+      textContent: buildStarterForm(),
+    });
   }
   async function createNoteFromTemplate(template) {
     const renderedTitle = renderTemplate(template.title || template.name || "untitled", {});
@@ -956,31 +608,6 @@ export default function Drive() {
     a.click();
   }
 
-  async function syncStructuredRecord(noteId, noteTitle, noteContent) {
-    const sync = extractStructuredSyncPayload(noteTitle, noteContent);
-    if (!sync) return { nextContent: noteContent, synced: false };
-
-    const syncKey = JSON.stringify({ endpoint: sync.endpoint, recordId: sync.recordId || "", payload: sync.payload });
-    const lastKey = structuredSyncState.current.get(noteId);
-    if (lastKey === syncKey) return { nextContent: noteContent, synced: false };
-
-    const method = sync.recordId ? "PUT" : "POST";
-    const body = method === "PUT" ? { id: sync.recordId, ...sync.payload } : sync.payload;
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/${sync.endpoint}`, {
-      method,
-      body: JSON.stringify(body),
-    });
-
-    const nextRecordId = sync.recordId || String(res?.id || res?.item?.id || "").trim();
-    structuredSyncState.current.set(noteId, JSON.stringify({ endpoint: sync.endpoint, recordId: nextRecordId, payload: sync.payload }));
-
-    if (nextRecordId && nextRecordId !== sync.recordId) {
-      const nextProperties = upsertProperty(upsertProperty(sync.parsed.properties || [], "record_type", sync.recordType), "record_id", nextRecordId);
-      return { nextContent: serializeFrontmatter(nextProperties, sync.parsed.body || ""), synced: true };
-    }
-    return { nextContent: noteContent, synced: true };
-  }
-
   async function saveNow() {
     if (!selectedId) return;
     try {
@@ -988,26 +615,12 @@ export default function Drive() {
         const parsed = parseFrontmatter(content);
         const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
         const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
-        let nextBody = content;
-        let res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
+        const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
-          body: JSON.stringify({ title, body: nextBody, tags: combinedTags }),
+          body: JSON.stringify({ title, body: content, tags: combinedTags }),
         });
-        const syncResult = await syncStructuredRecord(selectedId, title, nextBody);
-        if (syncResult?.nextContent && syncResult.nextContent !== nextBody) {
-          nextBody = syncResult.nextContent;
-          const nextParsed = parseFrontmatter(nextBody);
-          const nextPropertyTags = nextParsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
-          const nextCombinedTags = [...new Set([...parseTags(nextParsed.body), ...String(nextPropertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
-          res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
-            method: "PATCH",
-            body: JSON.stringify({ title, body: nextBody, tags: nextCombinedTags }),
-          });
-          skipNextSave.current = true;
-          setContent(nextBody);
-        }
         if (res?.note) {
-          setNotes((prev) => prev.map((n) => (n.id === selectedId ? { ...res.note, body: nextBody } : n)));
+          setNotes((prev) => prev.map((n) => (n.id === selectedId ? res.note : n)));
         }
         setStatus("saved");
         return;
@@ -1310,6 +923,14 @@ export default function Drive() {
   const showEditor = showEditableDocument && viewMode !== "read";
   const showPreview = showEditableDocument && viewMode !== "edit";
   const workspaceHeight = focusMode ? "100vh" : "calc(100vh - 86px)";
+  const createModalActions = [
+    { id: "folder", label: "Folder", hint: "Create a new folder in the current location.", icon: "📁", onClick: createFolder },
+    { id: "upload-file", label: "Upload files", hint: "Import one or more existing files.", icon: "⤴", onClick: () => { if (fileInputRef.current) fileInputRef.current.value = ""; fileInputRef.current?.click(); } },
+    { id: "upload-folder", label: "Upload folder", hint: "Import a whole folder tree.", icon: "🗂", onClick: () => { const input = folderInputRef.current; if (input) { input.value = ""; input.setAttribute("webkitdirectory", "true"); input.setAttribute("directory", "true"); } input?.click(); } },
+    { id: "note", label: "Rich note", hint: "Markdown note with templates and backlinks.", icon: "📝", onClick: createNote },
+    { id: "sheet", label: "Sheet", hint: "Simple grid document stored directly in Drive.", icon: "📊", onClick: createSpreadsheet },
+    { id: "form", label: "Form", hint: "Build an intake form with a live preview.", icon: "☑", onClick: createForm },
+  ];
 
   return (
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
@@ -1332,6 +953,9 @@ export default function Drive() {
             onSelectFile={openFile}
             onNewNote={createNote}
             onNewFolder={createFolder}
+            onNewSpreadsheet={createSpreadsheet}
+            onNewForm={createForm}
+            onOpenCreatePicker={() => setCreateModalOpen(true)}
             onUploadFile={() => {
               if (fileInputRef.current) fileInputRef.current.value = "";
               fileInputRef.current?.click();
@@ -1414,11 +1038,25 @@ export default function Drive() {
               />
 
               <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
-                {showEditor ? <div style={{ minWidth: 0 }}><NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact /></div> : null}
+                {showEditor ? (
+                  <div style={{ minWidth: 0 }}>
+                    {selectedFileSubtype === "sheet" ? (
+                      <SpreadsheetFileView value={content} onChange={setContent} mode="edit" />
+                    ) : selectedFileSubtype === "form" ? (
+                      <FormFileView value={content} onChange={setContent} mode="edit" />
+                    ) : (
+                      <NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact />
+                    )}
+                  </div>
+                ) : null}
                 {viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
                 {showPreview ? (
                   <div style={{ minWidth: 0 }}>
-                    {selectedKind === "file" && !fileIsMarkdown ? (
+                    {selectedFileSubtype === "sheet" ? (
+                      <SpreadsheetFileView value={content} mode="preview" />
+                    ) : selectedFileSubtype === "form" ? (
+                      <FormFileView value={content} mode="preview" />
+                    ) : selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (
                       <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact />
@@ -1460,6 +1098,8 @@ export default function Drive() {
           )}
         </div>
       </div>
+
+      <DriveCreateModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} actions={createModalActions} />
 
       {inspectorOpen && selectedNote ? (
         <div style={{ position: "fixed", top: focusMode ? 8 : 94, right: 8, width: 250, maxHeight: focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)", overflow: "auto", zIndex: 90 }}>
