@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { decryptDriveFileMetadata, decryptDriveFilePayload, decryptDriveFolder, decryptDriveNote, decryptDriveTemplate, encryptDriveFileMetadata, encryptDriveFilePayload, encryptDriveFolder, encryptDriveNote, encryptDriveTemplate } from "../lib/driveZk.js";
 import DriveSidebar from "../components/drive/DriveSidebar.jsx";
 import NoteEditor from "../components/drive/NoteEditor.jsx";
 import NotePreview from "../components/drive/NotePreview.jsx";
@@ -8,9 +9,6 @@ import DriveFilePreview from "../components/drive/DriveFilePreview.jsx";
 import Breadcrumbs from "../components/drive/Breadcrumbs.jsx";
 import NoteInspector from "../components/drive/NoteInspector.jsx";
 import RichTextToolbar from "../components/drive/RichTextToolbar.jsx";
-import DriveCreateModal from "../components/drive/DriveCreateModal.jsx";
-import SpreadsheetFileView from "../components/drive/SpreadsheetFileView.jsx";
-import FormFileView from "../components/drive/FormFileView.jsx";
 import { renderTemplate } from "../components/drive/templateEngine.js";
 
 const LEGACY_STORAGE_KEY = "bf_drive_v14";
@@ -54,10 +52,7 @@ function isMarkdownFile(file) {
 }
 function isEditableTextFile(file) {
   const ext = getFileExtension(file?.name);
-  const mime = String(file?.mime || "");
-  if (mime === "application/vnd.bondfire.sheet+json") return true;
-  if (mime === "application/vnd.bondfire.form+json") return true;
-  return mime.startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv", "bfsheet", "bfform"].includes(ext);
+  return String(file?.mime || "").startsWith("text/") || ["md", "markdown", "txt", "json", "js", "jsx", "ts", "tsx", "css", "html", "yml", "yaml", "xml", "csv"].includes(ext);
 }
 function canPreviewFileInApp(file) {
   const mime = String(file?.mime || "");
@@ -65,55 +60,12 @@ function canPreviewFileInApp(file) {
   if (mime === "application/pdf") return true;
   if (mime.startsWith("audio/")) return true;
   if (mime.startsWith("video/")) return true;
-  if (mime === "application/vnd.bondfire.sheet+json") return true;
-  if (mime === "application/vnd.bondfire.form+json") return true;
   if (isEditableTextFile(file)) return true;
   return false;
 }
 function textToDataUrl(text, mime = "text/plain;charset=utf-8") {
   const safeMime = String(mime || "text/plain;charset=utf-8");
   return `data:${safeMime};base64,${btoa(unescape(encodeURIComponent(String(text || ""))))}`;
-}
-function safeJsonParse(text, fallback = null) {
-  try { return JSON.parse(String(text || "")); } catch { return fallback; }
-}
-function isBondfireSheetFile(file, rawContent = "") {
-  const mime = String(file?.mime || "");
-  if (mime === "application/vnd.bondfire.sheet+json") return true;
-  const ext = getFileExtension(file?.name);
-  if (ext === "bfsheet") return true;
-  const parsed = safeJsonParse(rawContent, null);
-  return parsed?.type === "bondfire-sheet";
-}
-function isBondfireFormFile(file, rawContent = "") {
-  const mime = String(file?.mime || "");
-  if (mime === "application/vnd.bondfire.form+json") return true;
-  const ext = getFileExtension(file?.name);
-  if (ext === "bfform") return true;
-  const parsed = safeJsonParse(rawContent, null);
-  return parsed?.type === "bondfire-form";
-}
-function buildStarterSheet() {
-  return JSON.stringify({
-    type: "bondfire-sheet",
-    version: 1,
-    columns: ["A", "B", "C", "D"],
-    rows: [["", "", "", ""], ["", "", "", ""], ["", "", "", ""]],
-  }, null, 2);
-}
-function buildStarterForm() {
-  return JSON.stringify({
-    type: "bondfire-form",
-    version: 2,
-    title: "Untitled form",
-    description: "",
-    fields: [
-      { id: "field_1", type: "text", label: "Your name", required: false, options: [] },
-      { id: "field_2", type: "paragraph", label: "Details", required: false, options: [] },
-    ],
-    responses: [],
-    publicShare: { enabled: false, token: "" },
-  }, null, 2);
 }
 
 function buildDriveFileUrls(orgId, fileId) {
@@ -220,7 +172,6 @@ export default function Drive() {
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [loadState, setLoadState] = useState("loading");
   const [loadError, setLoadError] = useState("");
-  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(false);
@@ -274,10 +225,14 @@ export default function Drive() {
           }
         } catch {}
       }
-      const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
-      const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
-      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
-      const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
+      const rawFolders = Array.isArray(data?.folders) ? data.folders : [];
+      const rawNotes = Array.isArray(data?.notes) ? data.notes : [];
+      const rawFiles = Array.isArray(data?.files) ? data.files : [];
+      const rawTemplates = Array.isArray(data?.templates) ? data.templates : [];
+      const nextFolders = await Promise.all(rawFolders.map((row) => decryptDriveFolder(orgId, row).catch(() => row)));
+      const nextNotes = await Promise.all(rawNotes.map((row) => decryptDriveNote(orgId, row).catch(() => row)));
+      const nextFiles = (await Promise.all(rawFiles.map((row) => decryptDriveFileMetadata(orgId, row).catch(() => row)))).map((file) => withFileUrls(orgId, file));
+      const nextTemplates = rawTemplates.length ? await Promise.all(rawTemplates.map((row) => decryptDriveTemplate(orgId, row).catch(() => row))) : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
       setFiles(nextFiles);
@@ -373,10 +328,8 @@ export default function Drive() {
 
   const selectedNote = selectedKind === "note" ? notes.find((n) => n.id === selectedId) || null : null;
   const selectedFile = selectedKind === "file" ? files.find((f) => f.id === selectedId) || null : null;
-  const selectedFileSubtype = selectedKind === "file" && selectedFile ? (isBondfireSheetFile(selectedFile, content) ? "sheet" : isBondfireFormFile(selectedFile, content) ? "form" : null) : null;
   const fileIsEditable = isEditableTextFile(selectedFile);
   const fileIsMarkdown = isMarkdownFile(selectedFile);
-  const isStructuredDriveDoc = selectedFileSubtype === "sheet" || selectedFileSubtype === "form";
 
   const noteMap = useMemo(() => {
     const map = new Map();
@@ -395,25 +348,29 @@ export default function Drive() {
   async function createFolder() {
     const name = prompt("Folder name?");
     if (!name) return;
+    const encryptedBlob = await encryptDriveFolder(orgId, { name: String(name).trim() });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
       method: "POST",
-      body: JSON.stringify({ name: String(name).trim(), parentId: currentFolder }),
+      body: JSON.stringify({ name: "encrypted folder", encryptedBlob, parentId: currentFolder }),
     });
     const folder = res?.folder;
     if (!folder) return;
-    setFolders((prev) => [...prev, folder]);
-    setCurrentFolder(folder.id);
+    const decFolder = await decryptDriveFolder(orgId, folder).catch(() => folder);
+    setFolders((prev) => [...prev, decFolder]);
+    setCurrentFolder(decFolder.id);
   }
   async function renameFolder(id) {
     const folder = folders.find((f) => f.id === id);
     const name = prompt("Rename folder", folder?.name || "");
     if (!name) return;
+    const encryptedBlob = await encryptDriveFolder(orgId, { name: String(name).trim() });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: String(name).trim() }),
+      body: JSON.stringify({ name: "encrypted folder", encryptedBlob }),
     });
     if (!res?.folder) return;
-    setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
+    const decFolder = await decryptDriveFolder(orgId, res.folder).catch(() => res.folder);
+    setFolders((prev) => prev.map((f) => (f.id === id ? decFolder : f)));
   }
   async function deleteFolder(id) {
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -425,62 +382,25 @@ export default function Drive() {
   }
 
   async function createNoteWithPayload(payload) {
+    const encryptedBlob = await encryptDriveNote(orgId, payload);
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, title: "encrypted note", body: "", tags: [], encryptedBlob }),
     });
     const note = res?.note;
     if (!note) return null;
+    const decNote = await decryptDriveNote(orgId, note).catch(() => note);
     skipNextSave.current = true;
-    setNotes((prev) => [note, ...prev]);
-    setSelectedId(note.id);
+    setNotes((prev) => [decNote, ...prev]);
+    setSelectedId(decNote.id);
     setSelectedKind("note");
-    setTitle(note.title || "untitled");
-    setContent(note.body || "");
+    setTitle(decNote.title || "untitled");
+    setContent(decNote.body || "");
     setStatus("saved");
-    return note;
+    return decNote;
   }
   async function createNote() {
     await createNoteWithPayload({ title: "untitled", body: "", parentId: currentFolder, tags: [] });
-  }
-  async function createFileWithPayload(payload) {
-    const mime = String(payload?.mime || "text/plain;charset=utf-8");
-    const textContent = String(payload?.textContent || "");
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: payload?.name || "untitled.txt",
-        parentId: payload?.parentId ?? currentFolder,
-        mime,
-        size: new Blob([textContent], { type: mime }).size,
-        textContent,
-        dataUrl: textToDataUrl(textContent, mime),
-      }),
-    });
-    const file = res?.file ? withFileUrls(orgId, res.file) : null;
-    if (!file) return null;
-    setFiles((prev) => [file, ...prev.filter((existing) => existing.id !== file.id)]);
-    skipNextSave.current = true;
-    setSelectedId(file.id);
-    setSelectedKind("file");
-    setTitle(file.name || "untitled");
-    setContent(file.textContent || textContent);
-    setStatus("saved");
-    return file;
-  }
-  async function createSpreadsheet() {
-    await createFileWithPayload({
-      name: `${new Date().toISOString().slice(0, 10)} sheet.bfsheet`,
-      mime: "application/vnd.bondfire.sheet+json",
-      textContent: buildStarterSheet(),
-    });
-  }
-  async function createForm() {
-    await createFileWithPayload({
-      name: `${new Date().toISOString().slice(0, 10)} form.bfform`,
-      mime: "application/vnd.bondfire.form+json",
-      textContent: buildStarterForm(),
-    });
   }
   async function createNoteFromTemplate(template) {
     const renderedTitle = renderTemplate(template.title || template.name || "untitled", {});
@@ -501,9 +421,10 @@ export default function Drive() {
     const note = notes.find((n) => n.id === id);
     const name = prompt("Rename note", note?.title || "");
     if (!name) return;
+    const encryptedBlob = await encryptDriveNote(orgId, { title: String(name).trim(), body: note?.body || "", tags: note?.tags || [] });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ title: String(name).trim() }),
+      body: JSON.stringify({ title: "encrypted note", body: "", tags: [], encryptedBlob }),
     });
     if (!res?.note) return;
     setNotes((prev) => prev.map((n) => (n.id === id ? res.note : n)));
@@ -538,9 +459,10 @@ export default function Drive() {
     const file = files.find((f) => f.id === id);
     const name = prompt("Rename file", file?.name || "");
     if (!name) return;
+    const encryptedBlob = await encryptDriveFileMetadata(orgId, { name: String(name).trim(), mime: file?.mime || "application/octet-stream", size: file?.size || 0 });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: String(name).trim() }),
+      body: JSON.stringify({ name: "encrypted file", encryptedBlob }),
     });
     if (!res?.file) return;
     setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...res.file }) : f)));
@@ -572,46 +494,18 @@ export default function Drive() {
   }
 
   async function hydrateFile(fileId) {
-    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(fileId)}`);
-    const hydrated = res?.file || null;
+    const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(fileId)}?includeData=1`);
+    let hydrated = res?.file || null;
     if (!hydrated) return null;
+    hydrated = await decryptDriveFileMetadata(orgId, hydrated).catch(() => hydrated);
+    hydrated = await decryptDriveFilePayload(orgId, hydrated).catch(() => hydrated);
     setFiles((prev) => prev.map((f) => (f.id === fileId ? withFileUrls(orgId, { ...f, ...hydrated }) : f)));
     return hydrated;
   }
 
-  function openFileInBrowser(file) {
-    const name = String(file?.name || "");
-    const mime = String(file?.mime || "");
-    const textContent = String(file?.textContent || "");
-    if ((/\.bfform$/i.test(name) || mime === "application/vnd.bondfire.form+json") && textContent) {
-      try {
-        const parsed = JSON.parse(textContent);
-        const token = String(parsed?.publicShare?.token || "");
-        if (parsed?.publicShare?.enabled && token) {
-          window.open(`${window.location.origin}/api/public/forms/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token)}`, "_blank", "noopener,noreferrer");
-          return;
-        }
-        const blob = new Blob([`<!doctype html><html><head><meta charset="utf-8" /><title>${name}</title><style>body{font-family:Inter,system-ui,sans-serif;background:#090909;color:#fff;padding:24px}pre{white-space:pre-wrap;background:#111214;border:1px solid #232427;border-radius:12px;padding:16px}</style></head><body><h1>${name}</h1><pre>${textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></body></html>`], { type: "text/html" });
-        window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
-        return;
-      } catch {}
-    }
-    if ((/\.bfsheet$/i.test(name) || mime === "application/vnd.bondfire.sheet+json") && textContent) {
-      try {
-        const parsed = JSON.parse(textContent);
-        const sheet = Array.isArray(parsed?.sheets) && parsed.sheets.length ? parsed.sheets[0] : null;
-        const rows = Math.max(25, Number(sheet?.rowCount || 25));
-        const cols = Math.max(10, Number(sheet?.columnCount || 10));
-        const labels = Array.from({ length: cols }, (_, idx) => {
-          let n = idx + 1; let out = ""; while (n > 0) { const rem = (n - 1) % 26; out = String.fromCharCode(65 + rem) + out; n = Math.floor((n - 1) / 26); } return out;
-        });
-        const cells = sheet?.cells || {};
-        const esc = (value) => String(value || "").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const table = `<table><thead><tr><th>#</th>${labels.map((label)=>`<th>${label}</th>`).join("")}</tr></thead><tbody>${Array.from({ length: rows }, (_, r)=>`<tr><th>${r+1}</th>${labels.map((label)=>`<td>${esc(cells[`${label}${r+1}`]?.input || "")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-        const blob = new Blob([`<!doctype html><html><head><meta charset="utf-8" /><title>${name}</title><style>body{font-family:Inter,system-ui,sans-serif;background:#090909;color:#fff;padding:24px}table{border-collapse:collapse;background:#111214}th,td{border:1px solid #26282c;padding:8px 10px;min-width:120px}th{background:#15171b;position:sticky;top:0}</style></head><body><h1>${name}</h1>${table}</body></html>`], { type: "text/html" });
-        window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
-        return;
-      } catch {}
+  async function openFileInBrowser(file) {
+    if (!file?.dataUrl && file?.encrypted) {
+      file = await hydrateFile(file.id);
     }
     if (file?.dataUrl) {
       const a = document.createElement("a");
@@ -621,6 +515,7 @@ export default function Drive() {
       a.click();
       return;
     }
+    if (file?.encrypted) return;
     window.open(file?.previewUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download`, "_blank", "noopener,noreferrer");
   }
   async function openFile(file) {
@@ -642,7 +537,16 @@ export default function Drive() {
     }
     openFileInBrowser(nextFile);
   }
-  function downloadFile(file) {
+  async function downloadFile(file) {
+    let nextFile = file;
+    if (file?.encrypted && !file?.dataUrl) nextFile = await hydrateFile(file.id);
+    if (nextFile?.dataUrl) {
+      const a = document.createElement("a");
+      a.href = nextFile.dataUrl;
+      a.download = nextFile.name || "download";
+      a.click();
+      return;
+    }
     const a = document.createElement("a");
     a.href = file?.downloadUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
     a.download = file.name || "download";
@@ -656,9 +560,10 @@ export default function Drive() {
         const parsed = parseFrontmatter(content);
         const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
         const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
+        const encryptedBlob = await encryptDriveNote(orgId, { title, body: content, tags: combinedTags });
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
-          body: JSON.stringify({ title, body: content, tags: combinedTags }),
+          body: JSON.stringify({ title: "encrypted note", body: "", tags: [], encryptedBlob }),
         });
         if (res?.note) {
           setNotes((prev) => prev.map((n) => (n.id === selectedId ? res.note : n)));
@@ -669,14 +574,16 @@ export default function Drive() {
       if (selectedKind === "file" && fileIsEditable) {
         const mime = selectedFile?.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
         const dataUrl = textToDataUrl(content, mime);
+        const size = new Blob([content], { type: mime }).size;
+        const { encryptedBlob, encryptedPayload } = await encryptDriveFilePayload(orgId, { name: title, mime, size, dataUrl, textContent: content });
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
           body: JSON.stringify({
-            name: title,
-            mime,
-            size: new Blob([content], { type: mime }).size,
-            dataUrl,
-            textContent: content,
+            name: "encrypted file",
+            mime: "application/octet-stream",
+            size,
+            encryptedBlob,
+            encryptedPayload,
           }),
         });
         if (res?.file) {
@@ -736,32 +643,27 @@ export default function Drive() {
     setFiles((prev) => [optimisticFile, ...prev.filter((existing) => existing.id !== tempId)]);
 
     try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("FILE_READ_FAILED"));
+        reader.readAsDataURL(rawFile);
+      });
+      const { encryptedBlob, encryptedPayload } = await encryptDriveFilePayload(orgId, { name: record.name || rawFile.name || "file", mime: record.mime || rawFile.type || "application/octet-stream", size: Number(record.size || rawFile.size || 0), dataUrl, textContent: record.textContent || "" });
+      const payloadBytes = new TextEncoder().encode(encryptedPayload);
+      const encryptedFile = new Blob([payloadBytes], { type: "application/octet-stream" });
       const headers = {
-        "x-drive-name": record.name || rawFile.name || "file",
-        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+        "x-drive-name": "encrypted file",
+        "x-drive-mime": "application/octet-stream",
+        "x-drive-encrypted": "1",
+        "x-drive-encrypted-blob": encryptedBlob,
       };
       if (parentId) headers["x-drive-parent-id"] = String(parentId);
-      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-
-      let res;
-      try {
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          headers,
-          body: rawFile,
-        });
-      } catch {
-        const form = new FormData();
-        form.append("file", rawFile, rawFile.name || record.name || "file");
-        form.append("name", record.name || rawFile.name || "file");
-        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-        if (parentId) form.append("parentId", String(parentId));
-        if (relativePath) form.append("relativePath", String(relativePath));
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-          method: "POST",
-          body: form,
-        });
-      }
+      let res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+        method: "POST",
+        headers,
+        body: encryptedFile,
+      });
 
       const createdFile = res?.file || (res?.id ? { id: res.id } : null);
       if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
@@ -910,12 +812,14 @@ export default function Drive() {
     if (!content) return;
     const name = prompt("Template name?", title || "Untitled template");
     if (!name) return;
+    const encryptedBlob = await encryptDriveTemplate(orgId, { name: String(name).trim(), title: title || "untitled", body: content || "" });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates`, {
       method: "POST",
-      body: JSON.stringify({ name: String(name).trim(), title: title || "untitled", body: content || "" }),
+      body: JSON.stringify({ name: "encrypted template", title: "encrypted template", body: "", encryptedBlob }),
     });
     if (res?.template) {
-      setTemplates((prev) => [res.template, ...prev.filter((x) => x.id !== res.template.id)]);
+      const decTemplate = await decryptDriveTemplate(orgId, res.template).catch(() => res.template);
+      setTemplates((prev) => [decTemplate, ...prev.filter((x) => x.id !== decTemplate.id)]);
     }
   }
   async function editTemplate(id) {
@@ -927,11 +831,15 @@ export default function Drive() {
     if (nextTitle === null) return;
     const nextBody = prompt("Template body", tpl.body || "");
     if (nextBody === null) return;
+    const encryptedBlob = await encryptDriveTemplate(orgId, { name: String(nextName).trim(), title: String(nextTitle), body: String(nextBody) });
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/templates/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: String(nextName).trim(), title: String(nextTitle), body: String(nextBody) }),
+      body: JSON.stringify({ name: "encrypted template", title: "encrypted template", body: "", encryptedBlob }),
     });
-    if (res?.template) setTemplates((prev) => prev.map((x) => (x.id === id ? res.template : x)));
+    if (res?.template) {
+      const decTemplate = await decryptDriveTemplate(orgId, res.template).catch(() => res.template);
+      setTemplates((prev) => prev.map((x) => (x.id === id ? decTemplate : x)));
+    }
   }
   async function applyTemplate(template) {
     if (!template) return;
@@ -964,14 +872,6 @@ export default function Drive() {
   const showEditor = showEditableDocument && viewMode !== "read";
   const showPreview = showEditableDocument && viewMode !== "edit";
   const workspaceHeight = focusMode ? "100vh" : "calc(100vh - 86px)";
-  const createModalActions = [
-    { id: "folder", label: "Folder", hint: "Create a new folder in the current location.", icon: "📁", onClick: createFolder },
-    { id: "upload-file", label: "Upload files", hint: "Import one or more existing files.", icon: "⤴", onClick: () => { if (fileInputRef.current) fileInputRef.current.value = ""; fileInputRef.current?.click(); } },
-    { id: "upload-folder", label: "Upload folder", hint: "Import a whole folder tree.", icon: "🗂", onClick: () => { const input = folderInputRef.current; if (input) { input.value = ""; input.setAttribute("webkitdirectory", "true"); input.setAttribute("directory", "true"); } input?.click(); } },
-    { id: "note", label: "Rich note", hint: "Markdown note with templates and backlinks.", icon: "📝", onClick: createNote },
-    { id: "sheet", label: "Sheet", hint: "Simple grid document stored directly in Drive.", icon: "📊", onClick: createSpreadsheet },
-    { id: "form", label: "Form", hint: "Build an intake form with a live preview.", icon: "☑", onClick: createForm },
-  ];
 
   return (
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
@@ -994,9 +894,6 @@ export default function Drive() {
             onSelectFile={openFile}
             onNewNote={createNote}
             onNewFolder={createFolder}
-            onNewSpreadsheet={createSpreadsheet}
-            onNewForm={createForm}
-            onOpenCreatePicker={() => setCreateModalOpen(true)}
             onUploadFile={() => {
               if (fileInputRef.current) fileInputRef.current.value = "";
               fileInputRef.current?.click();
@@ -1052,7 +949,7 @@ export default function Drive() {
                 {selectedFile && !fileIsEditable ? <span className="helper">read only</span> : null}
               </div>
 
-              {!isStructuredDriveDoc ? <RichTextToolbar
+              <RichTextToolbar
                 onBold={showEditor ? () => wrapSelection("**") : undefined}
                 onItalic={showEditor ? () => wrapSelection("*") : undefined}
                 onH1={showEditor ? () => prefixLines("# ") : undefined}
@@ -1076,28 +973,14 @@ export default function Drive() {
                   selectedFile ? { label: "Download", onClick: () => { downloadFile(selectedFile); setMenuOpen(false); } } : null,
                   { label: focusMode ? "Exit focus" : "Focus", onClick: () => { setFocusMode((v) => !v); setMenuOpen(false); } },
                 ].filter(Boolean)}
-              /> : null}
+              />
 
               <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
-                {showEditor ? (
-                  <div style={{ minWidth: 0 }}>
-                    {selectedFileSubtype === "sheet" ? (
-                      <SpreadsheetFileView value={content} onChange={setContent} mode="edit" />
-                    ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="edit" fileId={selectedFile?.id || ""} orgId={orgId} />
-                    ) : (
-                      <NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact />
-                    )}
-                  </div>
-                ) : null}
+                {showEditor ? <div style={{ minWidth: 0 }}><NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact /></div> : null}
                 {viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
                 {showPreview ? (
                   <div style={{ minWidth: 0 }}>
-                    {selectedFileSubtype === "sheet" ? (
-                      <SpreadsheetFileView value={content} mode="preview" />
-                    ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="preview" fileId={selectedFile?.id || ""} orgId={orgId} />
-                    ) : selectedKind === "file" && !fileIsMarkdown ? (
+                    {selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (
                       <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact />
@@ -1139,8 +1022,6 @@ export default function Drive() {
           )}
         </div>
       </div>
-
-      <DriveCreateModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} actions={createModalActions} />
 
       {inspectorOpen && selectedNote ? (
         <div style={{ position: "fixed", top: focusMode ? 8 : 94, right: 8, width: 250, maxHeight: focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)", overflow: "auto", zIndex: 90 }}>
