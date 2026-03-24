@@ -647,13 +647,13 @@ export default function Studio() {
 		if (currentDoc) {
 			setTimeout(() => fitCanvas(currentPage || currentDoc), 0);
 		}
-	}, [currentId, activePageIndex, currentPage, currentDoc, fitCanvas]);
+	}, [currentId, activePageIndex]);
 
 	React.useEffect(() => {
 		const onResize = () => fitCanvas(currentPage || currentDoc);
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
-	}, [fitCanvas, currentDoc]);
+	}, [fitCanvas, currentId, activePageIndex]);
 
 	const createDoc = React.useCallback((preset = "flyer") => {
 		snapshot();
@@ -1395,23 +1395,29 @@ const addImage = () => {
 	const onWorkspaceDrop = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
+		const point = getCanvasPoint(e.clientX, e.clientY);
+		const pixabayPayload = e.dataTransfer?.getData("application/x-bondfire-image");
+		if (pixabayPayload) {
+			try {
+				const data = JSON.parse(pixabayPayload);
+				if (data?.src) {
+					placeImageAtPoint(String(data.src), String(data.name || "Pixabay Image"), point);
+					return;
+				}
+			} catch {}
+		}
 		const file = e.dataTransfer?.files?.[0];
 		if (!file || !String(file.type || "").startsWith("image/")) return;
 		const reader = new FileReader();
 		reader.onload = () => {
-			const point = getCanvasPoint(e.clientX, e.clientY);
-			const docId = ensureDoc(currentDoc?.preset || "flyer");
-			snapshot();
-			const element = makeImageElement({ src: String(reader.result || ""), name: file.name || "Image", x: Math.max(0, point.x - 160), y: Math.max(0, point.y - 120) });
-			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
-			setCurrentId(docId);
-			setSelectedIds([element.id]);
+			placeImageAtPoint(String(reader.result || ""), file.name || "Image", point);
 		};
 		reader.readAsDataURL(file);
 	};
 
 	const onWorkspaceDragOver = (e) => {
 		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 	};
 
 	React.useEffect(() => {
@@ -1748,12 +1754,23 @@ const addImage = () => {
 										{pixabayError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{pixabayError}</div> : null}
 										<div style={{ display: "grid", gap: 8 }}>
 											{pixabayResults.map((file) => (
-												<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+												<div
+													key={file.id}
+													draggable
+													onDragStart={(e) => {
+														e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify({ src: file.fullUrl || file.previewUrl, name: file.name }));
+														e.dataTransfer.effectAllowed = "copy";
+													}}
+													style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}
+												>
 													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-														<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+														<img src={file.previewUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
 													</div>
 													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
-													<button onClick={() => addImageFromSrc(file.fullUrl || file.previewUrl, file.name)}>Place on Canvas</button>
+													<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+														<button onClick={() => addImageFromSrc(file.fullUrl || file.previewUrl, file.name)}>Place on Canvas</button>
+														<div style={{ fontSize: 10, opacity: 0.72 }}>drag onto canvas</div>
+													</div>
 												</div>
 											))}
 											{!pixabayLoading && !pixabayResults.length ? <div style={{ opacity: 0.7 }}>Search Pixabay to place photos without uploading every image.</div> : null}
@@ -1918,22 +1935,22 @@ const addImage = () => {
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 														{selectionBounds ? (
 															<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: selectionBounds.left + (selectionBounds.width / 2), top: selectionBounds.top - 44, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 20 }}>
-																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={duplicateSelected}>Duplicate</button>
-																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={removeSelected}>Delete</button>
-																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => updateElements(selectedIds, (item) => ({ flipX: !item.flipX }))}>Flip H</button>
-																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => updateElements(selectedIds, (item) => ({ flipY: !item.flipY }))}>Flip V</button>
+																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
+																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
+																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
+																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
 																<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
 																	<span>Opacity</span>
-																	<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
+																	<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
 																</div>
 																{selected && ["text", "shape", "svg"].includes(selected.type) ? (
 																	<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
 																		{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
-																			<button key={swatch} onClick={() => updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch })} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
+																			<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
 																		))}
 																	</div>
 																) : null}
-																<button style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={() => setInspectorOpen(true)}>Inspector</button>
+																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
 															</div>
 														) : null}
 														{selected && !selected.locked ? [

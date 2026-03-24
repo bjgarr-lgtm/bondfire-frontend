@@ -1,26 +1,17 @@
 export async function searchPixabayImages(query) {
-  const key = import.meta.env.VITE_PIXABAY_API_KEY;
-  if (!key) {
-    throw new Error("Missing VITE_PIXABAY_API_KEY");
-  }
-  const url = new URL("https://pixabay.com/api/");
-  url.searchParams.set("key", key);
+  const url = new URL("/api/pixabay/search", window.location.origin);
   url.searchParams.set("q", query || "community");
-  url.searchParams.set("image_type", "photo");
-  url.searchParams.set("safesearch", "true");
-  url.searchParams.set("per_page", "24");
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    credentials: "same-origin",
+  });
   if (!res.ok) {
-    throw new Error(`Pixabay request failed (${res.status})`);
+    let message = `Pixabay request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = String(data.error);
+    } catch {}
+    throw new Error(message);
   }
   const data = await res.json();
-  return Array.isArray(data?.hits) ? data.hits.map((item) => ({
-    id: String(item.id),
-    name: item.tags || `Pixabay ${item.id}`,
-    previewUrl: item.webformatURL || item.previewURL,
-    fullUrl: item.largeImageURL || item.webformatURL || item.previewURL,
-    width: item.imageWidth || 1600,
-    height: item.imageHeight || 900,
-    tags: item.tags || "",
-  })) : [];
+  return Array.isArray(data?.results) ? data.results : [];
 }
