@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
 import { STUDIO_ASSETS } from "../data/studioAssets.js";
 import { searchPixabayImages } from "../utils/pixabay.js";
+import { buildQrCodeUrl } from "../utils/qr.js";
 import { useStudioFonts } from "../hooks/useStudioFonts.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
@@ -777,6 +778,28 @@ export default function Studio() {
 			setPixabayLoading(false);
 		}
 	}, [assetSearch]);
+	const addQrCode = () => {
+		const value = window.prompt("Enter the URL or text for this QR code:");
+		if (!value) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeImageElement({
+			name: "QR Code",
+			src: buildQrCodeUrl(value),
+			qrValue: value,
+			qrFg: "#000000",
+			qrBg: "#ffffff",
+			width: 220,
+			height: 220,
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	};
+
 const addImage = () => {
 		fileInputRef.current?.click();
 	};
@@ -1727,6 +1750,7 @@ const addImage = () => {
 								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
 								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
 								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
+								<button style={panelButtonStyle(false)} onClick={addQrCode}>Add QR Code</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
 								<hr style={{ opacity: 0.15, margin: "8px 0" }} />
@@ -1978,6 +2002,7 @@ const addImage = () => {
 																		))}
 																	</div>
 																) : null}
+																{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
 																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
 															</div>
 														) : null}
@@ -2120,7 +2145,21 @@ const addImage = () => {
 										<label>Radius<input type="number" value={selected.radius || 0} onChange={(e) => updateElement(selected.id, { radius: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
 									</div>
 								</>) : null}
-								{selected.type === "image" ? <label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label> : null}
+								{selected.type === "image" ? (
+									<>
+										<label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label>
+										{selected.qrValue ? (
+											<>
+												<label>QR value<textarea value={selected.qrValue || ""} onChange={(e) => updateElement(selected.id, { qrValue: e.target.value, src: buildQrCodeUrl(e.target.value, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) })} rows={4} style={{ width: "100%" }} /></label>
+												<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+													<label>QR foreground<input type="color" value={selected.qrFg || "#000000"} onChange={(e) => updateElement(selected.id, { qrFg: e.target.value, src: buildQrCodeUrl(selected.qrValue || "", { fg: e.target.value, bg: selected.qrBg || "#ffffff" }) })} style={{ width: "100%" }} /></label>
+													<label>QR background<input type="color" value={selected.qrBg || "#ffffff"} onChange={(e) => updateElement(selected.id, { qrBg: e.target.value, src: buildQrCodeUrl(selected.qrValue || "", { fg: selected.qrFg || "#000000", bg: e.target.value }) })} style={{ width: "100%" }} /></label>
+												</div>
+												<button type="button" onClick={() => updateElement(selected.id, { src: buildQrCodeUrl(selected.qrValue || "", { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) })}>Regenerate QR</button>
+											</>
+										) : null}
+									</>
+								) : null}
 							</div>
 						) : <div style={{ display: "grid", gap: 10 }}>
 							<label>Canvas background<input type="color" value={currentDoc?.background || "#ffffff"} onChange={(e) => currentDoc && updateDoc({ background: e.target.value })} style={{ width: "100%" }} /></label>
