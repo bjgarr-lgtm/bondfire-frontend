@@ -26,7 +26,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1080, height: 1350, fill: "#0f172a", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}}", x: 90, y: 110, width: 900, height: 60, fontSize: 28, fontWeight: 700, color: "#fca5a5", name: "Org Name" }),
-				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#ffffff", name: "Title" }),
+				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Title" }),
 				makeTextElement({ text: "{{meeting.date}}\n{{meeting.location}}", x: 90, y: 420, width: 420, height: 200, fontSize: 34, fontWeight: 600, lineHeight: 1.2, color: "#e5e7eb", name: "Date + Location" }),
 				makeShapeElement({ x: 610, y: 420, width: 320, height: 320, fill: "rgba(255,255,255,0.05)", stroke: "#fca5a5", strokeWidth: 2, radius: 24, name: "Image Frame" }),
 				makeTextElement({ text: "{{org.contact}}", x: 90, y: 1175, width: 920, height: 40, fontSize: 22, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
@@ -566,6 +566,7 @@ export default function Studio() {
 	const [panState, setPanState] = React.useState(null);
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
+	const [textEditId, setTextEditId] = React.useState(null);
 
 	React.useEffect(() => {
 		const nextDocs = normalizeDocs(readDocs(orgId));
@@ -573,6 +574,7 @@ export default function Studio() {
 		setCurrentId(nextDocs[0]?.id || null);
 		setActivePageIndex(0);
 		setSelectedIds([]);
+		setTextEditId(null);
 		setHistory([]);
 		setFuture([]);
 	}, [orgId]);
@@ -1314,6 +1316,7 @@ const addImage = () => {
 		if (!currentDoc) return;
 		setLeftPanel(null);
 		setFileMenuOpen(false);
+		setTextEditId(null);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 		if (e.button === 2) {
@@ -1325,6 +1328,7 @@ const addImage = () => {
 		}
 		setSelectedIds([]);
 		setSelectedGuideId(null);
+		setTextEditId(null);
 		if (tool === "select") {
 			const point = getCanvasPoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
@@ -1506,6 +1510,7 @@ const addImage = () => {
 	const closeMenus = () => {
 		setLeftPanel(null);
 		setFileMenuOpen(false);
+		setTextEditId(null);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 		setDocSettingsOpen(false);
@@ -1558,6 +1563,7 @@ const addImage = () => {
 		const onGlobalDown = () => setContextMenu(null);
 		const onEsc = (e) => {
 			if (e.key === "Escape") {
+				setTextEditId(null);
 				setContextMenu(null);
 				setLeftPanel(null);
 				setFileMenuOpen(false);
@@ -1979,14 +1985,23 @@ const addImage = () => {
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
 															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
-															if (el.type === "text") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+															if (el.type === "text") return <div
+															key={el.id}
+															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
+															onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) { if (selectedIds.includes(el.id)) setTextEditId(el.id); else selectElement(el, false); } closeMenus(); }}
+															onContextMenu={(e) => openContextMenu(e, el)}
+															contentEditable={textEditId === el.id}
+															suppressContentEditableWarning
+															onBlur={(e) => { updateElement(el.id, { text: e.currentTarget.innerText }); setTextEditId(null); }}
+															style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden", cursor: textEditId === el.id ? "text" : common.cursor }}
+														>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
 															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
 															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-														{selectionBounds ? (
-															<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: selectionBounds.left + (selectionBounds.width / 2), top: selectionBounds.top - 44, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 20 }}>
+														{selectionBounds && isActive ? (
+															<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: layout.left + 120, top: layout.top - 70, display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 20 }}>
 																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
 																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
 																<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>

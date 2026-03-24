@@ -1,6 +1,6 @@
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const apiKey = env.PIXABAY_API_KEY;
+  const apiKey = env.PIXABAY_API_KEY || env.VITE_PIXABAY_API_KEY;
   if (!apiKey) {
     return json({ error: "Missing PIXABAY_API_KEY on server" }, 500);
   }
@@ -16,9 +16,7 @@ export async function onRequestGet(context) {
   url.searchParams.set("per_page", "24");
 
   const response = await fetch(url.toString(), {
-    headers: {
-      "Accept": "application/json",
-    },
+    headers: { "Accept": "application/json" },
   });
 
   if (!response.ok) {
