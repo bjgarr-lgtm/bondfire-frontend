@@ -1,6 +1,6 @@
-import { bad } from "../../../../_lib/http.js";
-import { requireOrgRole } from "../../../../_lib/auth.js";
-import { ensureDriveSchema, getDb, json, now } from "../../../../_lib/drive.js";
+import { bad } from "../../../_lib/http.js";
+import { requireOrgRole } from "../../../_lib/auth.js";
+import { ensureDriveSchema, getDb, json, now } from "../../../_lib/drive.js";
 
 export async function onRequestPatch({ env, request, params }) {
   const orgId = params.orgId;
