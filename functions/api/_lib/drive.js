@@ -93,7 +93,7 @@ export function isEditableTextMime(mime, name = "") {
   const safeMime = String(mime || "").toLowerCase();
   const safeName = String(name || "").toLowerCase();
   if (safeMime.startsWith("text/")) return true;
-  return [".md", ".markdown", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".xml", ".yaml", ".yml", ".csv"].some((ext) => safeName.endsWith(ext));
+  return [".md", ".markdown", ".txt", ".json", ".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".xml", ".yaml", ".yml", ".csv", ".bfsheet", ".bfform"].some((ext) => safeName.endsWith(ext)) || safeMime === "application/vnd.bondfire.sheet+json" || safeMime === "application/vnd.bondfire.form+json";
 }
 
 export function buildDriveFileUrls(orgId, fileId) {

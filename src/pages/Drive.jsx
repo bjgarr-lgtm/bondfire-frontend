@@ -104,13 +104,15 @@ function buildStarterSheet() {
 function buildStarterForm() {
   return JSON.stringify({
     type: "bondfire-form",
-    version: 1,
+    version: 2,
     title: "Untitled form",
     description: "",
     fields: [
       { id: "field_1", type: "text", label: "Your name", required: false, options: [] },
       { id: "field_2", type: "paragraph", label: "Details", required: false, options: [] },
     ],
+    responses: [],
+    publicShare: { enabled: false, token: "" },
   }, null, 2);
 }
 
@@ -374,6 +376,7 @@ export default function Drive() {
   const selectedFileSubtype = selectedKind === "file" && selectedFile ? (isBondfireSheetFile(selectedFile, content) ? "sheet" : isBondfireFormFile(selectedFile, content) ? "form" : null) : null;
   const fileIsEditable = isEditableTextFile(selectedFile);
   const fileIsMarkdown = isMarkdownFile(selectedFile);
+  const isStructuredDriveDoc = selectedFileSubtype === "sheet" || selectedFileSubtype === "form";
 
   const noteMap = useMemo(() => {
     const map = new Map();
@@ -1016,7 +1019,7 @@ export default function Drive() {
                 {selectedFile && !fileIsEditable ? <span className="helper">read only</span> : null}
               </div>
 
-              <RichTextToolbar
+              {!isStructuredDriveDoc ? <RichTextToolbar
                 onBold={showEditor ? () => wrapSelection("**") : undefined}
                 onItalic={showEditor ? () => wrapSelection("*") : undefined}
                 onH1={showEditor ? () => prefixLines("# ") : undefined}
@@ -1040,7 +1043,7 @@ export default function Drive() {
                   selectedFile ? { label: "Download", onClick: () => { downloadFile(selectedFile); setMenuOpen(false); } } : null,
                   { label: focusMode ? "Exit focus" : "Focus", onClick: () => { setFocusMode((v) => !v); setMenuOpen(false); } },
                 ].filter(Boolean)}
-              />
+              /> : null}
 
               <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
                 {showEditor ? (
@@ -1048,7 +1051,7 @@ export default function Drive() {
                     {selectedFileSubtype === "sheet" ? (
                       <SpreadsheetFileView value={content} onChange={setContent} mode="edit" />
                     ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="edit" />
+                      <FormFileView value={content} onChange={setContent} mode="edit" fileId={selectedFile?.id || ""} />
                     ) : (
                       <NoteEditor value={content} onChange={setContent} focusMode={focusMode} editorRef={editorRef} compact />
                     )}
@@ -1060,7 +1063,7 @@ export default function Drive() {
                     {selectedFileSubtype === "sheet" ? (
                       <SpreadsheetFileView value={content} mode="preview" />
                     ) : selectedFileSubtype === "form" ? (
-                      <FormFileView value={content} onChange={setContent} mode="preview" />
+                      <FormFileView value={content} onChange={setContent} mode="preview" fileId={selectedFile?.id || ""} />
                     ) : selectedKind === "file" && !fileIsMarkdown ? (
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (

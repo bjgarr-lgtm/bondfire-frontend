@@ -94,9 +94,9 @@ export default function DriveSidebar({
   onNewFolder,
   onNewSpreadsheet,
   onNewForm,
+  onOpenCreatePicker,
   onUploadFile,
   onUploadFolder,
-  onOpenCreatePicker,
   onRenameFolder,
   onDeleteFolder,
   onRenameNote,
@@ -221,7 +221,7 @@ export default function DriveSidebar({
             key={file.id}
             depth={depth}
             active={selectedKind === "file" && selectedId === file.id}
-            icon={String(file?.mime || "").includes("bondfire.sheet") ? "▦" : String(file?.mime || "").includes("bondfire.form") ? "☑" : "↗"}
+            icon={String(file.mime || "").includes("bondfire.sheet") || /\.bfsheet$/i.test(String(file.name || "")) ? "▦" : String(file.mime || "").includes("bondfire.form") || /\.bfform$/i.test(String(file.name || "")) ? "☑" : "↗"}
             label={file.name}
             onClick={() => onSelectFile?.(file)}
             menuItems={[
@@ -251,30 +251,13 @@ export default function DriveSidebar({
 
       <div style={{ minWidth: 0, overflow: "auto", padding: 10, position: "relative", zIndex: 2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-          {onOpenCreatePicker ? (
-            <button className="btn" type="button" onClick={onOpenCreatePicker} style={{ padding: "6px 10px", minWidth: 34 }}>＋</button>
-          ) : (
-            <PopMenu
-              trigger="＋"
-              align="left"
-              items={[
-                { label: "New note", onClick: onNewNote },
-                { label: "New spreadsheet", onClick: onNewSpreadsheet },
-                { label: "New form", onClick: onNewForm },
-                { label: "New folder", onClick: onNewFolder },
-                { label: "Upload file", onClick: onUploadFile },
-                { label: "Upload folder", onClick: onUploadFolder },
-              ]}
-            />
-          )}
+          <button className="btn" type="button" onClick={() => onOpenCreatePicker?.()} style={{ padding: "6px 12px", minWidth: 36 }}>＋</button>
           {activePane === "templates" ? (
             <PopMenu
               trigger="⋯"
               align="left"
               items={[
                 { label: "New note", onClick: onNewNote },
-                { label: "New spreadsheet", onClick: onNewSpreadsheet },
-                { label: "New form", onClick: onNewForm },
                 { label: "New folder", onClick: onNewFolder },
                 { label: "Upload file", onClick: onUploadFile },
                 { label: "Upload folder", onClick: onUploadFolder },

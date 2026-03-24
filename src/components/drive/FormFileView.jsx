@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_FORM = {
   type: "bondfire-form",
-  version: 1,
+  version: 2,
   title: "Untitled form",
   description: "",
   fields: [
@@ -10,7 +10,12 @@ const DEFAULT_FORM = {
     { id: "field_2", type: "paragraph", label: "Details", required: false, options: [] },
   ],
   responses: [],
+  publicShare: { enabled: false, token: "" },
 };
+
+function makeToken() {
+  return `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
 
 function safeParse(value) {
   try {
@@ -35,6 +40,7 @@ function normalizeResponse(response, idx = 0) {
   return {
     id: String(response?.id || `resp_${idx + 1}`),
     submittedAt: Number(response?.submittedAt || Date.now()),
+    source: String(response?.source || "internal"),
     answers: response && typeof response.answers === "object" && !Array.isArray(response.answers) ? response.answers : {},
   };
 }
@@ -42,11 +48,15 @@ function normalizeResponse(response, idx = 0) {
 function normalizeForm(input) {
   return {
     type: "bondfire-form",
-    version: 1,
+    version: 2,
     title: String(input?.title || "Untitled form"),
     description: String(input?.description || ""),
     fields: Array.isArray(input?.fields) && input.fields.length ? input.fields.map(normalizeField) : DEFAULT_FORM.fields.map(normalizeField),
     responses: Array.isArray(input?.responses) ? input.responses.map(normalizeResponse) : [],
+    publicShare: {
+      enabled: !!input?.publicShare?.enabled,
+      token: String(input?.publicShare?.token || ""),
+    },
   };
 }
 
@@ -56,16 +66,7 @@ function serialize(form) {
 
 function FieldPreview({ field, answer, onAnswerChange, readOnly = false }) {
   if (field.type === "paragraph") {
-    return (
-      <textarea
-        disabled={readOnly}
-        className="input"
-        value={String(answer || "")}
-        onChange={(e) => onAnswerChange?.(e.target.value)}
-        placeholder="Long answer"
-        style={{ width: "100%", minHeight: 90, padding: 10, resize: "vertical" }}
-      />
-    );
+    return <textarea disabled={readOnly} className="input" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} placeholder="Long answer" style={{ width: "100%", minHeight: 100, padding: 10, resize: "vertical" }} />;
   }
   if (field.type === "choice") {
     return (
@@ -87,12 +88,7 @@ function FieldPreview({ field, answer, onAnswerChange, readOnly = false }) {
           const checked = selected.includes(option);
           return (
             <label key={`${field.id}-${idx}`} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                disabled={readOnly}
-                checked={checked}
-                onChange={(e) => onAnswerChange?.(e.target.checked ? [...selected, option] : selected.filter((value) => value !== option))}
-              />
+              <input type="checkbox" disabled={readOnly} checked={checked} onChange={(e) => onAnswerChange?.(e.target.checked ? [...selected, option] : selected.filter((value) => value !== option))} />
               <span>{option}</span>
             </label>
           );
@@ -112,11 +108,22 @@ function answerSummary(field, value) {
   return String(value || "—");
 }
 
-export default function FormFileView({ value, onChange, mode = "edit" }) {
+export default function FormFileView({ value, onChange, mode = "edit", fileId = "" }) {
   const form = useMemo(() => normalizeForm(safeParse(value)), [value]);
   const readOnly = mode === "preview";
   const [draftAnswers, setDraftAnswers] = useState({});
   const [responseStatus, setResponseStatus] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+
+  useEffect(() => {
+    if (!copyStatus) return undefined;
+    const timer = setTimeout(() => setCopyStatus(""), 1800);
+    return () => clearTimeout(timer);
+  }, [copyStatus]);
+
+  const publicUrl = form.publicShare.enabled && form.publicShare.token && fileId
+    ? `${window.location.origin}/api/public/forms/${encodeURIComponent(fileId)}?token=${encodeURIComponent(form.publicShare.token)}`
+    : "";
 
   const commit = (next) => onChange?.(serialize(next));
   const setFormProp = (key, nextValue) => commit({ ...form, [key]: nextValue });
@@ -129,11 +136,36 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
     setDraftAnswers((prev) => ({ ...prev, [fieldId]: nextValue }));
   };
 
+  const togglePublicShare = (enabled) => {
+    commit({
+      ...form,
+      publicShare: {
+        enabled,
+        token: enabled ? (form.publicShare.token || makeToken()) : form.publicShare.token,
+      },
+    });
+  };
+
+  const regeneratePublicLink = () => {
+    commit({ ...form, publicShare: { enabled: true, token: makeToken() } });
+    setCopyStatus("New link generated");
+  };
+
+  const copyPublicUrl = async () => {
+    if (!publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopyStatus("Link copied");
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  };
+
   const submitResponse = () => {
     const missingRequired = form.fields.filter((field) => field.required).find((field) => {
-      const value = draftAnswers[field.id];
-      if (field.type === "checkbox") return !Array.isArray(value) || !value.length;
-      return !String(value || "").trim();
+      const answer = draftAnswers[field.id];
+      if (field.type === "checkbox") return !Array.isArray(answer) || !answer.length;
+      return !String(answer || "").trim();
     });
     if (missingRequired) {
       setResponseStatus(`Missing required field: ${missingRequired.label}`);
@@ -142,9 +174,10 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
     const response = normalizeResponse({
       id: `resp_${Date.now()}`,
       submittedAt: Date.now(),
+      source: "internal",
       answers: form.fields.reduce((acc, field) => {
-        const value = draftAnswers[field.id];
-        acc[field.id] = field.type === "checkbox" ? (Array.isArray(value) ? value : []) : String(value || "");
+        const answer = draftAnswers[field.id];
+        acc[field.id] = field.type === "checkbox" ? (Array.isArray(answer) ? answer : []) : String(answer || "");
         return acc;
       }, {}),
     }, form.responses.length);
@@ -169,7 +202,7 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
         {readOnly ? (
           <>
             <h2 style={{ marginTop: 0, marginBottom: 8 }}>{form.title}</h2>
-            {form.description ? <div className="helper" style={{ whiteSpace: "pre-wrap", marginBottom: 16 }}>{form.description}</div> : null}
+            {form.description ? <div className="helper" style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{form.description}</div> : null}
           </>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
@@ -178,6 +211,31 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
           </div>
         )}
       </div>
+
+      {!readOnly ? (
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 800 }}>Public response link</div>
+              <div className="helper">Generate a public URL so anyone can submit without a Bondfire account.</div>
+            </div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={form.publicShare.enabled} onChange={(e) => togglePublicShare(e.target.checked)} />
+              Public link enabled
+            </label>
+          </div>
+          {form.publicShare.enabled ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 8 }}>
+                <input className="input" readOnly value={publicUrl} style={{ padding: "10px 12px" }} />
+                <button className="btn" type="button" onClick={copyPublicUrl}>Copy link</button>
+                <button className="btn" type="button" onClick={regeneratePublicLink}>Regenerate</button>
+              </div>
+              {copyStatus ? <div className="helper">{copyStatus}</div> : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {form.fields.map((field, idx) => (
         <div key={field.id} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
@@ -203,17 +261,13 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
                 </label>
                 <button className="btn" type="button" onClick={() => removeField(field.id)} style={{ color: "#ff9a9a" }}>Delete</button>
               </div>
-              {field.type === "choice" || field.type === "checkbox" ? (
-                <textarea
-                  className="input"
-                  value={field.options.join("\n")}
-                  onChange={(e) => setField(field.id, { options: e.target.value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean) })}
-                  placeholder="One option per line"
-                  style={{ minHeight: 88, padding: 10, resize: "vertical" }}
-                />
+
+              {(field.type === "choice" || field.type === "checkbox") ? (
+                <textarea className="input" value={field.options.join("\n")} onChange={(e) => setField(field.id, { options: e.target.value.split("\n").map((option) => option.trim()).filter(Boolean) })} placeholder="One option per line" style={{ minHeight: 90, padding: 10, resize: "vertical" }} />
               ) : null}
-              <div style={{ paddingTop: 6 }}>
-                <FieldPreview field={field} answer={draftAnswers[field.id]} onAnswerChange={() => {}} readOnly />
+
+              <div style={{ opacity: 0.8 }}>
+                <FieldPreview field={field} answer={field.type === "checkbox" ? [] : ""} readOnly />
               </div>
             </div>
           )}
@@ -221,37 +275,19 @@ export default function FormFileView({ value, onChange, mode = "edit" }) {
       ))}
 
       {readOnly ? (
-        <div style={{ display: "grid", gap: 10, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 700 }}>Responses collected: {form.responses.length}</div>
-            <button className="btn" type="button" onClick={submitResponse}>Submit response</button>
-          </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn" type="button" onClick={submitResponse}>Submit response</button>
           {responseStatus ? <div className="helper">{responseStatus}</div> : null}
-          {form.responses.length ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              {form.responses.slice().reverse().map((response) => (
-                <div key={response.id} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
-                  <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>{new Date(response.submittedAt).toLocaleString()}</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {form.fields.map((field) => (
-                      <div key={`${response.id}_${field.id}`}>
-                        <div style={{ fontWeight: 700, marginBottom: 2 }}>{field.label}</div>
-                        <div className="helper" style={{ whiteSpace: "pre-wrap" }}>{answerSummary(field, response.answers[field.id])}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
-      ) : form.responses.length ? (
+      ) : null}
+
+      {form.responses.length ? (
         <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Responses ({form.responses.length})</div>
           <div style={{ display: "grid", gap: 10 }}>
             {form.responses.slice().reverse().map((response) => (
               <div key={response.id} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
-                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>{new Date(response.submittedAt).toLocaleString()}</div>
+                <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>{new Date(response.submittedAt).toLocaleString()} · {response.source === "public" ? "public" : "internal"}</div>
                 <div style={{ display: "grid", gap: 6 }}>
                   {form.fields.map((field) => (
                     <div key={`${response.id}_${field.id}`}>
