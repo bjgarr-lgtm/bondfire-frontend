@@ -1,79 +1,72 @@
 import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from './zk.js';
 
-function ensureOrgKey(orgId) {
-  const key = getCachedOrgKey(orgId);
-  if (!key) throw new Error('DRIVE_ZK_KEY_MISSING');
-  return key;
-}
+export const DRIVE_ZK_PREFIX = 'bfzk1:';
+export const DRIVE_ZK_FILE_MIME = 'application/vnd.bondfire.zk-file';
 
-export async function encryptDriveFolder(orgId, { name }) {
-  const key = ensureOrgKey(orgId);
-  return encryptWithOrgKey(key, JSON.stringify({ name: String(name || 'untitled folder') }));
+function toB64(bytes) {
+  let bin = '';
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  for (let i = 0; i < arr.length; i += 1) bin += String.fromCharCode(arr[i]);
+  return btoa(bin);
 }
-
-export async function decryptDriveFolder(orgId, row) {
-  if (!row?.encryptedBlob) return row;
-  const key = ensureOrgKey(orgId);
-  const meta = JSON.parse(await decryptWithOrgKey(key, row.encryptedBlob));
-  return { ...row, name: String(meta?.name || row?.name || 'untitled folder') };
+function fromB64(str) {
+  const bin = atob(String(str || ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
 }
-
-export async function encryptDriveNote(orgId, { title, body, tags = [] }) {
-  const key = ensureOrgKey(orgId);
-  return encryptWithOrgKey(key, JSON.stringify({ title: String(title || 'untitled'), body: String(body || ''), tags: Array.isArray(tags) ? tags : [] }));
+export function getDriveOrgKey(orgId) {
+  try { return getCachedOrgKey(orgId); } catch { return null; }
 }
-
-export async function decryptDriveNote(orgId, row) {
-  if (!row?.encryptedBlob) return row;
-  const key = ensureOrgKey(orgId);
-  const meta = JSON.parse(await decryptWithOrgKey(key, row.encryptedBlob));
-  return { ...row, title: String(meta?.title || row?.title || 'untitled'), body: String(meta?.body || ''), tags: Array.isArray(meta?.tags) ? meta.tags : [] };
+export function isZkString(value) {
+  return typeof value === 'string' && value.startsWith(DRIVE_ZK_PREFIX);
 }
-
-export async function encryptDriveTemplate(orgId, { name, title, body }) {
-  const key = ensureOrgKey(orgId);
-  return encryptWithOrgKey(key, JSON.stringify({ name: String(name || 'template'), title: String(title || 'untitled'), body: String(body || '') }));
+export async function encryptDriveText(orgId, plaintext) {
+  const key = getDriveOrgKey(orgId);
+  if (!key) return String(plaintext || '');
+  return DRIVE_ZK_PREFIX + await encryptWithOrgKey(key, String(plaintext || ''));
 }
-
-export async function decryptDriveTemplate(orgId, row) {
-  if (!row?.encryptedBlob) return row;
-  const key = ensureOrgKey(orgId);
-  const meta = JSON.parse(await decryptWithOrgKey(key, row.encryptedBlob));
-  return { ...row, name: String(meta?.name || row?.name || 'template'), title: String(meta?.title || row?.title || 'untitled'), body: String(meta?.body || row?.body || '') };
+export async function decryptDriveText(orgId, value, fallback = '') {
+  if (!isZkString(value)) return value == null ? fallback : String(value);
+  const key = getDriveOrgKey(orgId);
+  if (!key) return fallback;
+  try {
+    return await decryptWithOrgKey(key, String(value).slice(DRIVE_ZK_PREFIX.length));
+  } catch {
+    return fallback;
+  }
 }
-
-export async function encryptDriveFileMetadata(orgId, { name, mime, size }) {
-  const key = ensureOrgKey(orgId);
-  return encryptWithOrgKey(key, JSON.stringify({ name: String(name || 'file'), mime: String(mime || 'application/octet-stream'), size: Number(size || 0) }));
+export async function encryptDriveJson(orgId, obj) {
+  return encryptDriveText(orgId, JSON.stringify(obj));
 }
-
-export async function decryptDriveFileMetadata(orgId, row) {
-  if (!row?.encryptedBlob) return row;
-  const key = ensureOrgKey(orgId);
-  const meta = JSON.parse(await decryptWithOrgKey(key, row.encryptedBlob));
-  return { ...row, name: String(meta?.name || row?.name || 'file'), mime: String(meta?.mime || row?.mime || 'application/octet-stream'), size: Number(meta?.size ?? row?.size ?? 0) };
+export async function decryptDriveJson(orgId, value, fallback = null) {
+  try {
+    const text = await decryptDriveText(orgId, value, '');
+    if (!text) return fallback;
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
 }
-
-export async function encryptDriveFilePayload(orgId, { name, mime, size, dataUrl, textContent = '' }) {
-  const key = ensureOrgKey(orgId);
-  const encryptedBlob = await encryptDriveFileMetadata(orgId, { name, mime, size });
-  const encryptedPayload = await encryptWithOrgKey(
-    key,
-    JSON.stringify({ kind: 'drive-file', name: String(name || 'file'), mime: String(mime || 'application/octet-stream'), size: Number(size || 0), dataUrl: String(dataUrl || ''), textContent: String(textContent || '') })
-  );
-  return { encryptedBlob, encryptedPayload };
+async function importAesKey(keyBytes, usage) {
+  return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, [usage]);
 }
-
-export async function decryptDriveFilePayload(orgId, file) {
-  if (!file?.encryptedPayload) return file;
-  const key = ensureOrgKey(orgId);
-  const payload = JSON.parse(await decryptWithOrgKey(key, file.encryptedPayload));
-  return {
-    ...file,
-    name: String(payload?.name || file?.name || 'file'),
-    mime: String(payload?.mime || file?.mime || 'application/octet-stream'),
-    size: Number(payload?.size ?? file?.size ?? 0),
-    dataUrl: String(payload?.dataUrl || ''),
-    textContent: String(payload?.textContent || ''),
-  };
+export async function encryptDriveBytesToString(orgId, bytes) {
+  const keyBytes = getDriveOrgKey(orgId);
+  if (!keyBytes) throw new Error('ORG_KEY_MISSING');
+  const key = await importAesKey(keyBytes, 'encrypt');
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, payload);
+  return JSON.stringify({ v: 1, iv: toB64(iv), ct: toB64(new Uint8Array(ct)) });
+}
+export async function decryptDriveBytesString(orgId, value) {
+  const keyBytes = getDriveOrgKey(orgId);
+  if (!keyBytes) throw new Error('ORG_KEY_MISSING');
+  const key = await importAesKey(keyBytes, 'decrypt');
+  const blob = typeof value === 'string' ? JSON.parse(value) : value || {};
+  const iv = fromB64(blob.iv || '');
+  const ct = fromB64(blob.ct || '');
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return new Uint8Array(pt);
 }

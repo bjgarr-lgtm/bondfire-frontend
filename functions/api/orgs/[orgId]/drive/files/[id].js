@@ -7,10 +7,11 @@ export async function onRequestGet({ env, request, params }) {
   const fileId = params.id;
   const auth = await requireOrgRole({ env, request, orgId, minRole: "viewer" });
   if (!auth.ok) return auth.resp;
-  const includeData = new URL(request.url).searchParams.get("includeData") === "1";
-  const existingMeta = await getFileRecord(env, orgId, fileId, { includeData: includeData });
-  if (!existingMeta) return bad(404, "NOT_FOUND");
-  return json({ ok: true, file: existingMeta });
+  const existingMeta = await getFileRecord(env, orgId, fileId, { includeData: false });
+  const shouldIncludeData = !!(existingMeta && (String(existingMeta.mime || "").startsWith("text/") || String(existingMeta.mime || "") === "application/vnd.bondfire.sheet+json" || String(existingMeta.mime || "") === "application/vnd.bondfire.form+json" || String(existingMeta.mime || "") === "application/vnd.bondfire.zk-file" || /\.(md|markdown|txt|json|js|jsx|ts|tsx|css|html|xml|yaml|yml|csv|bfsheet|bfform)$/i.test(String(existingMeta.name || ""))));
+  const file = existingMeta ? await getFileRecord(env, orgId, fileId, { includeData: shouldIncludeData }) : null;
+  if (!file) return bad(404, "NOT_FOUND");
+  return json({ ok: true, file });
 }
 
 export async function onRequestPatch({ env, request, params }) {
@@ -20,20 +21,34 @@ export async function onRequestPatch({ env, request, params }) {
   if (!auth.ok) return auth.resp;
   await ensureDriveSchema(env);
   const db = getDb(env);
-  const existing = await db.prepare(`SELECT * FROM drive_files WHERE org_id = ? AND id = ?`).bind(orgId, fileId).first();
+  const existing = await db.prepare(`SELECT id, parent_id, name, mime, size, storage_key, created_at, updated_at FROM drive_files WHERE org_id = ? AND id = ?`).bind(orgId, fileId).first();
   if (!existing) return bad(404, "NOT_FOUND");
   const body = await request.json().catch(() => ({}));
-  const encrypted = body.encryptedPayload !== undefined || body.encryptedBlob !== undefined || Number(existing.encrypted || 0) === 1;
-  const nextName = encrypted ? "encrypted file" : (body.name === undefined ? existing.name : String(body.name || "file").trim() || "file");
-  const nextMime = encrypted ? "application/octet-stream" : (body.mime === undefined ? existing.mime : String(body.mime || "application/octet-stream"));
+  const nextName = body.name === undefined ? existing.name : String(body.name || "file").trim() || "file";
+  const nextMime = body.mime === undefined ? existing.mime : String(body.mime || "application/octet-stream");
   const nextSize = body.size === undefined ? Number(existing.size || 0) : Number(body.size || 0);
   const nextParentId = Object.prototype.hasOwnProperty.call(body, "parentId") ? normalizeNullableId(body.parentId) : existing.parent_id || null;
-  const nextEncryptedBlob = body.encryptedBlob === undefined ? existing.encrypted_blob || null : String(body.encryptedBlob || "") || null;
-  await db.prepare(`UPDATE drive_files SET parent_id = ?, name = ?, mime = ?, size = ?, encrypted = ?, encrypted_blob = ?, updated_at = ? WHERE org_id = ? AND id = ?`).bind(nextParentId, nextName, nextMime, nextSize, encrypted ? 1 : 0, nextEncryptedBlob, now(), orgId, fileId).run();
-  if (body.dataUrl !== undefined || body.textContent !== undefined || body.mime !== undefined || body.encryptedPayload !== undefined) {
-    await saveFileBlob(env, { orgId, fileId, storageKey: existing.storage_key, mime: nextMime, dataUrl: body.dataUrl === undefined ? (await getFileRecord(env, orgId, fileId, { includeData: true }))?.dataUrl || "" : String(body.dataUrl || ""), textContent: body.textContent === undefined ? (await getFileRecord(env, orgId, fileId, { includeData: true }))?.textContent || "" : String(body.textContent || ""), encryptedPayload: body.encryptedPayload === undefined ? (await getFileRecord(env, orgId, fileId, { includeData: true }))?.encryptedPayload || "" : String(body.encryptedPayload || ""), encrypted });
+  await db.prepare(
+    `UPDATE drive_files
+     SET parent_id = ?,
+         name = ?,
+         mime = ?,
+         size = ?,
+         updated_at = ?
+     WHERE org_id = ? AND id = ?`
+  ).bind(nextParentId, nextName, nextMime, nextSize, now(), orgId, fileId).run();
+  if (body.dataUrl !== undefined || body.textContent !== undefined || body.mime !== undefined) {
+    await saveFileBlob(env, {
+      orgId,
+      fileId,
+      storageKey: existing.storage_key,
+      mime: nextMime,
+      dataUrl: body.dataUrl === undefined ? (await getFileRecord(env, orgId, fileId, { includeData: true }))?.dataUrl || "" : String(body.dataUrl || ""),
+      textContent: body.textContent === undefined ? (await getFileRecord(env, orgId, fileId, { includeData: true }))?.textContent || "" : String(body.textContent || ""),
+    });
   }
-  const file = await getFileRecord(env, orgId, fileId, { includeData: false });
+  const shouldIncludeData = !!(String(nextMime || "").startsWith("text/") || String(nextMime || "") === "application/vnd.bondfire.sheet+json" || String(nextMime || "") === "application/vnd.bondfire.form+json" || String(nextMime || "") === "application/vnd.bondfire.zk-file" || /\.(md|markdown|txt|json|js|jsx|ts|tsx|css|html|xml|yaml|yml|csv|bfsheet|bfform)$/i.test(String(nextName || "")));
+  const file = await getFileRecord(env, orgId, fileId, { includeData: shouldIncludeData });
   return json({ ok: true, file });
 }
 
