@@ -768,6 +768,57 @@ export default function Studio() {
 		setSelectedIds([element.id]);
 	};
 
+	const placeImageAtPoint = React.useCallback((src, name, point) => {
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeImageElement({
+			src,
+			name: name || "Image",
+			x: Math.max(0, Number(point?.x || 0) - 160),
+			y: Math.max(0, Number(point?.y || 0) - 120),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
+
+	const placeSvgAtPoint = React.useCallback((asset, point) => {
+		if (!asset?.svg) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeSvgElement(asset, {
+			name: asset.label || "Asset",
+			fill: brandKit.primary || "#111111",
+			x: Math.max(0, Number(point?.x || 0) - Number(asset.width || 180) / 2),
+			y: Math.max(0, Number(point?.y || 0) - Number(asset.height || 180) / 2),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs, brandKit.primary]);
+
+	const beginAssetDrag = React.useCallback((e, payload) => {
+		dragPayloadRef.current = payload;
+		if (!e?.dataTransfer) return;
+		try {
+			e.dataTransfer.effectAllowed = "copy";
+			e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+			if (payload?.kind === "svg" && payload?.svg) {
+				e.dataTransfer.setData("application/x-bondfire-svg", JSON.stringify(payload));
+			}
+			if (payload?.kind === "image" && payload?.src) {
+				e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload));
+			}
+		} catch {}
+	}, []);
+
+
 	const loadPixabayAssets = React.useCallback(async () => {
 		const query = assetSearch.trim() || "community poster";
 		setPixabayLoading(true);
@@ -1451,64 +1502,37 @@ const addImage = () => {
 		e.preventDefault();
 		e.stopPropagation();
 		const point = getCanvasPoint(e.clientX, e.clientY);
-
-		const fallbackPayload = dragPayloadRef.current;
-		const textPayload = e.dataTransfer?.getData("text/plain");
-		const svgPayload = e.dataTransfer?.getData("application/x-bondfire-svg");
-		const imagePayload = e.dataTransfer?.getData("application/x-bondfire-image");
-
-		if (fallbackPayload?.kind === "svg" && fallbackPayload?.asset?.svg) {
-			placeSvgAtPoint(fallbackPayload.asset, point);
-			dragPayloadRef.current = null;
-			return;
-		}
-		if (fallbackPayload?.kind === "image" && fallbackPayload?.src) {
-			placeImageAtPoint(String(fallbackPayload.src), String(fallbackPayload.name || "Image"), point);
-			dragPayloadRef.current = null;
-			return;
-		}
-
-		if (svgPayload) {
+		const payloads = [
+			dragPayloadRef.current ? JSON.stringify(dragPayloadRef.current) : "",
+			e.dataTransfer?.getData("application/x-bondfire-svg") || "",
+			e.dataTransfer?.getData("application/x-bondfire-image") || "",
+			e.dataTransfer?.getData("text/plain") || "",
+		];
+		for (const raw of payloads) {
+			if (!raw) continue;
 			try {
-				const data = JSON.parse(svgPayload);
-				if (data?.svg) {
+				const data = JSON.parse(raw);
+				if ((data?.kind === "svg" || data?.svg) && data?.svg) {
 					placeSvgAtPoint(data, point);
+					dragPayloadRef.current = null;
 					return;
 				}
-			} catch {}
-		}
-
-		if (imagePayload) {
-			try {
-				const data = JSON.parse(imagePayload);
-				if (data?.src) {
+				if ((data?.kind === "image" || data?.src) && data?.src) {
 					placeImageAtPoint(String(data.src), String(data.name || "Image"), point);
+					dragPayloadRef.current = null;
 					return;
 				}
 			} catch {}
 		}
-
-		if (textPayload) {
-			try {
-				const data = JSON.parse(textPayload);
-				if (data?.kind === "svg" && data?.asset?.svg) {
-					placeSvgAtPoint(data.asset, point);
-					return;
-				}
-				if (data?.kind === "image" && data?.src) {
-					placeImageAtPoint(String(data.src), String(data.name || "Image"), point);
-					return;
-				}
-			} catch {}
-		}
-
 		const file = e.dataTransfer?.files?.[0];
-		if (!file || !String(file.type || "").startsWith("image/")) return;
-		const reader = new FileReader();
-		reader.onload = () => {
-			placeImageAtPoint(String(reader.result || ""), file.name || "Image", point);
-		};
-		reader.readAsDataURL(file);
+		if (file && String(file.type || "").startsWith("image/")) {
+			const reader = new FileReader();
+			reader.onload = () => {
+				placeImageAtPoint(String(reader.result || ""), file.name || "Image", point);
+			};
+			reader.readAsDataURL(file);
+		}
+		dragPayloadRef.current = null;
 	};
 
 	const onWorkspaceDragOver = (e) => {
@@ -1516,11 +1540,13 @@ const addImage = () => {
 		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 	};
-
 	const onWorkspaceDragEnter = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+	};
+	const clearDragPayload = () => {
+		dragPayloadRef.current = null;
 	};
 
 	React.useEffect(() => {
@@ -1535,14 +1561,24 @@ const addImage = () => {
 	}, [handleWheel]);
 
 	React.useEffect(() => {
-		const clearDrag = () => { dragPayloadRef.current = null; };
-		window.addEventListener("dragend", clearDrag);
-		window.addEventListener("drop", clearDrag);
-		return () => {
-			window.removeEventListener("dragend", clearDrag);
-			window.removeEventListener("drop", clearDrag);
+		const workspace = workspaceRef.current;
+		const shell = canvasShellRef.current;
+		const onNativeDragOver = (e) => {
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 		};
-	}, []);
+		const onNativeDrop = (e) => onWorkspaceDrop(e);
+		workspace?.addEventListener("dragover", onNativeDragOver);
+		workspace?.addEventListener("drop", onNativeDrop);
+		shell?.addEventListener("dragover", onNativeDragOver);
+		shell?.addEventListener("drop", onNativeDrop);
+		return () => {
+			workspace?.removeEventListener("dragover", onNativeDragOver);
+			workspace?.removeEventListener("drop", onNativeDrop);
+			shell?.removeEventListener("dragover", onNativeDragOver);
+			shell?.removeEventListener("drop", onNativeDrop);
+		};
+	}, [onWorkspaceDrop, currentId, activePageIndex]);
 
 
 	const openContextMenu = (e, el) => {
@@ -1855,7 +1891,7 @@ const addImage = () => {
 								{assetTab === "builtins" ? (
 									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
 										{filteredBuiltInAssets.map((asset) => (
-											<div key={asset.id} draggable onDragStart={(e) => beginAssetDrag(e, { kind: "svg", asset })} onDragEnd={clearAssetDrag} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
+											<div key={asset.id} draggable onDragStart={(e) => beginAssetDrag(e, { ...asset, kind: "svg" })} onDragEnd={clearDragPayload} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
 												<div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center", marginBottom: 8, borderRadius: 8, background: "rgba(255,255,255,0.05)", color: brandKit.primary }}>
 													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" draggable={false} style={{ maxWidth: "80%", maxHeight: "80%" }} />
 												</div>
@@ -1874,8 +1910,13 @@ const addImage = () => {
 												<div
 													key={file.id}
 													draggable
-													onDragStart={(e) => beginAssetDrag(e, { kind: "image", src: file.fullUrl || file.previewUrl, name: file.name })}
-													onDragEnd={clearAssetDrag}
+													onDragStart={(e) => {
+														const payload = { kind: "image", src: file.fullUrl || file.previewUrl, name: file.name };
+														dragPayloadRef.current = payload;
+														e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload));
+														e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+														e.dataTransfer.effectAllowed = "copy";
+													}} onDragEnd={clearDragPayload}
 													style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}
 												>
 													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
@@ -1902,7 +1943,7 @@ const addImage = () => {
 										{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
 										<div style={{ display: "grid", gap: 8 }}>
 											{filteredAssets.map((file) => (
-												<div key={file.id} draggable onDragStart={(e) => beginAssetDrag(e, { kind: "image", src: file.previewUrl, name: file.name })} onDragEnd={clearAssetDrag} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
+												<div key={file.id} draggable onDragStart={(e) => beginAssetDrag(e, { kind: "image", src: file.previewUrl, name: file.name })} onDragEnd={clearDragPayload} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
 													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
 														<img src={file.previewUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
 													</div>
@@ -2015,7 +2056,7 @@ const addImage = () => {
 											</div>
 										</div>
 										{selectionBounds && isActive ? (
-											<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: Math.max(RULER_SIZE + 16, layout.left + 180), top: Math.max(RULER_SIZE + 8, layout.top - 86), display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 22 }}>
+											<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: "50%", top: showRulers ? (RULER_SIZE + 10) : 10, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 24, maxWidth: "calc(100% - 120px)", overflowX: "auto" }}>
 												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
 												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
 												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
@@ -2054,7 +2095,7 @@ const addImage = () => {
 												cursor: isActive ? "default" : "pointer",
 											}}
 										>
-											<div onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} onDragEnter={onWorkspaceDragEnter} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+											<div onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
 												{isActive ? (
 													<>
 														{currentGuides.map((guide) => guide.orientation === "vertical" ? (
