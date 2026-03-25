@@ -29,7 +29,7 @@ const TEMPLATE_LIBRARY = {
 				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Title" }),
 				makeTextElement({ text: "{{meeting.date}}\n{{meeting.location}}", x: 90, y: 420, width: 420, height: 200, fontSize: 34, fontWeight: 600, lineHeight: 1.2, color: "#e5e7eb", name: "Date + Location" }),
 				makeShapeElement({ x: 610, y: 420, width: 320, height: 320, fill: "rgba(255,255,255,0.05)", stroke: "#fca5a5", strokeWidth: 2, radius: 24, name: "Image Frame" }),
-				makeTextElement({ text: "{{org.contact}}", x: 90, y: 1175, width: 920, height: 40, fontSize: 22, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
+				makeTextElement({ text: "{{org.contact}}", x: 90, y: 1175, width: 920, height: 34, fontSize: 22, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
 			],
 		}),
 	},
@@ -2042,8 +2042,8 @@ const addImage = () => {
 							border: "1px solid rgba(255,255,255,0.12)",
 							boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
 							zIndex: 40,
-							maxWidth: "calc(100% - 140px)",
-							overflowX: "auto",
+							maxWidth: "calc(100% - 48px)",
+							overflow: "visible",
 							whiteSpace: "nowrap",
 						}}
 					>
