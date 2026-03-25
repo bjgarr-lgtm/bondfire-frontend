@@ -1768,7 +1768,7 @@ const addImage = () => {
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 			<input ref={fontUploadRef} type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/x-font-ttf,application/x-font-otf" onChange={onUploadFont} style={{ display: "none" }} />
 
-			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
+			<div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "space-between", flexWrap: "nowrap" }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
 					<button style={{ padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.96)", color: "white" }} onClick={(e) => { e.stopPropagation(); setFileMenuOpen((v) => !v); setExportMenuOpen(false); setLeftPanel(null); }}>☰</button>
 					{docSettingsOpen && currentDoc ? (
@@ -2035,8 +2035,9 @@ const addImage = () => {
 							display: "flex",
 							alignItems: "center",
 							gap: 6,
-							padding: "5px 8px",
+							padding: "3px 8px",
 							borderRadius: 999,
+							height: 40,
 							background: "rgba(17,24,39,0.97)",
 							border: "1px solid rgba(255,255,255,0.12)",
 							boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
@@ -2046,13 +2047,15 @@ const addImage = () => {
 							whiteSpace: "nowrap",
 						}}
 					>
-						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
-						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
-						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
-						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
-						<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
+						<div style={{ display: "flex", alignItems: "center", gap: 4, color: "white", fontSize: 11 }}>
 							<span>Opacity</span>
-							<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} style={{ width: 140 }} />
+							<div style={{ width: 140, display: "flex", alignItems: "center" }}>
+								<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} style={{ width: "100%", margin: 0, display: "block" }} />
+							</div>
 						</div>
 						{selected && ["text", "shape", "svg"].includes(selected.type) ? (
 							<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -2061,8 +2064,8 @@ const addImage = () => {
 								))}
 							</div>
 						) : null}
-						{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
-						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
+						{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
 					</div>
 				) : null}
 
