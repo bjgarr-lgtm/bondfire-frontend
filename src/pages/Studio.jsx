@@ -2023,6 +2023,50 @@ const addImage = () => {
 					</div>
 				) : null}
 
+				{selectionBounds ? (
+					<div
+						onMouseDown={(e) => e.stopPropagation()}
+						onClick={(e) => e.stopPropagation()}
+						style={{
+							position: "absolute",
+							left: "50%",
+							top: 10,
+							transform: "translateX(-50%)",
+							display: "flex",
+							alignItems: "center",
+							gap: 6,
+							padding: "5px 8px",
+							borderRadius: 999,
+							background: "rgba(17,24,39,0.97)",
+							border: "1px solid rgba(255,255,255,0.12)",
+							boxShadow: "0 8px 24px rgba(0,0,0,0.24)",
+							zIndex: 40,
+							maxWidth: "calc(100% - 140px)",
+							overflowX: "auto",
+							whiteSpace: "nowrap",
+						}}
+					>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
+						<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
+							<span>Opacity</span>
+							<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} style={{ width: 140 }} />
+						</div>
+						{selected && ["text", "shape", "svg"].includes(selected.type) ? (
+							<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+								{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
+									<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer", flex: "0 0 auto" }} />
+								))}
+							</div>
+						) : null}
+						{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
+						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "3px 8px", minHeight: 30 }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
+					</div>
+				) : null}
+
+
 				<div
 					ref={workspaceRef}
 					onMouseDown={startWorkspaceAction}
@@ -2084,28 +2128,7 @@ const addImage = () => {
 												</button>
 											</div>
 										</div>
-										{selectionBounds && isActive ? (
-											<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: "50%", top: showRulers ? (RULER_SIZE + 10) : 10, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 24, maxWidth: "calc(100% - 120px)", overflowX: "auto" }}>
-												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
-												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
-												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
-												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
-												<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
-													<span>Opacity</span>
-													<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
-												</div>
-												{selected && ["text", "shape", "svg"].includes(selected.type) ? (
-													<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-														{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
-															<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
-														))}
-													</div>
-												) : null}
-												{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
-												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
-											</div>
-										) : null}
-										<div
+																				<div
 											ref={isActive ? canvasShellRef : null}
 											onClick={() => { if (suppressCanvasClickRef.current) { suppressCanvasClickRef.current = false; return; } if (!isActive) { setActivePageIndex(pageIndex); setSelectedIds([]); } else { setSelectedIds([]); } }}
 											onDrop={onWorkspaceDrop}
