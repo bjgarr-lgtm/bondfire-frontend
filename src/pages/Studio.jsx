@@ -768,6 +768,59 @@ export default function Studio() {
 		setSelectedIds([element.id]);
 	};
 
+	const placeImageAtPoint = React.useCallback((src, name, point) => {
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeImageElement({
+			src,
+			name: name || "Image",
+			x: Math.max(0, Number(point?.x || 0) - 160),
+			y: Math.max(0, Number(point?.y || 0) - 120),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
+
+	const placeSvgAtPoint = React.useCallback((asset, point) => {
+		if (!asset?.svg) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeSvgElement(asset, {
+			name: asset.label || "Asset",
+			fill: brandKit.primary || "#111111",
+			x: Math.max(0, Number(point?.x || 0) - Number(asset.width || 180) / 2),
+			y: Math.max(0, Number(point?.y || 0) - Number(asset.height || 180) / 2),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs, brandKit.primary]);
+
+	const setAssetDragImage = (e) => {
+		if (!e?.dataTransfer?.setDragImage || !e?.currentTarget?.cloneNode) return;
+		try {
+			const ghost = e.currentTarget.cloneNode(true);
+			ghost.style.position = "fixed";
+			ghost.style.top = "-10000px";
+			ghost.style.left = "-10000px";
+			ghost.style.width = `${Math.min(160, Math.max(96, e.currentTarget.getBoundingClientRect().width || 120))}px`;
+			ghost.style.pointerEvents = "none";
+			ghost.style.opacity = "0.96";
+			ghost.style.transform = "none";
+			ghost.style.zIndex = "9999";
+			document.body.appendChild(ghost);
+			e.dataTransfer.setDragImage(ghost, 16, 16);
+			window.setTimeout(() => ghost.remove(), 0);
+		} catch {}
+	};
+
 	const loadPixabayAssets = React.useCallback(async () => {
 		const query = assetSearch.trim() || "community poster";
 		setPixabayLoading(true);
@@ -1427,7 +1480,7 @@ const addImage = () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = React.useCallback((e) => {
 		if (!(e.ctrlKey || e.metaKey)) return;
@@ -1461,12 +1514,12 @@ const addImage = () => {
 			if (!raw) continue;
 			try {
 				const data = JSON.parse(raw);
-				if (data?.kind === "svg" && data?.svg) {
+				if ((data?.kind === "svg" || data?.svg) && data?.svg) {
 					placeSvgAtPoint(data, point);
 					dragPayloadRef.current = null;
 					return;
 				}
-				if (data?.kind === "image" && data?.src) {
+				if ((data?.kind === "image" || data?.src) && data?.src) {
 					placeImageAtPoint(String(data.src), String(data.name || "Image"), point);
 					dragPayloadRef.current = null;
 					return;
@@ -1486,29 +1539,16 @@ const addImage = () => {
 
 	const onWorkspaceDragOver = (e) => {
 		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+	};
+	const onWorkspaceDragEnter = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 	};
 	const clearDragPayload = () => {
 		dragPayloadRef.current = null;
-	};
-
-	const setAssetDragImage = (e) => {
-		if (!e?.dataTransfer) return;
-		try {
-			const source = e.currentTarget;
-			const ghost = source.cloneNode(true);
-			ghost.style.position = "fixed";
-			ghost.style.top = "-10000px";
-			ghost.style.left = "-10000px";
-			ghost.style.width = `${Math.min(160, Math.max(96, source.getBoundingClientRect().width || 120))}px`;
-			ghost.style.pointerEvents = "none";
-			ghost.style.opacity = "0.96";
-			ghost.style.transform = "none";
-			ghost.style.zIndex = "9999";
-			document.body.appendChild(ghost);
-			e.dataTransfer.setDragImage(ghost, 16, 16);
-			window.setTimeout(() => ghost.remove(), 0);
-		} catch {}
 	};
 
 	React.useEffect(() => {
@@ -1853,9 +1893,9 @@ const addImage = () => {
 								{assetTab === "builtins" ? (
 									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
 										{filteredBuiltInAssets.map((asset) => (
-											<button key={asset.id} draggable onDragStart={(e) => { const payload = { ...asset, kind: "svg" }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-svg", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; }} onDragEnd={clearDragPayload} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
+											<button key={asset.id} draggable onDragStart={(e) => { const payload = { ...asset, kind: "svg" }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-svg", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; setAssetDragImage(e); }} onDragEnd={clearDragPayload} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
 												<div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center", marginBottom: 8, borderRadius: 8, background: "rgba(255,255,255,0.05)", color: brandKit.primary }}>
-													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" style={{ maxWidth: "80%", maxHeight: "80%" }} />
+													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" draggable={false} style={{ maxWidth: "80%", maxHeight: "80%" }} />
 												</div>
 												<div style={{ fontSize: 11, fontWeight: 700 }}>{asset.label}</div>
 												<div style={{ fontSize: 10, opacity: 0.7 }}>{asset.category}</div>
@@ -1905,9 +1945,9 @@ const addImage = () => {
 										{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
 										<div style={{ display: "grid", gap: 8 }}>
 											{filteredAssets.map((file) => (
-												<div key={file.id} draggable onDragStart={(e) => { const payload = { kind: "image", src: file.previewUrl, name: file.name }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; }} onDragEnd={clearDragPayload} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
+												<div key={file.id} draggable onDragStart={(e) => { const payload = { kind: "image", src: file.previewUrl, name: file.name }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; setAssetDragImage(e); }} onDragEnd={clearDragPayload} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
 													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-														<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+														<img src={file.previewUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
 													</div>
 													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
 													<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
@@ -1968,6 +2008,7 @@ const addImage = () => {
 					}}
 					onDrop={onWorkspaceDrop}
 					onDragOver={onWorkspaceDragOver}
+					onDragEnter={onWorkspaceDragEnter}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
 					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
@@ -2039,10 +2080,10 @@ const addImage = () => {
 										) : null}
 										<div
 											ref={isActive ? canvasShellRef : null}
-											onMouseDown={isActive ? startWorkspaceAction : undefined}
 											onClick={() => { if (!isActive) { setActivePageIndex(pageIndex); setSelectedIds([]); } else { setSelectedIds([]); } }}
 											onDrop={onWorkspaceDrop}
 											onDragOver={onWorkspaceDragOver}
+											onDragEnter={onWorkspaceDragEnter}
 											style={{
 												position: "absolute",
 												left: layout.left,
