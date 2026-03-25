@@ -99,19 +99,6 @@ function clone(obj) {
 	return JSON.parse(JSON.stringify(obj));
 }
 
-function isCorruptStudioTextElement(el) {
-	if (!el || el.type !== "text") return false;
-	const text = String(el.text ?? "").trim();
-	const x = Number(el.x || 0);
-	const y = Number(el.y || 0);
-	const suspicious = /^(\{?\s*:?[\s]*null[\s]*\}?|:\s*null\}?|null\}?)$/i.test(text);
-	return suspicious && x <= 24 && y <= 24;
-}
-
-function sanitizeStudioElements(elements) {
-	return (Array.isArray(elements) ? elements : []).filter((el) => !isCorruptStudioTextElement(el));
-}
-
 function makePage(preset = "flyer", patch = {}) {
 	return {
 		id: uid(),
@@ -135,13 +122,13 @@ function normalizeDoc(doc) {
 				width: Number(page?.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 				height: Number(page?.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 				background: page?.background || doc.background || "#ffffff",
-				elements: sanitizeStudioElements(Array.isArray(page?.elements) ? page.elements : []),
+				elements: Array.isArray(page?.elements) ? page.elements : [],
 				guides: Array.isArray(page?.guides) ? page.guides : [],
 			})),
 			width: Number(firstPage.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 			height: Number(firstPage.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 			background: firstPage.background || doc.background || "#ffffff",
-			elements: sanitizeStudioElements(Array.isArray(firstPage.elements) ? firstPage.elements : []),
+			elements: Array.isArray(firstPage.elements) ? firstPage.elements : [],
 			guides: Array.isArray(firstPage.guides) ? firstPage.guides : [],
 		};
 	}
@@ -149,7 +136,7 @@ function normalizeDoc(doc) {
 		width: Number(doc.width || PRESETS[doc.preset]?.width || 1080),
 		height: Number(doc.height || PRESETS[doc.preset]?.height || 1350),
 		background: doc.background || "#ffffff",
-		elements: sanitizeStudioElements(Array.isArray(doc.elements) ? doc.elements : []),
+		elements: Array.isArray(doc.elements) ? doc.elements : [],
 		guides: Array.isArray(doc.guides) ? doc.guides : [],
 	});
 	return {
@@ -1379,6 +1366,15 @@ const addImage = () => {
 		};
 	}, [pan, zoom]);
 
+	const getMarqueePoint = React.useCallback((clientX, clientY) => {
+		const rect = canvasShellRef.current?.getBoundingClientRect();
+		if (!rect || !currentPage) return getCanvasPoint(clientX, clientY);
+		return {
+			x: clamp((clientX - rect.left) / zoom, 0, Number(currentPage.width || 0)),
+			y: clamp((clientY - rect.top) / zoom, 0, Number(currentPage.height || 0)),
+		};
+	}, [currentPage, zoom, getCanvasPoint]);
+
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
 		setLeftPanel(null);
@@ -1397,7 +1393,7 @@ const addImage = () => {
 		setSelectedGuideId(null);
 		setTextEditId(null);
 		if (tool === "select") {
-			const point = getCanvasPoint(e.clientX, e.clientY);
+			const point = getMarqueePoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
 		}
 	};
@@ -1457,7 +1453,7 @@ const addImage = () => {
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
-				const point = getCanvasPoint(e.clientX, e.clientY);
+				const point = getMarqueePoint(e.clientX, e.clientY);
 				const next = {
 					...marquee,
 					left: Math.min(marquee.startX, point.x),
@@ -1478,7 +1474,7 @@ const addImage = () => {
 		const onUp = () => {
 			if (marquee && currentDoc) {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const ids = sanitizeStudioElements(currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
+				const ids = (currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
 			}
 			setDragState(null);
@@ -1493,7 +1489,7 @@ const addImage = () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = React.useCallback((e) => {
 		if (!(e.ctrlKey || e.metaKey)) return;
@@ -2138,6 +2134,7 @@ const addImage = () => {
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
+														) : null}
 														{selected && !selected.locked ? [
 															{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
 															{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
