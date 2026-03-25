@@ -1366,6 +1366,15 @@ const addImage = () => {
 		};
 	}, [pan, zoom]);
 
+	const getMarqueePoint = React.useCallback((clientX, clientY) => {
+		const rect = canvasShellRef.current?.getBoundingClientRect();
+		if (!rect || !currentPage) return getCanvasPoint(clientX, clientY);
+		return {
+			x: clamp((clientX - rect.left) / zoom, 0, Number(currentPage.width || 0)),
+			y: clamp((clientY - rect.top) / zoom, 0, Number(currentPage.height || 0)),
+		};
+	}, [currentPage, zoom, getCanvasPoint]);
+
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
 		setLeftPanel(null);
@@ -1384,7 +1393,7 @@ const addImage = () => {
 		setSelectedGuideId(null);
 		setTextEditId(null);
 		if (tool === "select") {
-			const point = getCanvasPoint(e.clientX, e.clientY);
+			const point = getMarqueePoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
 		}
 	};
@@ -1444,7 +1453,7 @@ const addImage = () => {
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
-				const point = getCanvasPoint(e.clientX, e.clientY);
+				const point = getMarqueePoint(e.clientX, e.clientY);
 				const next = {
 					...marquee,
 					left: Math.min(marquee.startX, point.x),
@@ -1480,7 +1489,7 @@ const addImage = () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = React.useCallback((e) => {
 		if (!(e.ctrlKey || e.metaKey)) return;
