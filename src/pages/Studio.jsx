@@ -99,6 +99,19 @@ function clone(obj) {
 	return JSON.parse(JSON.stringify(obj));
 }
 
+function isCorruptStudioTextElement(el) {
+	if (!el || el.type !== "text") return false;
+	const text = String(el.text ?? "").trim();
+	const x = Number(el.x || 0);
+	const y = Number(el.y || 0);
+	const matchesNull = /^:?\s*null\s*\}?$/i.test(text) || /^\{?\s*:?[\s]*null[\s]*\}?$/i.test(text);
+	return matchesNull && x <= 24 && y <= 24;
+}
+
+function sanitizeStudioElements(elements) {
+	return (Array.isArray(elements) ? elements : []).filter((el) => !isCorruptStudioTextElement(el));
+}
+
 function makePage(preset = "flyer", patch = {}) {
 	return {
 		id: uid(),
@@ -122,13 +135,13 @@ function normalizeDoc(doc) {
 				width: Number(page?.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 				height: Number(page?.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 				background: page?.background || doc.background || "#ffffff",
-				elements: Array.isArray(page?.elements) ? page.elements : [],
+				elements: sanitizeStudioElements(Array.isArray(page?.elements) ? page.elements : []),
 				guides: Array.isArray(page?.guides) ? page.guides : [],
 			})),
 			width: Number(firstPage.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 			height: Number(firstPage.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 			background: firstPage.background || doc.background || "#ffffff",
-			elements: Array.isArray(firstPage.elements) ? firstPage.elements : [],
+			elements: sanitizeStudioElements(Array.isArray(firstPage.elements) ? firstPage.elements : []),
 			guides: Array.isArray(firstPage.guides) ? firstPage.guides : [],
 		};
 	}
@@ -136,7 +149,7 @@ function normalizeDoc(doc) {
 		width: Number(doc.width || PRESETS[doc.preset]?.width || 1080),
 		height: Number(doc.height || PRESETS[doc.preset]?.height || 1350),
 		background: doc.background || "#ffffff",
-		elements: Array.isArray(doc.elements) ? doc.elements : [],
+		elements: sanitizeStudioElements(Array.isArray(doc.elements) ? doc.elements : []),
 		guides: Array.isArray(doc.guides) ? doc.guides : [],
 	});
 	return {
@@ -1474,7 +1487,7 @@ const addImage = () => {
 		const onUp = () => {
 			if (marquee && currentDoc) {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const ids = (currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
+				const ids = sanitizeStudioElements(currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
 			}
 			setDragState(null);
