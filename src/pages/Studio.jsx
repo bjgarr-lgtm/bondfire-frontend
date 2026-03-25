@@ -99,6 +99,19 @@ function clone(obj) {
 	return JSON.parse(JSON.stringify(obj));
 }
 
+function isCorruptStudioTextElement(el) {
+	if (!el || el.type !== "text") return false;
+	const text = String(el.text ?? "").trim();
+	const x = Number(el.x || 0);
+	const y = Number(el.y || 0);
+	const suspicious = /^(\{?\s*:?[\s]*null[\s]*\}?|:\s*null\}?|null\}?)$/i.test(text);
+	return suspicious && x <= 24 && y <= 24;
+}
+
+function sanitizeStudioElements(elements) {
+	return (Array.isArray(elements) ? elements : []).filter((el) => !isCorruptStudioTextElement(el));
+}
+
 function makePage(preset = "flyer", patch = {}) {
 	return {
 		id: uid(),
@@ -109,21 +122,6 @@ function makePage(preset = "flyer", patch = {}) {
 		guides: [],
 		...patch,
 	};
-}
-
-function sanitizeStudioElements(elements) {
-	return (Array.isArray(elements) ? elements : []).filter((el) => {
-		if (!el) return false;
-		if (el.type !== "text") return true;
-		const text = String(el.text ?? "").trim();
-		const looksCorrupt = /^[:;.,)}\]]*\s*null\s*[)}\]]*$/i.test(text) || /^[:;.,)}\]]*\s*:\s*null\s*[)}\]]*$/i.test(text);
-		const x = Number(el.x || 0);
-		const y = Number(el.y || 0);
-		const w = Number(el.width || 0);
-		const h = Number(el.height || 0);
-		if (looksCorrupt && x <= 24 && y <= 24 && w <= 140 && h <= 100) return false;
-		return true;
-	});
 }
 
 function normalizeDoc(doc) {
@@ -546,7 +544,6 @@ export default function Studio() {
 	const fileInputRef = React.useRef(null);
 	const fontUploadRef = React.useRef(null);
 	const dragPayloadRef = React.useRef(null);
-	const elementNodeMapRef = React.useRef(new Map());
 
 	const [docs, setDocs] = React.useState(() => readDocs(orgId));
 	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
@@ -626,11 +623,6 @@ export default function Studio() {
 	const selectedElements = React.useMemo(() => (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentPage, selectedIds]);
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
-	const registerElementNode = React.useCallback((id, node) => {
-		if (!id) return;
-		if (node) elementNodeMapRef.current.set(id, node);
-		else elementNodeMapRef.current.delete(id);
-	}, []);
 	const orderedLayers = React.useMemo(() => (currentPage?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentPage]);
 
 	React.useEffect(() => {
@@ -1484,23 +1476,9 @@ const addImage = () => {
 			}
 		};
 		const onUp = () => {
-			if (marquee && currentDoc && currentPage && canvasShellRef.current) {
-				const modelRect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const shellRect = canvasShellRef.current.getBoundingClientRect();
-				const screenRect = {
-					left: shellRect.left + modelRect.left * zoom,
-					top: shellRect.top + modelRect.top * zoom,
-					right: shellRect.left + (modelRect.left + modelRect.width) * zoom,
-					bottom: shellRect.top + (modelRect.top + modelRect.height) * zoom,
-				};
-				const ids = (currentPage.elements || []).filter((el) => {
-					const node = elementNodeMapRef.current.get(el.id);
-					if (node && typeof node.getBoundingClientRect === "function") {
-						const r = node.getBoundingClientRect();
-						return !(r.right < screenRect.left || r.left > screenRect.right || r.bottom < screenRect.top || r.top > screenRect.bottom);
-					}
-					return intersectsRect(el, modelRect);
-				}).map((el) => el.id);
+			if (marquee && currentDoc) {
+				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
+				const ids = sanitizeStudioElements(currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
 			}
 			setDragState(null);
@@ -1515,7 +1493,7 @@ const addImage = () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = React.useCallback((e) => {
 		if (!(e.ctrlKey || e.metaKey)) return;
@@ -2150,18 +2128,17 @@ const addImage = () => {
 															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
 															onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) { if (selectedIds.includes(el.id)) setTextEditId(el.id); else selectElement(el, false); } closeMenus(); }}
 															onContextMenu={(e) => openContextMenu(e, el)}
-															ref={(node) => registerElementNode(el.id, node)}
 															contentEditable={textEditId === el.id}
 															suppressContentEditableWarning
 															onBlur={(e) => { updateElement(el.id, { text: e.currentTarget.innerText }); setTextEditId(null); }}
 															style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden", cursor: textEditId === el.id ? "text" : common.cursor }}
 														>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-															if (el.type === "shape") return <div key={el.id} ref={(node) => registerElementNode(el.id, node)} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-															if (el.type === "svg") return <img key={el.id} ref={(node) => registerElementNode(el.id, node)} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
-															return <img key={el.id} ref={(node) => registerElementNode(el.id, node)} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
+															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-														
+														) : null}
 														{selected && !selected.locked ? [
 															{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
 															{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
