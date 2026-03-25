@@ -111,6 +111,21 @@ function makePage(preset = "flyer", patch = {}) {
 	};
 }
 
+function sanitizeStudioElements(elements) {
+	return (Array.isArray(elements) ? elements : []).filter((el) => {
+		if (!el) return false;
+		if (el.type !== "text") return true;
+		const text = String(el.text ?? "").trim();
+		const looksCorrupt = /^[:;.,)}\]]*\s*null\s*[)}\]]*$/i.test(text) || /^[:;.,)}\]]*\s*:\s*null\s*[)}\]]*$/i.test(text);
+		const x = Number(el.x || 0);
+		const y = Number(el.y || 0);
+		const w = Number(el.width || 0);
+		const h = Number(el.height || 0);
+		if (looksCorrupt && x <= 24 && y <= 24 && w <= 140 && h <= 100) return false;
+		return true;
+	});
+}
+
 function normalizeDoc(doc) {
 	if (!doc) return doc;
 	if (Array.isArray(doc.pages) && doc.pages.length) {
@@ -122,13 +137,13 @@ function normalizeDoc(doc) {
 				width: Number(page?.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 				height: Number(page?.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 				background: page?.background || doc.background || "#ffffff",
-				elements: Array.isArray(page?.elements) ? page.elements : [],
+				elements: sanitizeStudioElements(Array.isArray(page?.elements) ? page.elements : []),
 				guides: Array.isArray(page?.guides) ? page.guides : [],
 			})),
 			width: Number(firstPage.width || doc.width || PRESETS[doc.preset]?.width || 1080),
 			height: Number(firstPage.height || doc.height || PRESETS[doc.preset]?.height || 1350),
 			background: firstPage.background || doc.background || "#ffffff",
-			elements: Array.isArray(firstPage.elements) ? firstPage.elements : [],
+			elements: sanitizeStudioElements(Array.isArray(firstPage.elements) ? firstPage.elements : []),
 			guides: Array.isArray(firstPage.guides) ? firstPage.guides : [],
 		};
 	}
@@ -136,7 +151,7 @@ function normalizeDoc(doc) {
 		width: Number(doc.width || PRESETS[doc.preset]?.width || 1080),
 		height: Number(doc.height || PRESETS[doc.preset]?.height || 1350),
 		background: doc.background || "#ffffff",
-		elements: Array.isArray(doc.elements) ? doc.elements : [],
+		elements: sanitizeStudioElements(Array.isArray(doc.elements) ? doc.elements : []),
 		guides: Array.isArray(doc.guides) ? doc.guides : [],
 	});
 	return {
@@ -531,6 +546,7 @@ export default function Studio() {
 	const fileInputRef = React.useRef(null);
 	const fontUploadRef = React.useRef(null);
 	const dragPayloadRef = React.useRef(null);
+	const elementNodeMapRef = React.useRef(new Map());
 
 	const [docs, setDocs] = React.useState(() => readDocs(orgId));
 	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
@@ -610,6 +626,11 @@ export default function Studio() {
 	const selectedElements = React.useMemo(() => (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentPage, selectedIds]);
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
+	const registerElementNode = React.useCallback((id, node) => {
+		if (!id) return;
+		if (node) elementNodeMapRef.current.set(id, node);
+		else elementNodeMapRef.current.delete(id);
+	}, []);
 	const orderedLayers = React.useMemo(() => (currentPage?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentPage]);
 
 	React.useEffect(() => {
@@ -1366,15 +1387,6 @@ const addImage = () => {
 		};
 	}, [pan, zoom]);
 
-	const getMarqueePoint = React.useCallback((clientX, clientY) => {
-		const rect = canvasShellRef.current?.getBoundingClientRect();
-		if (!rect || !currentPage) return getCanvasPoint(clientX, clientY);
-		return {
-			x: clamp((clientX - rect.left) / zoom, 0, Number(currentPage.width || 0)),
-			y: clamp((clientY - rect.top) / zoom, 0, Number(currentPage.height || 0)),
-		};
-	}, [currentPage, zoom, getCanvasPoint]);
-
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
 		setLeftPanel(null);
@@ -1393,7 +1405,7 @@ const addImage = () => {
 		setSelectedGuideId(null);
 		setTextEditId(null);
 		if (tool === "select") {
-			const point = getMarqueePoint(e.clientX, e.clientY);
+			const point = getCanvasPoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
 		}
 	};
@@ -1453,7 +1465,7 @@ const addImage = () => {
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
-				const point = getMarqueePoint(e.clientX, e.clientY);
+				const point = getCanvasPoint(e.clientX, e.clientY);
 				const next = {
 					...marquee,
 					left: Math.min(marquee.startX, point.x),
@@ -1472,9 +1484,23 @@ const addImage = () => {
 			}
 		};
 		const onUp = () => {
-			if (marquee && currentDoc) {
-				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const ids = (currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
+			if (marquee && currentDoc && currentPage && canvasShellRef.current) {
+				const modelRect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
+				const shellRect = canvasShellRef.current.getBoundingClientRect();
+				const screenRect = {
+					left: shellRect.left + modelRect.left * zoom,
+					top: shellRect.top + modelRect.top * zoom,
+					right: shellRect.left + (modelRect.left + modelRect.width) * zoom,
+					bottom: shellRect.top + (modelRect.top + modelRect.height) * zoom,
+				};
+				const ids = (currentPage.elements || []).filter((el) => {
+					const node = elementNodeMapRef.current.get(el.id);
+					if (node && typeof node.getBoundingClientRect === "function") {
+						const r = node.getBoundingClientRect();
+						return !(r.right < screenRect.left || r.left > screenRect.right || r.bottom < screenRect.top || r.top > screenRect.bottom);
+					}
+					return intersectsRect(el, modelRect);
+				}).map((el) => el.id);
 				setSelectedIds(ids);
 			}
 			setDragState(null);
@@ -1489,7 +1515,7 @@ const addImage = () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = React.useCallback((e) => {
 		if (!(e.ctrlKey || e.metaKey)) return;
@@ -2124,14 +2150,15 @@ const addImage = () => {
 															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
 															onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) { if (selectedIds.includes(el.id)) setTextEditId(el.id); else selectElement(el, false); } closeMenus(); }}
 															onContextMenu={(e) => openContextMenu(e, el)}
+															ref={(node) => registerElementNode(el.id, node)}
 															contentEditable={textEditId === el.id}
 															suppressContentEditableWarning
 															onBlur={(e) => { updateElement(el.id, { text: e.currentTarget.innerText }); setTextEditId(null); }}
 															style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden", cursor: textEditId === el.id ? "text" : common.cursor }}
 														>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
-															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+															if (el.type === "shape") return <div key={el.id} ref={(node) => registerElementNode(el.id, node)} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+															if (el.type === "svg") return <img key={el.id} ref={(node) => registerElementNode(el.id, node)} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
+															return <img key={el.id} ref={(node) => registerElementNode(el.id, node)} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 														) : null}
