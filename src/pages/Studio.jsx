@@ -1,6 +1,10 @@
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../utils/api.js";
+import { STUDIO_ASSETS } from "../data/studioAssets.js";
+import { searchPixabayImages } from "../utils/pixabay.js";
+import { buildQrCodeUrl } from "../utils/qr.js";
+import { useStudioFonts } from "../hooks/useStudioFonts.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
 const PRESETS = {
@@ -10,15 +14,8 @@ const PRESETS = {
 	banner: { label: "Banner", width: 1600, height: 900 },
 };
 
-const FONT_OPTIONS = [
-	"Inter, system-ui, sans-serif",
-	"Arial, sans-serif",
-	"Georgia, serif",
-	"Times New Roman, serif",
-	"Trebuchet MS, sans-serif",
-	"Courier New, monospace",
-	"Impact, sans-serif",
-];
+const FALLBACK_FONT = "Inter";
+
 
 const TEMPLATE_LIBRARY = {
 	eventFlyer: {
@@ -29,7 +26,7 @@ const TEMPLATE_LIBRARY = {
 			elements: [
 				makeShapeElement({ x: 0, y: 0, width: 1080, height: 1350, fill: "#0f172a", radius: 0, name: "Background" }),
 				makeTextElement({ text: "{{org.name}}", x: 90, y: 110, width: 900, height: 60, fontSize: 28, fontWeight: 700, color: "#fca5a5", name: "Org Name" }),
-				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#ffffff", name: "Title" }),
+				makeTextElement({ text: "{{meeting.title}}", x: 90, y: 200, width: 900, height: 180, fontSize: 86, fontWeight: 800, lineHeight: 0.95, color: "#000000", name: "Title" }),
 				makeTextElement({ text: "{{meeting.date}}\n{{meeting.location}}", x: 90, y: 420, width: 420, height: 200, fontSize: 34, fontWeight: 600, lineHeight: 1.2, color: "#e5e7eb", name: "Date + Location" }),
 				makeShapeElement({ x: 610, y: 420, width: 320, height: 320, fill: "rgba(255,255,255,0.05)", stroke: "#fca5a5", strokeWidth: 2, radius: 24, name: "Image Frame" }),
 				makeTextElement({ text: "{{org.contact}}", x: 90, y: 1175, width: 920, height: 40, fontSize: 22, fontWeight: 500, color: "#d1d5db", name: "Contact" }),
@@ -102,16 +99,85 @@ function clone(obj) {
 	return JSON.parse(JSON.stringify(obj));
 }
 
-function makeDoc(preset = "flyer") {
+function isCorruptStudioNullText(el) {
+	if (!el || el.type !== "text") return false;
+	const text = String(el.text ?? "").trim();
+	const x = Number(el.x || 0);
+	const y = Number(el.y || 0);
+	return /^:?\s*null\s*\}?$/i.test(text) && x <= 24 && y <= 24;
+}
+
+function sanitizeStudioElements(elements) {
+	return (Array.isArray(elements) ? elements : []).filter((el) => !isCorruptStudioNullText(el));
+}
+
+function makePage(preset = "flyer", patch = {}) {
 	return {
 		id: uid(),
-		name: `Untitled ${PRESETS[preset]?.label || "Design"}`,
-		preset,
 		width: PRESETS[preset]?.width || 1080,
 		height: PRESETS[preset]?.height || 1350,
 		background: "#ffffff",
 		elements: [],
 		guides: [],
+		...patch,
+	};
+}
+
+function normalizeDoc(doc) {
+	if (!doc) return doc;
+	if (Array.isArray(doc.pages) && doc.pages.length) {
+		const firstPage = doc.pages[0] || makePage(doc.preset || "flyer");
+		return {
+			...doc,
+			pages: doc.pages.map((page) => ({
+				id: page?.id || uid(),
+				width: Number(page?.width || doc.width || PRESETS[doc.preset]?.width || 1080),
+				height: Number(page?.height || doc.height || PRESETS[doc.preset]?.height || 1350),
+				background: page?.background || doc.background || "#ffffff",
+				elements: sanitizeStudioElements(Array.isArray(page?.elements) ? page.elements : []),
+				guides: Array.isArray(page?.guides) ? page.guides : [],
+			})),
+			width: Number(firstPage.width || doc.width || PRESETS[doc.preset]?.width || 1080),
+			height: Number(firstPage.height || doc.height || PRESETS[doc.preset]?.height || 1350),
+			background: firstPage.background || doc.background || "#ffffff",
+			elements: sanitizeStudioElements(Array.isArray(firstPage.elements) ? firstPage.elements : []),
+			guides: Array.isArray(firstPage.guides) ? firstPage.guides : [],
+		};
+	}
+	const firstPage = makePage(doc.preset || "flyer", {
+		width: Number(doc.width || PRESETS[doc.preset]?.width || 1080),
+		height: Number(doc.height || PRESETS[doc.preset]?.height || 1350),
+		background: doc.background || "#ffffff",
+		elements: sanitizeStudioElements(Array.isArray(doc.elements) ? doc.elements : []),
+		guides: Array.isArray(doc.guides) ? doc.guides : [],
+	});
+	return {
+		...doc,
+		width: firstPage.width,
+		height: firstPage.height,
+		background: firstPage.background,
+		elements: firstPage.elements,
+		guides: firstPage.guides,
+		pages: [firstPage],
+	};
+}
+
+function normalizeDocs(docs) {
+	return (Array.isArray(docs) ? docs : []).map(normalizeDoc);
+}
+
+function makeDoc(preset = "flyer") {
+	const firstPage = makePage(preset);
+	return {
+		id: uid(),
+		name: `Untitled ${PRESETS[preset]?.label || "Design"}`,
+		preset,
+		width: firstPage.width,
+		height: firstPage.height,
+		background: firstPage.background,
+		elements: firstPage.elements,
+		guides: firstPage.guides,
+		pages: [firstPage],
 		updatedAt: Date.now(),
 	};
 }
@@ -132,7 +198,7 @@ function makeTextElement(patch = {}) {
 		opacity: 1,
 		fontSize: 36,
 		fontWeight: 700,
-		fontFamily: FONT_OPTIONS[0],
+		fontFamily: FALLBACK_FONT,
 		lineHeight: 1.1,
 		letterSpacing: 0,
 		align: "left",
@@ -158,6 +224,8 @@ function makeShapeElement(patch = {}) {
 		stroke: "#ffffff",
 		strokeWidth: 0,
 		radius: 16,
+		flipX: false,
+		flipY: false,
 		...patch,
 	};
 }
@@ -177,6 +245,8 @@ function makeImageElement(patch = {}) {
 		opacity: 1,
 		fit: "cover",
 		src: "",
+		flipX: false,
+		flipY: false,
 		...patch,
 	};
 }
@@ -192,11 +262,11 @@ function readJson(key, fallback) {
 
 function readDocs(orgId) {
 	if (!orgId) return [];
-	return readJson(storageKey(orgId), []);
+	return normalizeDocs(readJson(storageKey(orgId), []));
 }
 
 function saveDocs(orgId, docs) {
-	localStorage.setItem(storageKey(orgId), JSON.stringify(docs));
+	localStorage.setItem(storageKey(orgId), JSON.stringify(normalizeDocs(docs)));
 }
 
 function readBlocks(orgId) {
@@ -364,6 +434,39 @@ function roundRectPath(ctx, x, y, width, height, radius) {
 	ctx.closePath();
 }
 
+function svgMarkupToDataUrl(svg, fill = "#111111") {
+	const safeFill = String(fill || "#111111");
+	const markup = String(svg || "").replace(/currentColor/g, safeFill);
+	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+}
+
+function makeSvgElement(asset, patch = {}) {
+	return {
+		id: uid(),
+		type: "svg",
+		name: patch.name || asset?.label || "Asset",
+		locked: false,
+		hidden: false,
+		x: 140,
+		y: 140,
+		width: Number(patch.width || asset?.width || 180),
+		height: Number(patch.height || asset?.height || 180),
+		rotation: 0,
+		opacity: 1,
+		fill: patch.fill || "#111111",
+		svg: asset?.svg || patch.svg || "",
+		flipX: false,
+		flipY: false,
+		...patch,
+	};
+}
+
+function getElementTransform(el) {
+	const scaleX = el?.flipX ? -1 : 1;
+	const scaleY = el?.flipY ? -1 : 1;
+	return `rotate(${el?.rotation || 0}deg) scale(${scaleX}, ${scaleY})`;
+}
+
 async function renderDocToCanvas(doc, bindings) {
 	const canvas = document.createElement("canvas");
 	canvas.width = doc.width;
@@ -377,6 +480,7 @@ async function renderDocToCanvas(doc, bindings) {
 		ctx.globalAlpha = Number(el.opacity ?? 1);
 		ctx.translate(Number(el.x || 0) + Number(el.width || 0) / 2, Number(el.y || 0) + Number(el.height || 0) / 2);
 		ctx.rotate((Number(el.rotation || 0) * Math.PI) / 180);
+		ctx.scale(el.flipX ? -1 : 1, el.flipY ? -1 : 1);
 		ctx.translate(-Number(el.width || 0) / 2, -Number(el.height || 0) / 2);
 		if (el.type === "shape") {
 			roundRectPath(ctx, 0, 0, Number(el.width || 0), Number(el.height || 0), Number(el.radius || 0));
@@ -387,6 +491,11 @@ async function renderDocToCanvas(doc, bindings) {
 				ctx.strokeStyle = el.stroke || "transparent";
 				ctx.stroke();
 			}
+		} else if (el.type === "svg" && el.svg) {
+			try {
+				const img = await loadImageData(svgMarkupToDataUrl(el.svg, el.fill));
+				ctx.drawImage(img, 0, 0, Number(el.width || 0), Number(el.height || 0));
+			} catch {}
 		} else if (el.type === "image" && el.src) {
 			try {
 				const img = await loadImageData(el.src);
@@ -410,7 +519,7 @@ async function renderDocToCanvas(doc, bindings) {
 			const text = applyBindings(el.text || "", bindings);
 			ctx.fillStyle = el.color || "#fff";
 			ctx.textBaseline = "top";
-			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || FONT_OPTIONS[0]}`;
+			ctx.font = `${Number(el.fontWeight || 700)} ${Number(el.fontSize || 36)}px ${el.fontFamily || FALLBACK_FONT}`;
 			const lines = String(text).split("\n");
 			const lineHeight = Number(el.fontSize || 36) * Number(el.lineHeight || 1.1);
 			for (let i = 0; i < lines.length; i += 1) {
@@ -432,9 +541,13 @@ export default function Studio() {
 	const workspaceRef = React.useRef(null);
 	const canvasShellRef = React.useRef(null);
 	const fileInputRef = React.useRef(null);
+	const fontUploadRef = React.useRef(null);
+	const dragPayloadRef = React.useRef(null);
+	const suppressCanvasClickRef = React.useRef(false);
 
 	const [docs, setDocs] = React.useState(() => readDocs(orgId));
 	const [currentId, setCurrentId] = React.useState(() => readDocs(orgId)[0]?.id || null);
+	const [activePageIndex, setActivePageIndex] = React.useState(0);
 	const [selectedIds, setSelectedIds] = React.useState([]);
 	const [history, setHistory] = React.useState([]);
 	const [future, setFuture] = React.useState([]);
@@ -456,33 +569,71 @@ export default function Studio() {
 	const [driveLoading, setDriveLoading] = React.useState(false);
 	const [driveError, setDriveError] = React.useState("");
 	const [assetSearch, setAssetSearch] = React.useState("");
+	const [assetTab, setAssetTab] = React.useState("builtins");
+	const [pixabayResults, setPixabayResults] = React.useState([]);
+	const [pixabayLoading, setPixabayLoading] = React.useState(false);
+	const [pixabayError, setPixabayError] = React.useState("");
+	const [fontSearch, setFontSearch] = React.useState("");
 	const [dragState, setDragState] = React.useState(null);
 	const [resizeState, setResizeState] = React.useState(null);
 	const [marquee, setMarquee] = React.useState(null);
 	const [panState, setPanState] = React.useState(null);
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
+	const [textEditId, setTextEditId] = React.useState(null);
 
 	React.useEffect(() => {
-		const nextDocs = readDocs(orgId);
+		const nextDocs = normalizeDocs(readDocs(orgId));
 		setDocs(nextDocs);
 		setCurrentId(nextDocs[0]?.id || null);
+		setActivePageIndex(0);
 		setSelectedIds([]);
+		setTextEditId(null);
 		setHistory([]);
 		setFuture([]);
 	}, [orgId]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
+	const {
+		availableFonts,
+		uploadedFonts,
+		recentFonts,
+		ensureFontLoaded,
+		markFontRecent,
+		uploadFontFile,
+		fontStatus,
+	} = useStudioFonts({ orgId, search: fontSearch });
+
 	const currentDoc = React.useMemo(() => docs.find((doc) => doc.id === currentId) || null, [docs, currentId]);
-	const selectedElements = React.useMemo(() => (currentDoc?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentDoc, selectedIds]);
+	const currentPages = React.useMemo(() => {
+		if (!currentDoc) return [];
+		return Array.isArray(currentDoc.pages) && currentDoc.pages.length ? currentDoc.pages : [makePage(currentDoc.preset || "flyer", {
+			width: currentDoc.width,
+			height: currentDoc.height,
+			background: currentDoc.background,
+			elements: currentDoc.elements || [],
+			guides: currentDoc.guides || [],
+		})];
+	}, [currentDoc]);
+	const currentPage = React.useMemo(() => {
+		if (!currentPages.length) return null;
+		return currentPages[Math.max(0, Math.min(activePageIndex, currentPages.length - 1))] || currentPages[0] || null;
+	}, [currentPages, activePageIndex]);
+	const selectedElements = React.useMemo(() => (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)), [currentPage, selectedIds]);
 	const selected = selectedElements.length === 1 ? selectedElements[0] : null;
 	const selectionBounds = React.useMemo(() => getSelectionBounds(selectedElements), [selectedElements]);
-	const orderedLayers = React.useMemo(() => (currentDoc?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentDoc]);
+	const orderedLayers = React.useMemo(() => (currentPage?.elements || []).map((el, idx) => ({ ...el, _order: idx + 1 })).reverse(), [currentPage]);
+
+	React.useEffect(() => {
+		if (selected?.type === "text" && selected?.fontFamily) {
+			ensureFontLoaded(selected.fontFamily);
+		}
+	}, [selected?.id, selected?.type, selected?.fontFamily, ensureFontLoaded]);
 
 	const commitDocs = React.useCallback((updater) => {
 		setDocs((prev) => {
-			const next = typeof updater === "function" ? updater(prev) : updater;
+			const next = normalizeDocs(typeof updater === "function" ? updater(prev) : updater);
 			saveDocs(orgId, next);
 			setSavedAt(Date.now());
 			return next;
@@ -497,7 +648,7 @@ export default function Studio() {
 	const ensureDoc = React.useCallback((preset = "flyer") => {
 		if (currentDoc) return currentDoc.id;
 		const doc = makeDoc(preset);
-		const next = [doc];
+		const next = normalizeDocs([doc]);
 		setDocs(next);
 		saveDocs(orgId, next);
 		setSavedAt(Date.now());
@@ -505,7 +656,7 @@ export default function Studio() {
 		return doc.id;
 	}, [currentDoc, orgId]);
 
-	const fitCanvas = React.useCallback((doc = currentDoc) => {
+	const fitCanvas = React.useCallback((doc = currentPage || currentDoc) => {
 		if (!doc || !workspaceRef.current) return;
 		const rect = workspaceRef.current.getBoundingClientRect();
 		const availableWidth = Math.max(320, rect.width - 120);
@@ -514,27 +665,31 @@ export default function Studio() {
 		setZoom(nextZoom);
 		setPan({
 			x: Math.max(40, (rect.width - doc.width * nextZoom) / 2),
-			y: Math.max(40, (rect.height - doc.height * nextZoom) / 2),
+			y: 0,
 		});
-	}, [currentDoc]);
+		if (workspaceRef.current) {
+			workspaceRef.current.scrollTop = 0;
+		}
+	}, [currentPage, currentDoc]);
 
 	React.useEffect(() => {
 		if (currentDoc) {
-			setTimeout(() => fitCanvas(currentDoc), 0);
+			setTimeout(() => fitCanvas(currentPage || currentDoc), 0);
 		}
-	}, [currentId]);
+	}, [currentId, activePageIndex]);
 
 	React.useEffect(() => {
-		const onResize = () => fitCanvas(currentDoc);
+		const onResize = () => fitCanvas(currentPage || currentDoc);
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
-	}, [fitCanvas, currentDoc]);
+	}, [fitCanvas, currentId, activePageIndex]);
 
 	const createDoc = React.useCallback((preset = "flyer") => {
 		snapshot();
 		const doc = makeDoc(preset);
 		commitDocs((prev) => [doc, ...prev]);
 		setCurrentId(doc.id);
+		setActivePageIndex(0);
 		setSelectedIds([]);
 		setTimeout(() => fitCanvas(doc), 0);
 	}, [snapshot, commitDocs, fitCanvas]);
@@ -545,7 +700,14 @@ export default function Studio() {
 		snapshot();
 		const base = makeDoc(template.preset);
 		const built = template.build(bindings);
-		const doc = { ...base, name: built.name || template.label, elements: built.elements || [], updatedAt: Date.now() };
+		const firstPage = makePage(template.preset, {
+			width: base.width,
+			height: base.height,
+			background: base.background,
+			elements: built.elements || [],
+			guides: [],
+		});
+		const doc = normalizeDoc({ ...base, name: built.name || template.label, elements: firstPage.elements, guides: firstPage.guides, pages: [firstPage], updatedAt: Date.now() });
 		commitDocs((prev) => [doc, ...prev]);
 		setCurrentId(doc.id);
 		setSelectedIds(doc.elements[0]?.id ? [doc.elements[0].id] : []);
@@ -555,7 +717,7 @@ export default function Studio() {
 
 	const updateDoc = React.useCallback((patch) => {
 		if (!currentDoc) return;
-		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? { ...doc, ...patch, updatedAt: Date.now() } : doc));
+		commitDocs((prev) => prev.map((doc) => doc.id === currentDoc.id ? commitToActivePage(doc, patch) : doc));
 	}, [currentDoc, commitDocs]);
 
 	const updateElements = React.useCallback((ids, patchOrFn) => {
@@ -563,15 +725,14 @@ export default function Studio() {
 		const idSet = new Set(ids);
 		commitDocs((prev) => prev.map((doc) => {
 			if (doc.id !== currentDoc.id) return doc;
-			return {
-				...doc,
-				updatedAt: Date.now(),
-				elements: doc.elements.map((el) => {
+			return commitToActivePage(doc, (page) => ({
+				...page,
+				elements: (page.elements || []).map((el) => {
 					if (!idSet.has(el.id)) return el;
 					const patch = typeof patchOrFn === "function" ? patchOrFn(el) : patchOrFn;
 					return { ...el, ...patch };
 				}),
-			};
+			}));
 		}));
 	}, [currentDoc, commitDocs]);
 
@@ -583,7 +744,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeTextElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -592,7 +753,7 @@ export default function Studio() {
 		const docId = ensureDoc("flyer");
 		snapshot();
 		const element = makeShapeElement();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -601,12 +762,114 @@ export default function Studio() {
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
 		const element = makeImageElement({ src, name });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
 
-	const addImage = () => {
+	
+	const addSvgAsset = (asset) => {
+		if (!asset) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeSvgElement(asset, { name: asset.label, fill: brandKit.primary || "#111111" });
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	};
+
+	const placeImageAtPoint = React.useCallback((src, name, point) => {
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeImageElement({
+			src,
+			name: name || "Image",
+			x: Math.max(0, Number(point?.x || 0) - 160),
+			y: Math.max(0, Number(point?.y || 0) - 120),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs]);
+
+	const placeSvgAtPoint = React.useCallback((asset, point) => {
+		if (!asset?.svg) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeSvgElement(asset, {
+			name: asset.label || "Asset",
+			fill: brandKit.primary || "#111111",
+			x: Math.max(0, Number(point?.x || 0) - Number(asset.width || 180) / 2),
+			y: Math.max(0, Number(point?.y || 0) - Number(asset.height || 180) / 2),
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	}, [ensureDoc, currentDoc, snapshot, commitDocs, brandKit.primary]);
+
+	const setAssetDragImage = (e) => {
+		if (!e?.dataTransfer?.setDragImage || !e?.currentTarget?.cloneNode) return;
+		try {
+			const ghost = e.currentTarget.cloneNode(true);
+			ghost.style.position = "fixed";
+			ghost.style.top = "-10000px";
+			ghost.style.left = "-10000px";
+			ghost.style.width = `${Math.min(160, Math.max(96, e.currentTarget.getBoundingClientRect().width || 120))}px`;
+			ghost.style.pointerEvents = "none";
+			ghost.style.opacity = "0.96";
+			ghost.style.transform = "none";
+			ghost.style.zIndex = "9999";
+			document.body.appendChild(ghost);
+			e.dataTransfer.setDragImage(ghost, 16, 16);
+			window.setTimeout(() => ghost.remove(), 0);
+		} catch {}
+	};
+
+	const loadPixabayAssets = React.useCallback(async () => {
+		const query = assetSearch.trim() || "community poster";
+		setPixabayLoading(true);
+		setPixabayError("");
+		try {
+			const results = await searchPixabayImages(query);
+			setPixabayResults(results);
+		} catch (err) {
+			setPixabayError(String(err?.message || err || "Failed to load Pixabay results"));
+		} finally {
+			setPixabayLoading(false);
+		}
+	}, [assetSearch]);
+	const addQrCode = () => {
+		const value = window.prompt("Enter the URL or text for this QR code:");
+		if (!value) return;
+		const docId = ensureDoc(currentDoc?.preset || "flyer");
+		snapshot();
+		const element = makeImageElement({
+			name: "QR Code",
+			src: buildQrCodeUrl(value),
+			qrValue: value,
+			qrFg: "#000000",
+			qrBg: "#ffffff",
+			width: 220,
+			height: 220,
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({
+			...page,
+			elements: [...(Array.isArray(page.elements) ? page.elements : []), element],
+		}))));
+		setCurrentId(docId);
+		setSelectedIds([element.id]);
+	};
+
+const addImage = () => {
 		fileInputRef.current?.click();
 	};
 
@@ -616,6 +879,21 @@ export default function Studio() {
 		const reader = new FileReader();
 		reader.onload = () => addImageFromSrc(String(reader.result || ""), file.name || "Image");
 		reader.readAsDataURL(file);
+		e.target.value = "";
+	};
+
+	const onUploadFont = async (e) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		try {
+			const uploaded = await uploadFontFile(file);
+			if (selected?.type === "text" && uploaded?.family) {
+				updateElement(selected.id, { fontFamily: uploaded.family });
+				markFontRecent(uploaded.family);
+			}
+		} catch (err) {
+			window.alert(String(err?.message || err || "Failed to upload font"));
+		}
 		e.target.value = "";
 	};
 
@@ -638,31 +916,31 @@ export default function Studio() {
 	}, [orgId]);
 
 	React.useEffect(() => {
-		if (leftPanel === "assets" && !driveAssets.length && !driveLoading) {
+		if (leftPanel === "assets" && assetTab === "drive" && !driveAssets.length && !driveLoading) {
 			loadDriveAssets();
 		}
-	}, [leftPanel, driveAssets.length, driveLoading, loadDriveAssets]);
+	}, [leftPanel, assetTab, driveAssets.length, driveLoading, loadDriveAssets]);
 
 	const removeSelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
 		const selectedSet = new Set(selectedIds);
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: doc.elements.filter((el) => !selectedSet.has(el.id)) }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: (page.elements || []).filter((el) => !selectedSet.has(el.id)) }))));
 		setSelectedIds([]);
 	};
 
 	const duplicateSelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
-		const toDup = currentDoc.elements.filter((el) => selectedIds.includes(el.id));
+		const toDup = (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id));
 		const dupes = withNewIds(toDup).map((el) => ({ ...el, name: `${el.name || el.type} Copy` }));
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...dupes] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), ...dupes] }))));
 		setSelectedIds(dupes.map((el) => el.id));
 	};
 
 	const copySelected = () => {
 		if (!currentDoc || !selectedIds.length) return;
-		const copied = currentDoc.elements.filter((el) => selectedIds.includes(el.id)).map((el) => clone(el));
+		const copied = (currentPage?.elements || []).filter((el) => selectedIds.includes(el.id)).map((el) => clone(el));
 		setClipboard(copied);
 	};
 
@@ -675,11 +953,7 @@ export default function Studio() {
 			y: Number(el.y || 0) + 24,
 			name: `${el.name || el.type} Copy`,
 		}));
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : {
-			...doc,
-			updatedAt: Date.now(),
-			elements: [...(Array.isArray(doc.elements) ? doc.elements : []), ...pasted],
-		}));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), ...pasted] }))));
 		setSelectedIds(pasted.map((el) => el.id));
 	};
 
@@ -693,7 +967,7 @@ export default function Studio() {
 		if (!currentDoc || !selectedIds.length) return;
 		snapshot();
 		const selectedSet = new Set(selectedIds);
-		const elements = currentDoc.elements.slice();
+		const elements = (currentPage?.elements || []).slice();
 		if (dir === "up") {
 			for (let i = elements.length - 2; i >= 0; i -= 1) {
 				if (selectedSet.has(elements[i].id) && !selectedSet.has(elements[i + 1].id)) {
@@ -707,7 +981,7 @@ export default function Studio() {
 				}
 			}
 		}
-		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : { ...doc, updatedAt: Date.now(), elements }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : commitToActivePage(doc, { elements })));
 	};
 
 	const setFlagOnSelection = (key, value) => {
@@ -731,14 +1005,14 @@ export default function Studio() {
 	const addBoundText = (token, label) => {
 		const docId = ensureDoc("flyer");
 		snapshot();
-		const element = makeTextElement({ name: label, text: `{{${token}}}`, x: 80, y: 80 + ((currentDoc?.elements?.length || 0) * 24), width: 420, height: 80 });
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		const element = makeTextElement({ name: label, text: `{{${token}}}`, x: 80, y: 80 + ((currentPage?.elements?.length || 0) * 24), width: 420, height: 80 });
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
 
 	const saveCurrentDoc = () => {
-		saveDocs(orgId, docs);
+		saveDocs(orgId, normalizeDocs(docs));
 		setSavedAt(Date.now());
 	};
 
@@ -751,8 +1025,15 @@ export default function Studio() {
 		copy.updatedAt = Date.now();
 		copy.elements = withNewIds(copy.elements || []);
 		copy.guides = (copy.guides || []).map((g) => ({ ...g, id: uid() }));
+		copy.pages = (copy.pages || []).map((page, index) => ({
+			...page,
+			id: uid(),
+			elements: index === 0 ? copy.elements : withNewIds(page.elements || []),
+			guides: (page.guides || []).map((g) => ({ ...g, id: uid() })),
+		}));
 		commitDocs((prev) => [copy, ...prev]);
 		setCurrentId(copy.id);
+		setActivePageIndex(0);
 		setSelectedIds([]);
 		setFileMenuOpen(false);
 		setLeftPanel(null);
@@ -761,7 +1042,71 @@ export default function Studio() {
 
 	const addPage = () => {
 		const nextPreset = currentDoc?.preset || "flyer";
-		createDoc(nextPreset);
+		if (!currentDoc) {
+			createDoc(nextPreset);
+			return;
+		}
+		snapshot();
+		const page = makePage(nextPreset, {
+			width: currentDoc.width,
+			height: currentDoc.height,
+			background: currentDoc.background,
+		});
+		commitDocs((prev) => prev.map((doc) => doc.id !== currentDoc.id ? doc : normalizeDoc({
+			...doc,
+			pages: [...(Array.isArray(doc.pages) && doc.pages.length ? doc.pages : [makePage(doc.preset || nextPreset, {
+				width: doc.width,
+				height: doc.height,
+				background: doc.background,
+				elements: doc.elements || [],
+				guides: doc.guides || [],
+			})]), page],
+			updatedAt: Date.now(),
+		})));
+		setActivePageIndex(currentPages.length);
+		setSelectedIds([]);
+	};
+
+	const duplicatePage = (pageIndex) => {
+		if (!currentDoc || !currentPages[pageIndex]) return;
+		snapshot();
+		const sourcePage = currentPages[pageIndex];
+		const copyPage = {
+			...clone(sourcePage),
+			id: uid(),
+			elements: withNewIds(sourcePage.elements || []),
+			guides: (sourcePage.guides || []).map((guide) => ({ ...guide, id: uid() })),
+		};
+		commitDocs((prev) => prev.map((doc) => {
+			if (doc.id !== currentDoc.id) return doc;
+			const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || currentDoc.preset || "flyer", {
+				width: doc.width,
+				height: doc.height,
+				background: doc.background,
+				elements: doc.elements || [],
+				guides: doc.guides || [],
+			})];
+			pages.splice(pageIndex + 1, 0, copyPage);
+			return normalizeDoc({ ...doc, pages, updatedAt: Date.now() });
+		}));
+		setActivePageIndex(pageIndex + 1);
+		setSelectedIds([]);
+	};
+
+	const deletePage = (pageIndex) => {
+		if (!currentDoc || currentPages.length <= 1) return;
+		snapshot();
+		commitDocs((prev) => prev.map((doc) => {
+			if (doc.id !== currentDoc.id) return doc;
+			const pages = (Array.isArray(doc.pages) ? doc.pages : []).filter((_, index) => index !== pageIndex);
+			return normalizeDoc({ ...doc, pages, updatedAt: Date.now() });
+		}));
+		setActivePageIndex((prev) => {
+			if (prev > pageIndex) return prev - 1;
+			if (prev === pageIndex) return Math.max(0, pageIndex - 1);
+			return prev;
+		});
+		setSelectedIds([]);
 	};
 
 	const deleteDoc = (docId) => {
@@ -769,7 +1114,7 @@ export default function Studio() {
 		if (!target) return;
 		if (!window.confirm(`Delete "${target.name}"?`)) return;
 		snapshot();
-		const next = docs.filter((doc) => doc.id !== docId);
+		const next = normalizeDocs(docs.filter((doc) => doc.id !== docId));
 		setDocs(next);
 		saveDocs(orgId, next);
 		setSavedAt(Date.now());
@@ -793,7 +1138,7 @@ export default function Studio() {
 		const element = { ...clone(block.element), id: uid(), x: Number(block.element?.x || 80) + 24, y: Number(block.element?.y || 80) + 24, name: `${block.name} Copy` };
 		const docId = ensureDoc(currentDoc?.preset || "flyer");
 		snapshot();
-		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
+		commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : commitToActivePage(doc, (page) => ({ ...page, elements: [...(Array.isArray(page.elements) ? page.elements : []), element] }))));
 		setCurrentId(docId);
 		setSelectedIds([element.id]);
 	};
@@ -815,7 +1160,7 @@ export default function Studio() {
 		const groups = [...new Set(selectedElements.map((el) => el.groupId).filter(Boolean))];
 		if (!groups.length) return;
 		snapshot();
-		const ids = currentDoc.elements.filter((el) => groups.includes(el.groupId)).map((el) => el.id);
+		const ids = (currentPage?.elements || []).filter((el) => groups.includes(el.groupId)).map((el) => el.id);
 		updateElements(ids, { groupId: null, groupName: null });
 	};
 
@@ -832,9 +1177,9 @@ export default function Studio() {
 		const clean = [...new Set((ids || []).filter(Boolean))];
 		if (!clean.length) return;
 		snapshot();
-		const groupIds = [...new Set((currentDoc?.elements || []).filter((el) => clean.includes(el.id)).map((el) => el.groupId).filter(Boolean))];
+		const groupIds = [...new Set((currentPage?.elements || []).filter((el) => clean.includes(el.id)).map((el) => el.groupId).filter(Boolean))];
 		if (!groupIds.length) return;
-		const allIds = (currentDoc?.elements || []).filter((el) => groupIds.includes(el.groupId)).map((el) => el.id);
+		const allIds = (currentPage?.elements || []).filter((el) => groupIds.includes(el.groupId)).map((el) => el.id);
 		updateElements(allIds, { groupId: null, groupName: null });
 		setSelectedIds(allIds);
 	};
@@ -956,7 +1301,7 @@ export default function Studio() {
 
 	const selectElement = React.useCallback((el, add = false) => {
 		if (!el) return;
-		const idsForElement = el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id];
+		const idsForElement = el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id];
 		setSelectedIds((prev) => {
 			if (!add) return idsForElement;
 			const next = new Set(prev);
@@ -983,21 +1328,21 @@ export default function Studio() {
 			selectElement(el, true);
 			return;
 		}
-		const groupSize = el.groupId ? currentDoc.elements.filter((item) => item.groupId === el.groupId).length : 1;
+		const groupSize = el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).length : 1;
 		if (!selectedIds.includes(el.id) || selectedIds.length !== groupSize) {
 			selectElement(el, false);
 		}
 		const activeIds = el.groupId
-			? currentDoc.elements.filter((item) => item.groupId === el.groupId).map((item) => item.id)
+			? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id)
 			: (selectedIds.includes(el.id) ? selectedIds : [el.id]);
 		const ids = activeIds.filter((id) => {
-			const item = currentDoc.elements.find((x) => x.id === id);
+			const item = (currentPage?.elements || []).find((x) => x.id === id);
 			return item && !item.locked;
 		});
 		if (!ids.length) return;
 		const point = getCanvasPoint(e.clientX, e.clientY);
 		const origins = Object.fromEntries(ids.map((id) => {
-			const item = currentDoc.elements.find((x) => x.id === id);
+			const item = (currentPage?.elements || []).find((x) => x.id === id);
 			return [id, { x: Number(item?.x || 0), y: Number(item?.y || 0) }];
 		}));
 		const anchorOrigin = origins[el.id] || { x: Number(el.x || 0), y: Number(el.y || 0) };
@@ -1036,17 +1381,18 @@ export default function Studio() {
 
 	const getMarqueePoint = React.useCallback((clientX, clientY) => {
 		const rect = canvasShellRef.current?.getBoundingClientRect();
-		if (!rect || !currentDoc) return getCanvasPoint(clientX, clientY);
+		if (!rect || !currentPage) return getCanvasPoint(clientX, clientY);
 		return {
-			x: clamp((clientX - rect.left) / zoom, 0, Number(currentDoc.width || 0)),
-			y: clamp((clientY - rect.top) / zoom, 0, Number(currentDoc.height || 0)),
+			x: clamp((clientX - rect.left) / zoom, 0, Number(currentPage.width || 0)),
+			y: clamp((clientY - rect.top) / zoom, 0, Number(currentPage.height || 0)),
 		};
-	}, [currentDoc, zoom, getCanvasPoint]);
+	}, [currentPage, zoom, getCanvasPoint]);
 
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
 		setLeftPanel(null);
 		setFileMenuOpen(false);
+		setTextEditId(null);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 		if (e.button === 2) {
@@ -1058,6 +1404,7 @@ export default function Studio() {
 		}
 		setSelectedIds([]);
 		setSelectedGuideId(null);
+		setTextEditId(null);
 		if (tool === "select") {
 			const point = getMarqueePoint(e.clientX, e.clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
@@ -1082,8 +1429,8 @@ export default function Studio() {
 					};
 				});
 			}
-			if (resizeState && currentDoc) {
-				const el = currentDoc.elements.find((item) => item.id === resizeState.id);
+			if (resizeState && currentPage) {
+				const el = (currentPage?.elements || []).find((item) => item.id === resizeState.id);
 				if (!el) return;
 				const dx = (e.clientX - resizeState.startX) / zoom;
 				const dy = (e.clientY - resizeState.startY) / zoom;
@@ -1112,10 +1459,10 @@ export default function Studio() {
 					if (handle.includes("n")) nextY -= (minH - nextHeight);
 					nextHeight = minH;
 				}
-				nextX = clamp(nextX, 0, currentDoc.width - minW);
-				nextY = clamp(nextY, 0, currentDoc.height - minH);
-				nextWidth = clamp(nextWidth, minW, currentDoc.width - nextX);
-				nextHeight = clamp(nextHeight, minH, currentDoc.height - nextY);
+				nextX = clamp(nextX, 0, currentPage.width - minW);
+				nextY = clamp(nextY, 0, currentPage.height - minH);
+				nextWidth = clamp(nextWidth, minW, currentPage.width - nextX);
+				nextHeight = clamp(nextHeight, minH, currentPage.height - nextY);
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
@@ -1129,9 +1476,9 @@ export default function Studio() {
 				};
 				setMarquee(next);
 			}
-			if (guideDrag && currentDoc) {
+			if (guideDrag && currentPage) {
 				const point = getCanvasPoint(e.clientX, e.clientY);
-				const position = guideDrag.orientation === "vertical" ? clamp(point.x, 0, currentDoc.width) : clamp(point.y, 0, currentDoc.height);
+				const position = guideDrag.orientation === "vertical" ? clamp(point.x, 0, currentPage.width) : clamp(point.y, 0, currentPage.height);
 				updateDoc({
 					guides: (currentDoc.guides || []).map((guide) => guide.id === guideDrag.id ? { ...guide, position } : guide),
 				});
@@ -1140,8 +1487,9 @@ export default function Studio() {
 		const onUp = () => {
 			if (marquee && currentDoc) {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
-				const ids = currentDoc.elements.filter((el) => intersectsRect(el, rect)).map((el) => el.id);
+				const ids = sanitizeStudioElements(currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
 				setSelectedIds(ids);
+				suppressCanvasClickRef.current = true;
 			}
 			setDragState(null);
 			setResizeState(null);
@@ -1155,10 +1503,12 @@ export default function Studio() {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
 
-	const handleWheel = (e) => {
+	const handleWheel = React.useCallback((e) => {
+		if (!(e.ctrlKey || e.metaKey)) return;
 		e.preventDefault();
+		e.stopPropagation();
 		if (!currentDoc || !workspaceRef.current) return;
 		const rect = workspaceRef.current.getBoundingClientRect();
 		const pointX = e.clientX - rect.left;
@@ -1171,41 +1521,102 @@ export default function Studio() {
 			x: pointX - worldX * nextZoom - RULER_SIZE,
 			y: pointY - worldY * nextZoom - RULER_SIZE,
 		});
-	};
+	}, [currentDoc, pan.x, pan.y, zoom]);
 
 	const onWorkspaceDrop = (e) => {
 		e.preventDefault();
 		e.stopPropagation();
+		const point = getCanvasPoint(e.clientX, e.clientY);
+		const payloads = [
+			dragPayloadRef.current ? JSON.stringify(dragPayloadRef.current) : "",
+			e.dataTransfer?.getData("application/x-bondfire-svg") || "",
+			e.dataTransfer?.getData("application/x-bondfire-image") || "",
+			e.dataTransfer?.getData("text/plain") || "",
+		];
+		for (const raw of payloads) {
+			if (!raw) continue;
+			try {
+				const data = JSON.parse(raw);
+				if ((data?.kind === "svg" || data?.svg) && data?.svg) {
+					placeSvgAtPoint(data, point);
+					dragPayloadRef.current = null;
+					return;
+				}
+				if ((data?.kind === "image" || data?.src) && data?.src) {
+					placeImageAtPoint(String(data.src), String(data.name || "Image"), point);
+					dragPayloadRef.current = null;
+					return;
+				}
+			} catch {}
+		}
 		const file = e.dataTransfer?.files?.[0];
-		if (!file || !String(file.type || "").startsWith("image/")) return;
-		const reader = new FileReader();
-		reader.onload = () => {
-			const point = getCanvasPoint(e.clientX, e.clientY);
-			const docId = ensureDoc(currentDoc?.preset || "flyer");
-			snapshot();
-			const element = makeImageElement({ src: String(reader.result || ""), name: file.name || "Image", x: Math.max(0, point.x - 160), y: Math.max(0, point.y - 120) });
-			commitDocs((prev) => prev.map((doc) => doc.id !== docId ? doc : { ...doc, updatedAt: Date.now(), elements: [...(Array.isArray(doc.elements) ? doc.elements : []), element] }));
-			setCurrentId(docId);
-			setSelectedIds([element.id]);
-		};
-		reader.readAsDataURL(file);
+		if (file && String(file.type || "").startsWith("image/")) {
+			const reader = new FileReader();
+			reader.onload = () => {
+				placeImageAtPoint(String(reader.result || ""), file.name || "Image", point);
+			};
+			reader.readAsDataURL(file);
+		}
+		dragPayloadRef.current = null;
 	};
 
 	const onWorkspaceDragOver = (e) => {
 		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 	};
+	const onWorkspaceDragEnter = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+	};
+	const clearDragPayload = () => {
+		dragPayloadRef.current = null;
+	};
+
+	React.useEffect(() => {
+		const node = workspaceRef.current;
+		if (!node) return;
+		const onNativeWheel = (e) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			handleWheel(e);
+		};
+		node.addEventListener("wheel", onNativeWheel, { passive: false });
+		return () => node.removeEventListener("wheel", onNativeWheel);
+	}, [handleWheel]);
+
+	React.useEffect(() => {
+		const workspace = workspaceRef.current;
+		const shell = canvasShellRef.current;
+		const onNativeDragOver = (e) => {
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+		};
+		const onNativeDrop = (e) => onWorkspaceDrop(e);
+		workspace?.addEventListener("dragover", onNativeDragOver);
+		workspace?.addEventListener("drop", onNativeDrop);
+		shell?.addEventListener("dragover", onNativeDragOver);
+		shell?.addEventListener("drop", onNativeDrop);
+		return () => {
+			workspace?.removeEventListener("dragover", onNativeDragOver);
+			workspace?.removeEventListener("drop", onNativeDrop);
+			shell?.removeEventListener("dragover", onNativeDragOver);
+			shell?.removeEventListener("drop", onNativeDrop);
+		};
+	}, [onWorkspaceDrop, currentId, activePageIndex]);
+
 
 	const openContextMenu = (e, el) => {
 		e.preventDefault();
 		e.stopPropagation();
 		if (el) {
-			const alreadySelected = selectedIds.includes(el.id) || (el.groupId && (currentDoc?.elements || []).some((item) => item.groupId === el.groupId && selectedIds.includes(item.id)));
+			const alreadySelected = selectedIds.includes(el.id) || (el.groupId && (currentPage?.elements || []).some((item) => item.groupId === el.groupId && selectedIds.includes(item.id)));
 			if (!alreadySelected) {
 				selectElement(el, false);
 			}
 		}
 		const targetIds = el
-			? (el.groupId ? (currentDoc?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
+			? (el.groupId ? (currentPage?.elements || []).filter((item) => item.groupId === el.groupId).map((item) => item.id) : [el.id])
 			: [];
 		setContextMenu({
 			x: e.clientX,
@@ -1219,6 +1630,7 @@ export default function Studio() {
 	const closeMenus = () => {
 		setLeftPanel(null);
 		setFileMenuOpen(false);
+		setTextEditId(null);
 		setExportMenuOpen(false);
 		setContextMenu(null);
 		setDocSettingsOpen(false);
@@ -1226,21 +1638,27 @@ export default function Studio() {
 
 	const exportJson = () => {
 		if (!currentDoc) return;
-		downloadBlob(`${printableName(currentDoc.name)}.json`, new Blob([JSON.stringify(currentDoc, null, 2)], { type: "application/json" }));
+		downloadBlob(`${printableName(currentDoc.name)}.json`, new Blob([JSON.stringify(normalizeDoc(currentDoc), null, 2)], { type: "application/json" }));
 	};
 
 	const exportPng = async () => {
-		if (!currentDoc) return;
-		const canvas = await renderDocToCanvas(currentDoc, bindings);
+		if (!currentDoc || !currentPage) return;
+		const pageDoc = normalizeDoc({ ...currentDoc, width: currentPage.width, height: currentPage.height, background: currentPage.background, elements: currentPage.elements || [], guides: currentPage.guides || [] });
+		const canvas = await renderDocToCanvas(pageDoc, bindings);
 		canvas.toBlob((png) => {
-			if (png) downloadBlob(`${printableName(currentDoc.name)}.png`, png);
+			if (png) downloadBlob(`${printableName(currentDoc.name)}-page-${activePageIndex + 1}.png`, png);
 		}, "image/png");
 	};
 
 	const exportPdf = async () => {
-		if (!currentDoc) return;
-		const canvas = await renderDocToCanvas(currentDoc, bindings);
-		const dataUrl = canvas.toDataURL("image/png");
+		if (!currentDoc || !currentPages.length) return;
+		const pageDataUrls = [];
+		for (const page of currentPages) {
+			const pageDoc = normalizeDoc({ ...currentDoc, width: page.width, height: page.height, background: page.background, elements: page.elements || [], guides: page.guides || [] });
+			const canvas = await renderDocToCanvas(pageDoc, bindings);
+			pageDataUrls.push({ url: canvas.toDataURL("image/png"), width: page.width, height: page.height });
+		}
+		const dataUrl = pageDataUrls[0]?.url || "";
 		const frame = document.createElement("iframe");
 		frame.style.position = "fixed";
 		frame.style.right = "0";
@@ -1252,7 +1670,7 @@ export default function Studio() {
 		const doc = frame.contentWindow?.document;
 		if (!doc) return;
 		doc.open();
-		doc.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#fff;}img{display:block;width:100%;height:auto;}@page{size:auto;margin:0;}</style></head><body><img src="${dataUrl}" alt="" /></body></html>`);
+		doc.write(`<!doctype html><html><head><title>${currentDoc.name || "Design"}</title><style>html,body{margin:0;padding:0;background:#fff;} .page-break{break-after:page;page-break-after:always;} img{display:block;width:100%;height:auto;} @page{size:auto;margin:0;}</style></head><body>${pageDataUrls.map((item, index) => `<div class="${index < pageDataUrls.length - 1 ? "page-break" : ""}"><img src="${item.url}" alt="" /></div>`).join("")}</body></html>`);
 		doc.close();
 		setTimeout(() => {
 			frame.contentWindow?.focus();
@@ -1265,6 +1683,7 @@ export default function Studio() {
 		const onGlobalDown = () => setContextMenu(null);
 		const onEsc = (e) => {
 			if (e.key === "Escape") {
+				setTextEditId(null);
 				setContextMenu(null);
 				setLeftPanel(null);
 				setFileMenuOpen(false);
@@ -1285,18 +1704,69 @@ export default function Studio() {
 		if (!q) return driveAssets;
 		return driveAssets.filter((file) => String(file?.name || "").toLowerCase().includes(q));
 	}, [driveAssets, assetSearch]);
+	const filteredBuiltInAssets = React.useMemo(() => {
+		const q = assetSearch.trim().toLowerCase();
+		if (!q) return STUDIO_ASSETS;
+		return STUDIO_ASSETS.filter((asset) => String(asset?.label || "").toLowerCase().includes(q) || String(asset?.category || "").toLowerCase().includes(q));
+	}, [assetSearch]);
 
 	const multiSelection = selectedIds.length > 1;
-	const currentGuides = currentDoc?.guides || [];
+	const currentGuides = currentPage?.guides || [];
 	const rulerStep = React.useMemo(() => {
 		const steps = [5, 10, 25, 50, 100, 200, 500, 1000];
 		return steps.find((step) => step * zoom >= 45) || 1000;
 	}, [zoom]);
+	const pageGap = 32;
+	const pageLayouts = React.useMemo(() => {
+		let offsetTop = RULER_SIZE + 36;
+		return currentPages.map((page) => {
+			const layout = {
+				left: pan.x + RULER_SIZE,
+				top: offsetTop,
+				width: Number(page.width || currentDoc?.width || 1080) * zoom,
+				height: Number(page.height || currentDoc?.height || 1350) * zoom,
+			};
+			offsetTop += layout.height + pageGap;
+			return layout;
+		});
+	}, [currentPages, pan.x, pan.y, zoom, currentDoc]);
+	const pageStackHeight = React.useMemo(() => {
+		if (!pageLayouts.length) return 900;
+		const last = pageLayouts[pageLayouts.length - 1];
+		return Math.max(980, last.top + last.height + 170);
+	}, [pageLayouts]);
+	const activePageLayout = React.useMemo(() => {
+		if (!pageLayouts.length) return null;
+		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
+	}, [pageLayouts, activePageIndex]);
 
+	function commitToActivePage(doc, pageUpdater) {
+		const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || "flyer", {
+			width: doc.width,
+			height: doc.height,
+			background: doc.background,
+			elements: doc.elements || [],
+			guides: doc.guides || [],
+		})];
+		const pageIndex = Math.max(0, Math.min(activePageIndex, pages.length - 1));
+		const page = pages[pageIndex];
+		pages[pageIndex] = typeof pageUpdater === "function" ? pageUpdater(page) : { ...page, ...pageUpdater };
+		const nextDoc = { ...doc, pages, updatedAt: Date.now() };
+		if (pageIndex === 0) {
+			nextDoc.width = pages[0].width;
+			nextDoc.height = pages[0].height;
+			nextDoc.background = pages[0].background;
+			nextDoc.elements = pages[0].elements;
+			nextDoc.guides = pages[0].guides;
+		}
+		return normalizeDoc(nextDoc);
+	}
 
 	return (
+
 		<div style={{ padding: 8, display: "grid", gap: 8 }}>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
+			<input ref={fontUploadRef} type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/x-font-ttf,application/x-font-otf" onChange={onUploadFont} style={{ display: "none" }} />
 
 			<div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between", flexWrap: "nowrap" }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 420px", position: "relative" }}>
@@ -1304,7 +1774,7 @@ export default function Studio() {
 					{docSettingsOpen && currentDoc ? (
 						<div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 40, right: 360, width: 220, zIndex: 40, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 							<div style={{ fontWeight: 700, marginBottom: 8 }}>Page background</div>
-							<input type="color" value={currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
+							<input type="color" value={currentPage?.background || currentDoc.background || "#ffffff"} onChange={(e) => updateDoc({ background: e.target.value })} style={{ width: "100%", height: 36, marginBottom: 10 }} />
 							<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
 								{["#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent].map((color) => (
 									<button key={color} onClick={() => updateDoc({ background: color })} style={{ height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: color }} />
@@ -1332,7 +1802,8 @@ export default function Studio() {
 				</div>
 				<div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
 					<div style={{ display: "grid", lineHeight: 1.05, textAlign: "right", marginRight: 6 }}>
-						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+						<div style={{ fontSize: 11, fontWeight: 700 }}>{currentPage ? `${currentPage.width} × ${currentPage.height}` : currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+						<div style={{ fontSize: 10, opacity: 0.7 }}>{currentDoc ? `page ${activePageIndex + 1} of ${currentPages.length}` : ""}</div>
 						<div style={{ fontSize: 10, opacity: 0.7 }}>{savedAt ? `Saved ${formatSavedAt(savedAt)}` : "Unsaved"}</div>
 					</div>
 					<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={undo} disabled={!history.length}>↶</button>
@@ -1405,6 +1876,7 @@ export default function Studio() {
 								<button style={panelButtonStyle(false)} onClick={addText}>Add Text</button>
 								<button style={panelButtonStyle(false)} onClick={addShape}>Add Shape</button>
 								<button style={panelButtonStyle(false)} onClick={addImage}>Upload Image</button>
+								<button style={panelButtonStyle(false)} onClick={addQrCode}>Add QR Code</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("vertical")}>Add Vertical Guide</button>
 								<button style={panelButtonStyle(false)} onClick={() => addGuide("horizontal")}>Add Horizontal Guide</button>
 								<hr style={{ opacity: 0.15, margin: "8px 0" }} />
@@ -1431,25 +1903,83 @@ export default function Studio() {
 						{leftPanel === "assets" ? (
 							<div style={{ display: "grid", gap: 8 }}>
 								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-									<div style={{ fontWeight: 800 }}>Drive Assets</div>
-									<button onClick={loadDriveAssets}>Refresh</button>
+									<div style={{ fontWeight: 800 }}>Assets</div>
+									<button style={panelButtonStyle(false)} onClick={addImage}>Upload</button>
 								</div>
-								<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Search Drive images" style={{ width: "100%" }} />
-								<button style={panelButtonStyle(false)} onClick={addImage}>Upload from device</button>
-								{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
-								{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
-								<div style={{ display: "grid", gap: 8 }}>
-									{filteredAssets.map((file) => (
-										<div key={file.id} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-											<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-												<img src={file.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-											</div>
-											<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
-											<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
+								<div style={{ display: "flex", gap: 6 }}>
+									<button style={{ ...panelButtonStyle(assetTab === "builtins"), textAlign: "center" }} onClick={() => setAssetTab("builtins")}>Built-in</button>
+									<button style={{ ...panelButtonStyle(assetTab === "pixabay"), textAlign: "center" }} onClick={() => setAssetTab("pixabay")}>Pixabay</button>
+									<button style={{ ...panelButtonStyle(assetTab === "drive"), textAlign: "center" }} onClick={() => setAssetTab("drive")}>Drive</button>
+								</div>
+								<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder={assetTab === "pixabay" ? "Search Pixabay images" : assetTab === "drive" ? "Search Drive images" : "Search built-in assets"} style={{ width: "100%" }} />
+								{assetTab === "pixabay" ? <button style={panelButtonStyle(false)} onClick={loadPixabayAssets}>{pixabayLoading ? "Searching..." : "Search Pixabay"}</button> : null}
+								{assetTab === "builtins" ? (
+									<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+										{filteredBuiltInAssets.map((asset) => (
+											<button key={asset.id} draggable onDragStart={(e) => { const payload = { ...asset, kind: "svg" }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-svg", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; setAssetDragImage(e); }} onDragEnd={clearDragPayload} onClick={() => addSvgAsset(asset)} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", textAlign: "left", cursor: "grab" }}>
+												<div style={{ aspectRatio: "1 / 1", display: "grid", placeItems: "center", marginBottom: 8, borderRadius: 8, background: "rgba(255,255,255,0.05)", color: brandKit.primary }}>
+													<img src={svgMarkupToDataUrl(asset.svg, brandKit.primary)} alt="" draggable={false} style={{ maxWidth: "80%", maxHeight: "80%" }} />
+												</div>
+												<div style={{ fontSize: 11, fontWeight: 700 }}>{asset.label}</div>
+												<div style={{ fontSize: 10, opacity: 0.7 }}>{asset.category}</div>
+											</button>
+										))}
+										{!filteredBuiltInAssets.length ? <div style={{ opacity: 0.7, gridColumn: "1 / -1" }}>No built-in assets match that search.</div> : null}
+									</div>
+								) : null}
+								{assetTab === "pixabay" ? (
+									<div style={{ display: "grid", gap: 8 }}>
+										{pixabayError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{pixabayError}</div> : null}
+										<div style={{ display: "grid", gap: 8 }}>
+											{pixabayResults.map((file) => (
+												<div
+													key={file.id}
+													draggable
+													onDragStart={(e) => {
+														const payload = { kind: "image", src: file.fullUrl || file.previewUrl, name: file.name };
+														dragPayloadRef.current = payload;
+														e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload));
+														e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+														e.dataTransfer.effectAllowed = "copy";
+													}} onDragEnd={clearDragPayload}
+													style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}
+												>
+													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+														<img src={file.previewUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+													</div>
+													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+													<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+														<button onClick={() => addImageFromSrc(file.fullUrl || file.previewUrl, file.name)}>Place on Canvas</button>
+														<div style={{ fontSize: 10, opacity: 0.72 }}>drag onto canvas</div>
+													</div>
+												</div>
+											))}
+											{!pixabayLoading && !pixabayResults.length ? <div style={{ opacity: 0.7 }}>Search Pixabay to place photos without uploading every image.</div> : null}
 										</div>
-									))}
-									{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
-								</div>
+									</div>
+								) : null}
+								{assetTab === "drive" ? (
+									<div style={{ display: "grid", gap: 8 }}>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+											<div style={{ fontWeight: 800 }}>Drive Assets</div>
+											<button onClick={loadDriveAssets}>Refresh</button>
+										</div>
+										{driveLoading ? <div style={{ opacity: 0.7 }}>Loading Drive assets...</div> : null}
+										{driveError ? <div style={{ color: "#fca5a5", fontSize: 12 }}>{driveError}</div> : null}
+										<div style={{ display: "grid", gap: 8 }}>
+											{filteredAssets.map((file) => (
+												<div key={file.id} draggable onDragStart={(e) => { const payload = { kind: "image", src: file.previewUrl, name: file.name }; dragPayloadRef.current = payload; e.dataTransfer.setData("application/x-bondfire-image", JSON.stringify(payload)); e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copy"; setAssetDragImage(e); }} onDragEnd={clearDragPayload} style={{ padding: 8, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", cursor: "grab" }}>
+													<div style={{ aspectRatio: "4 / 3", background: "rgba(255,255,255,0.05)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+														<img src={file.previewUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+													</div>
+													<div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{file.name}</div>
+													<button onClick={() => addImageFromSrc(file.previewUrl, file.name)}>Place on Canvas</button>
+												</div>
+											))}
+											{!driveLoading && !filteredAssets.length ? <div style={{ opacity: 0.7 }}>No image assets found in Drive.</div> : null}
+										</div>
+									</div>
+								) : null}
 							</div>
 						) : null}
 
@@ -1478,12 +2008,12 @@ export default function Studio() {
 								</div>
 								{docs.length ? docs.map((doc) => (
 									<div key={doc.id} style={{ border: doc.id === currentId ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.08)", background: doc.id === currentId ? "rgba(239,68,68,0.14)" : "rgba(255,255,255,0.04)", borderRadius: 12, padding: 10 }}>
-										<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
+										<button onClick={() => { setCurrentId(doc.id); setActivePageIndex(0); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0 }}>
 											<div style={{ fontWeight: 700 }}>{doc.name}</div>
 											<div style={{ opacity: 0.7, fontSize: 12 }}>{doc.width} × {doc.height}</div>
 										</button>
 										<div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-											<button onClick={() => { setCurrentId(doc.id); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
+											<button onClick={() => { setCurrentId(doc.id); setActivePageIndex(0); setSelectedIds([]); setTimeout(() => fitCanvas(doc), 0); }}>Open</button>
 											<button onClick={() => deleteDoc(doc.id)}>Delete</button>
 										</div>
 									</div>
@@ -1497,15 +2027,19 @@ export default function Studio() {
 					ref={workspaceRef}
 					onMouseDown={startWorkspaceAction}
 					onClick={(e) => {
+						if (suppressCanvasClickRef.current) {
+							suppressCanvasClickRef.current = false;
+							return;
+						}
 						if (e.target === e.currentTarget) closeMenus();
 					}}
-					onWheel={handleWheel}
 					onDrop={onWorkspaceDrop}
 					onDragOver={onWorkspaceDragOver}
+					onDragEnter={onWorkspaceDragEnter}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
-					style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
-						<>
+						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight, paddingTop: 0 }}>
 							{showRulers ? (
 								<>
 									<div style={{ position: "absolute", left: RULER_SIZE, top: 0, right: 0, height: RULER_SIZE, background: "rgba(17,24,39,0.95)", borderBottom: "1px solid rgba(255,255,255,0.08)", zIndex: 20 }}>
@@ -1526,41 +2060,130 @@ export default function Studio() {
 								</>
 							) : null}
 
-							<div ref={canvasShellRef} style={{ position: "absolute", left: pan.x + RULER_SIZE, top: pan.y + RULER_SIZE, width: currentDoc.width * zoom, height: currentDoc.height * zoom, background: currentDoc.background || "#ffffff", borderRadius: 18, overflow: "visible", boxShadow: "0 24px 80px rgba(0,0,0,0.35)" }}>
-								<div id="bf-studio-canvas-inner" style={{ position: "absolute", inset: 0, width: currentDoc.width, height: currentDoc.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: currentDoc.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
-									{currentGuides.map((guide) => guide.orientation === "vertical" ? (
-										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
-									) : (
-										<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", top: guide.position, left: 0, right: 0, height: 8, marginTop: -4, background: guide.id === selectedGuideId ? "rgba(96,165,250,0.22)" : "transparent", borderTop: `1px solid ${GUIDE_COLORS.horizontal}`, cursor: "ns-resize", zIndex: 9 }} />
-									))}
-									{(currentDoc.elements || []).map((el) => {
-										if (el.hidden) return null;
-										const isSelected = selectedIds.includes(el.id);
-										const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= currentDoc.width && Number(el.height || 0) >= currentDoc.height;
-									const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
-										if (el.type === "text") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FONT_OPTIONS[0], lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-										}
-										if (el.type === "shape") {
-											return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-										}
-										return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
-									})}
-									{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
-									{selected && !selected.locked ? [
-										{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
-										{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
-										{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nesw-resize" },
-										{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
-										{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nwse-resize" },
-										{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "ns-resize" },
-										{ key: "sw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nesw-resize" },
-										{ key: "w", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
-									].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
-									{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
-								</div>
-							</div>
-						</>
+							{currentPages.map((page, pageIndex) => {
+								const layout = pageLayouts[pageIndex];
+								if (!layout) return null;
+								const isActive = pageIndex === activePageIndex;
+								return (
+									<React.Fragment key={page.id}>
+										<div style={{ position: "absolute", left: layout.left, top: layout.top - 32, width: layout.width, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, color: "rgba(255,255,255,0.96)", fontSize: 13, fontWeight: 800, zIndex: 16 }}>
+											<div style={{ textShadow: "0 1px 2px rgba(0,0,0,0.45)" }}>Page {pageIndex + 1}</div>
+											<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+												<button
+													onClick={(e) => { e.stopPropagation(); duplicatePage(pageIndex); }}
+													style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(17,24,39,0.92)", color: "white", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+												>
+													Duplicate
+												</button>
+												<button
+													onClick={(e) => { e.stopPropagation(); deletePage(pageIndex); }}
+													disabled={currentPages.length <= 1}
+													style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.16)", background: currentPages.length <= 1 ? "rgba(107,114,128,0.4)" : "rgba(17,24,39,0.92)", color: "white", fontSize: 12, fontWeight: 700, cursor: currentPages.length <= 1 ? "not-allowed" : "pointer", opacity: currentPages.length <= 1 ? 0.65 : 1 }}
+												>
+													Delete
+												</button>
+											</div>
+										</div>
+										{selectionBounds && isActive ? (
+											<div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ position: "absolute", left: "50%", top: showRulers ? (RULER_SIZE + 10) : 10, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 999, background: "rgba(17,24,39,0.96)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 8px 24px rgba(0,0,0,0.24)", zIndex: 24, maxWidth: "calc(100% - 120px)", overflowX: "auto" }}>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}>Duplicate</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
+												<div style={{ display: "flex", alignItems: "center", gap: 6, color: "white", fontSize: 12 }}>
+													<span>Opacity</span>
+													<input type="range" min="0.05" max="1" step="0.05" value={selected ? Number(selected.opacity ?? 1) : 1} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onChange={(e) => updateElements(selectedIds, { opacity: Number(e.target.value) })} />
+												</div>
+												{selected && ["text", "shape", "svg"].includes(selected.type) ? (
+													<div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+														{["#111827", "#ffffff", brandKit.primary, brandKit.secondary, brandKit.accent, "#ef4444", "#22c55e", "#3b82f6"].map((swatch) => (
+															<button type="button" key={swatch} onClick={(e) => { e.stopPropagation(); updateElement(selected.id, selected.type === "text" ? { color: swatch } : { fill: swatch }); }} style={{ width: 18, height: 18, borderRadius: 999, border: "1px solid rgba(255,255,255,0.24)", background: swatch, cursor: "pointer" }} />
+														))}
+													</div>
+												) : null}
+												{selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); const nextValue = window.prompt("Edit QR value", selected.qrValue || ""); if (nextValue) updateElement(selected.id, { qrValue: nextValue, src: buildQrCodeUrl(nextValue, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) }); }}>Edit QR</button> : null}
+												<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "4px 8px" }} onClick={(e) => { e.stopPropagation(); setInspectorOpen(true); }}>Inspector</button>
+											</div>
+										) : null}
+										<div
+											ref={isActive ? canvasShellRef : null}
+											onClick={() => { if (suppressCanvasClickRef.current) { suppressCanvasClickRef.current = false; return; } if (!isActive) { setActivePageIndex(pageIndex); setSelectedIds([]); } else { setSelectedIds([]); } }}
+											onDrop={onWorkspaceDrop}
+											onDragOver={onWorkspaceDragOver}
+											onDragEnter={onWorkspaceDragEnter}
+											style={{
+												position: "absolute",
+												left: layout.left,
+												top: layout.top,
+												width: layout.width,
+												height: layout.height,
+												background: page.background || "#ffffff",
+												borderRadius: 18,
+												overflow: "visible",
+												boxShadow: isActive ? "0 24px 80px rgba(0,0,0,0.35)" : "0 18px 50px rgba(0,0,0,0.22)",
+												cursor: isActive ? "default" : "pointer",
+											}}
+										>
+											<div onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
+												{isActive ? (
+													<>
+														{currentGuides.map((guide) => guide.orientation === "vertical" ? (
+															<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", left: guide.position, top: 0, bottom: 0, width: 8, marginLeft: -4, background: guide.id === selectedGuideId ? "rgba(239,68,68,0.22)" : "transparent", borderLeft: `1px solid ${GUIDE_COLORS.vertical}`, cursor: "ew-resize", zIndex: 9 }} />
+														) : (
+															<div key={guide.id} onMouseDown={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); setGuideDrag({ id: guide.id, orientation: guide.orientation }); }} onClick={(e) => { e.stopPropagation(); setSelectedGuideId(guide.id); }} onDoubleClick={() => removeGuide(guide.id)} style={{ position: "absolute", top: guide.position, left: 0, right: 0, height: 8, marginTop: -4, background: guide.id === selectedGuideId ? "rgba(96,165,250,0.22)" : "transparent", borderTop: `1px solid ${GUIDE_COLORS.horizontal}`, cursor: "ns-resize", zIndex: 9 }} />
+														))}
+														{(currentPage?.elements || []).map((el) => {
+															if (el.hidden) return null;
+															const isSelected = selectedIds.includes(el.id);
+															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
+															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
+															if (el.type === "text") return <div
+															key={el.id}
+															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
+															onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) { if (selectedIds.includes(el.id)) setTextEditId(el.id); else selectElement(el, false); } closeMenus(); }}
+															onContextMenu={(e) => openContextMenu(e, el)}
+															contentEditable={textEditId === el.id}
+															suppressContentEditableWarning
+															onBlur={(e) => { updateElement(el.id, { text: e.currentTarget.innerText }); setTextEditId(null); }}
+															style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden", cursor: textEditId === el.id ? "text" : common.cursor }}
+														>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
+															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+														})}
+														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
+														{selected && !selected.locked ? [
+															{ key: "nw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nwse-resize" },
+															{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) - 6, cursor: "ns-resize" },
+															{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) - 6, cursor: "nesw-resize" },
+															{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
+															{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nwse-resize" },
+															{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "ns-resize" },
+															{ key: "sw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nesw-resize" },
+															{ key: "w", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
+														].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
+														{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
+													</>
+												) : (
+													(page.elements || []).map((el) => {
+														if (el.hidden) return null;
+														const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: `rotate(${el.rotation || 0}deg)`, boxSizing: "border-box", pointerEvents: "none" };
+														if (el.type === "text") return <div key={el.id} style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden" }}>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
+														if (el.type === "shape") return <div key={el.id} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+														return <img key={el.id} alt="" src={el.src} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+													})
+												)}
+											</div>
+										</div>
+									</React.Fragment>
+								);
+							})}
+							{pageLayouts.length ? (
+								<button onClick={(e) => { e.stopPropagation(); addPage(); }} style={{ position: "absolute", left: (pageLayouts[pageLayouts.length - 1]?.left || 0) + ((pageLayouts[pageLayouts.length - 1]?.width || 0) / 2) - 76, top: (pageLayouts[pageLayouts.length - 1]?.top || 0) + (pageLayouts[pageLayouts.length - 1]?.height || 0) + 24, width: 152, padding: "10px 14px", borderRadius: 999, border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(17,24,39,0.96)", color: "white", fontWeight: 700, zIndex: 18, cursor: "pointer" }}>
+									+ Add Page
+								</button>
+							) : null}
+						</div>
 					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
 
@@ -1600,7 +2223,7 @@ export default function Studio() {
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
 							<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-								<div style={{ fontSize: 12, opacity: 0.7 }}>{currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
+								<div style={{ fontSize: 12, opacity: 0.7 }}>{currentPage ? `${currentPage.width} × ${currentPage.height}` : currentDoc ? `${currentDoc.width} × ${currentDoc.height}` : "No canvas"}</div>
 								<button onClick={() => setInspectorOpen(false)} style={{ padding: "4px 8px", borderRadius: 8 }}>✕</button>
 							</div>
 						</div>
@@ -1639,7 +2262,24 @@ export default function Studio() {
 										<label>Line height<input type="number" step="0.05" value={selected.lineHeight || 1.1} onChange={(e) => updateElement(selected.id, { lineHeight: Number(e.target.value || 1.1) })} style={{ width: "100%" }} /></label>
 										<label>Letter spacing<input type="number" value={selected.letterSpacing || 0} onChange={(e) => updateElement(selected.id, { letterSpacing: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
 									</div>
-									<label>Font family<select value={selected.fontFamily || FONT_OPTIONS[0]} onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })} style={{ width: "100%" }}>{FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
+									<div style={{ display: "grid", gap: 8 }}>
+										<label>Font search<input value={fontSearch} onChange={(e) => setFontSearch(e.target.value)} placeholder="Search Google or uploaded fonts" style={{ width: "100%" }} /></label>
+										<label>Font family<select value={selected.fontFamily || FALLBACK_FONT} onChange={(e) => { const nextFont = e.target.value; updateElement(selected.id, { fontFamily: nextFont }); ensureFontLoaded(nextFont); markFontRecent(nextFont); }} style={{ width: "100%" }}>
+											<optgroup label="Recent">
+												{recentFonts.map((font) => <option key={`recent_${font.family}`} value={font.family}>{font.family}</option>)}
+											</optgroup>
+											<optgroup label="Uploaded">
+												{uploadedFonts.map((font) => <option key={`uploaded_${font.id}`} value={font.family}>{font.family}</option>)}
+											</optgroup>
+											<optgroup label="Google Fonts">
+												{availableFonts.map((font) => <option key={font.family} value={font.family}>{font.family}</option>)}
+											</optgroup>
+										</select></label>
+										<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+											<button type="button" onClick={() => fontUploadRef.current?.click()}>Upload font</button>
+											<div style={{ fontSize: 12, opacity: 0.72 }}>{fontStatus}</div>
+										</div>
+									</div>
 									<label>Alignment<select value={selected.align || "left"} onChange={(e) => updateElement(selected.id, { align: e.target.value })} style={{ width: "100%" }}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
 									<label>Text color<input type="color" value={selected.color || "#ffffff"} onChange={(e) => updateElement(selected.id, { color: e.target.value })} style={{ width: "100%" }} /></label>
 								</>) : null}
@@ -1651,7 +2291,21 @@ export default function Studio() {
 										<label>Radius<input type="number" value={selected.radius || 0} onChange={(e) => updateElement(selected.id, { radius: Number(e.target.value || 0) })} style={{ width: "100%" }} /></label>
 									</div>
 								</>) : null}
-								{selected.type === "image" ? <label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label> : null}
+								{selected.type === "image" ? (
+									<>
+										<label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label>
+										{selected.qrValue ? (
+											<>
+												<label>QR value<textarea value={selected.qrValue || ""} onChange={(e) => updateElement(selected.id, { qrValue: e.target.value, src: buildQrCodeUrl(e.target.value, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) })} rows={4} style={{ width: "100%" }} /></label>
+												<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+													<label>QR foreground<input type="color" value={selected.qrFg || "#000000"} onChange={(e) => updateElement(selected.id, { qrFg: e.target.value, src: buildQrCodeUrl(selected.qrValue || "", { fg: e.target.value, bg: selected.qrBg || "#ffffff" }) })} style={{ width: "100%" }} /></label>
+													<label>QR background<input type="color" value={selected.qrBg || "#ffffff"} onChange={(e) => updateElement(selected.id, { qrBg: e.target.value, src: buildQrCodeUrl(selected.qrValue || "", { fg: selected.qrFg || "#000000", bg: e.target.value }) })} style={{ width: "100%" }} /></label>
+												</div>
+												<button type="button" onClick={() => updateElement(selected.id, { src: buildQrCodeUrl(selected.qrValue || "", { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) })}>Regenerate QR</button>
+											</>
+										) : null}
+									</>
+								) : null}
 							</div>
 						) : <div style={{ display: "grid", gap: 10 }}>
 							<label>Canvas background<input type="color" value={currentDoc?.background || "#ffffff"} onChange={(e) => currentDoc && updateDoc({ background: e.target.value })} style={{ width: "100%" }} /></label>
