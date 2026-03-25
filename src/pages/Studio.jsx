@@ -1036,12 +1036,12 @@ export default function Studio() {
 
 	const getMarqueePoint = React.useCallback((clientX, clientY) => {
 		const rect = canvasShellRef.current?.getBoundingClientRect();
-		if (!rect || !currentPage) return getCanvasPoint(clientX, clientY);
+		if (!rect || !currentDoc) return getCanvasPoint(clientX, clientY);
 		return {
-			x: clamp((clientX - rect.left) / zoom, 0, Number(currentPage.width || 0)),
-			y: clamp((clientY - rect.top) / zoom, 0, Number(currentPage.height || 0)),
+			x: clamp((clientX - rect.left) / zoom, 0, Number(currentDoc.width || 0)),
+			y: clamp((clientY - rect.top) / zoom, 0, Number(currentDoc.height || 0)),
 		};
-	}, [currentPage, zoom, getCanvasPoint]);
+	}, [currentDoc, zoom, getCanvasPoint]);
 
 	const startWorkspaceAction = (e) => {
 		if (!currentDoc) return;
@@ -1155,7 +1155,7 @@ export default function Studio() {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
 		};
-	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
+	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
 
 	const handleWheel = (e) => {
 		e.preventDefault();
