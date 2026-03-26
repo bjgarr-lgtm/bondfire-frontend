@@ -836,7 +836,7 @@ React.useEffect(() => {
 	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
 
 
-const fetchAndApplyRemoteStudioState = React.useCallback(async ({ queueIfBusy = true, forceApply = false, reason = "poll" } = {}) => {
+async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply = false, reason = "poll" } = {}) {
 	if (!orgId) return false;
 	const resp = await loadStudioStateFromServer(orgId);
 	const sig = buildStudioRemoteSignature(resp);
@@ -891,7 +891,7 @@ const fetchAndApplyRemoteStudioState = React.useCallback(async ({ queueIfBusy = 
 	setStudioRemoteNotice(null);
 	setStudioSyncMsg(reason === "initial" ? "Studio docs are now synced with org-key encryption." : "Remote Studio changes applied.");
 	return true;
-}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+}
 
 	const snapshot = React.useCallback(() => {
 		setHistory((prev) => [...prev, clone(docs)]);
