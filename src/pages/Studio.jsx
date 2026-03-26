@@ -593,6 +593,7 @@ export default function Studio() {
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
 	const [textEditId, setTextEditId] = React.useState(null);
+	const [isMobileViewport, setIsMobileViewport] = React.useState(() => typeof window !== "undefined" ? window.innerWidth <= 900 : false);
 	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
 	const studioLoadedRef = React.useRef(false);
