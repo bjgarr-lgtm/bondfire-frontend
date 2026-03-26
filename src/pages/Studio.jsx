@@ -290,6 +290,38 @@ async function saveStudioStateToServer(orgId, payload) {
 	});
 }
 
+function buildStudioRemoteSignature(resp) {
+	const docsSig = (Array.isArray(resp?.docs) ? resp.docs : [])
+		.map((row) => `${row?.id || ""}:${row?.updated_at || 0}`)
+		.join("|");
+	const blocksSig = (Array.isArray(resp?.blocks) ? resp.blocks : [])
+		.map((row) => `${row?.id || ""}:${row?.updated_at || 0}`)
+		.join("|");
+	return `${docsSig}__${blocksSig}`;
+}
+
+async function decryptStudioStatePayload(orgId, resp) {
+	let orgKey = null;
+	try { orgKey = getCachedOrgKey(orgId); } catch {}
+	if (!orgKey) return null;
+	const remoteDocs = [];
+	for (const row of Array.isArray(resp?.docs) ? resp.docs : []) {
+		if (!row?.encrypted_blob) continue;
+		try {
+			remoteDocs.push(normalizeDoc(JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob))));
+		} catch {}
+	}
+	const remoteBlocks = [];
+	for (const row of Array.isArray(resp?.blocks) ? resp.blocks : []) {
+		if (!row?.encrypted_blob) continue;
+		try {
+			const parsed = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
+			if (parsed && parsed.id) remoteBlocks.push(parsed);
+		} catch {}
+	}
+	return { docs: normalizeDocs(remoteDocs), blocks: remoteBlocks };
+}
+
 function getBrandKit(orgId) {
 	const settings = readJson(`bf_org_settings_${orgId}`, {});
 	return {
@@ -598,6 +630,9 @@ export default function Studio() {
 	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
 	const studioLoadedRef = React.useRef(false);
 	const studioSyncTimerRef = React.useRef(null);
+	const studioRemoteSigRef = React.useRef("");
+	const studioPendingRemoteRef = React.useRef(null);
+	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
 		let cancelled = false;
@@ -632,21 +667,10 @@ export default function Studio() {
 			}
 			try {
 				const resp = await loadStudioStateFromServer(orgId);
-				const remoteDocs = [];
-				for (const row of Array.isArray(resp?.docs) ? resp.docs : []) {
-					if (!row?.encrypted_blob) continue;
-					try {
-						remoteDocs.push(normalizeDoc(JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob))));
-					} catch {}
-				}
-				const remoteBlocks = [];
-				for (const row of Array.isArray(resp?.blocks) ? resp.blocks : []) {
-					if (!row?.encrypted_blob) continue;
-					try {
-						const parsed = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
-						if (parsed && parsed.id) remoteBlocks.push(parsed);
-					} catch {}
-				}
+				studioRemoteSigRef.current = buildStudioRemoteSignature(resp);
+				const remoteState = await decryptStudioStatePayload(orgId, resp);
+				const remoteDocs = remoteState?.docs || [];
+				const remoteBlocks = remoteState?.blocks || [];
 				if (cancelled) return;
 				const nextDocs = remoteDocs.length ? normalizeDocs(remoteDocs) : cachedDocs;
 				const nextBlocks = remoteBlocks.length ? remoteBlocks : cachedBlocks;
@@ -749,6 +773,70 @@ export default function Studio() {
 			}
 		};
 	}, [orgId, docs, savedBlocks]);
+
+	React.useEffect(() => {
+		if (!studioLoadedRef.current || !orgId) return;
+		const shouldPollFast = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+		const intervalMs = shouldPollFast ? 3000 : 12000;
+		let cancelled = false;
+
+		const poll = async () => {
+			try {
+				const resp = await loadStudioStateFromServer(orgId);
+				if (cancelled) return;
+				const sig = buildStudioRemoteSignature(resp);
+				if (!sig || sig === studioRemoteSigRef.current) return;
+				const remoteState = await decryptStudioStatePayload(orgId, resp);
+				if (!remoteState) return;
+				const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
+				if (hasActiveInteraction) {
+					studioPendingRemoteRef.current = { sig, remoteState };
+					setStudioSyncMsg("Remote Studio changes detected. Applying when editing pauses.");
+					return;
+				}
+				studioRemoteSigRef.current = sig;
+				studioPendingRemoteRef.current = null;
+				setDocs(remoteState.docs);
+				setSavedBlocks(remoteState.blocks);
+				saveDocs(orgId, remoteState.docs);
+				saveBlocks(orgId, remoteState.blocks);
+				setCurrentId((prev) => remoteState.docs.some((doc) => doc.id === prev) ? prev : (remoteState.docs[0]?.id || null));
+				setStudioSyncMsg("Remote Studio changes applied.");
+			} catch {}
+		};
+
+		poll();
+		const id = window.setInterval(poll, intervalMs);
+		const onVisible = () => {
+			if (document.visibilityState === "visible") poll();
+		};
+		window.addEventListener("visibilitychange", onVisible);
+		window.addEventListener("focus", poll);
+		return () => {
+			cancelled = true;
+			window.clearInterval(id);
+			window.removeEventListener("visibilitychange", onVisible);
+			window.removeEventListener("focus", poll);
+		};
+	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+
+	React.useEffect(() => {
+		const pending = studioPendingRemoteRef.current;
+		if (!pending) return;
+		if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
+		const id = window.setTimeout(() => {
+			studioRemoteSigRef.current = pending.sig;
+			setDocs(pending.remoteState.docs);
+			setSavedBlocks(pending.remoteState.blocks);
+			saveDocs(orgId, pending.remoteState.docs);
+			saveBlocks(orgId, pending.remoteState.blocks);
+			setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
+			studioPendingRemoteRef.current = null;
+			setStudioSyncMsg("Queued Studio changes applied.");
+		}, 750);
+		return () => window.clearTimeout(id);
+	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+
 
 	const snapshot = React.useCallback(() => {
 		setHistory((prev) => [...prev, clone(docs)]);
@@ -1432,6 +1520,13 @@ const addImage = () => {
 		};
 	};
 
+	const getTouchDistance = (touches) => {
+		if (!touches || touches.length < 2) return 0;
+		const dx = Number(touches[0].clientX || 0) - Number(touches[1].clientX || 0);
+		const dy = Number(touches[0].clientY || 0) - Number(touches[1].clientY || 0);
+		return Math.sqrt(dx * dx + dy * dy);
+	};
+
 	const startElementDrag = (e, el) => {
 		if (!currentDoc || el.locked) return;
 		if (e.button === 2) {
@@ -1518,6 +1613,25 @@ const addImage = () => {
 		if (e.button === 2) {
 			return;
 		}
+		if (e.touches?.length >= 2 && workspaceRef.current) {
+			e.preventDefault();
+			const rect = workspaceRef.current.getBoundingClientRect();
+			const t1 = e.touches[0];
+			const t2 = e.touches[1];
+			const centerX = (t1.clientX + t2.clientX) / 2;
+			const centerY = (t1.clientY + t2.clientY) / 2;
+			pinchStateRef.current = {
+				startDistance: getTouchDistance(e.touches),
+				startZoom: zoom,
+				centerX,
+				centerY,
+				worldX: (centerX - rect.left - pan.x - RULER_SIZE) / zoom,
+				worldY: (centerY - rect.top - pan.y - RULER_SIZE) / zoom,
+			};
+			setMarquee(null);
+			setPanState(null);
+			return;
+		}
 		const { clientX, clientY } = getEventClientPoint(e);
 		if (spacePan || tool === "hand" || e.button === 1) {
 			setPanState({ startX: clientX, startY: clientY, panX: pan.x, panY: pan.y });
@@ -1526,7 +1640,7 @@ const addImage = () => {
 		setSelectedIds([]);
 		setSelectedGuideId(null);
 		setTextEditId(null);
-		if (tool === "select") {
+		if (tool === "select" && !isMobileViewport) {
 			const point = getMarqueePoint(clientX, clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
 		}
@@ -1534,6 +1648,23 @@ const addImage = () => {
 
 	React.useEffect(() => {
 		const onMove = (e) => {
+			if (e.type === "touchmove") e.preventDefault();
+			if (e.touches?.length >= 2 && pinchStateRef.current && workspaceRef.current) {
+				const rect = workspaceRef.current.getBoundingClientRect();
+				const t1 = e.touches[0];
+				const t2 = e.touches[1];
+				const centerX = (t1.clientX + t2.clientX) / 2;
+				const centerY = (t1.clientY + t2.clientY) / 2;
+				const distance = getTouchDistance(e.touches);
+				const ratio = pinchStateRef.current.startDistance > 0 ? distance / pinchStateRef.current.startDistance : 1;
+				const nextZoom = clamp(pinchStateRef.current.startZoom * ratio, 0.1, 3);
+				setZoom(nextZoom);
+				setPan({
+					x: centerX - rect.left - pinchStateRef.current.worldX * nextZoom - RULER_SIZE,
+					y: centerY - rect.top - pinchStateRef.current.worldY * nextZoom - RULER_SIZE,
+				});
+				return;
+			}
 			const { clientX, clientY } = getEventClientPoint(e);
 			if (panState) {
 				setPan({ x: panState.panX + (clientX - panState.startX), y: panState.panY + (clientY - panState.startY) });
@@ -1607,6 +1738,7 @@ const addImage = () => {
 			}
 		};
 		const onUp = () => {
+			pinchStateRef.current = null;
 			if (marquee && currentDoc) {
 				const rect = { left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height };
 				const ids = sanitizeStudioElements(currentPage?.elements || []).filter((el) => intersectsRect(el, rect)).map((el) => el.id);
@@ -2225,7 +2357,7 @@ React.useEffect(() => {
 					onDragOver={onWorkspaceDragOver}
 					onDragEnter={onWorkspaceDragEnter}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
-					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default", touchAction: "none" }}>
+					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default", touchAction: isMobileViewport ? "manipulation" : "none" }}>
 					{currentDoc ? (
 						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight, paddingTop: 0 }}>
 							{showRulers ? (
@@ -2289,7 +2421,7 @@ React.useEffect(() => {
 												overflow: "visible",
 												boxShadow: isActive ? "0 24px 80px rgba(0,0,0,0.35)" : "0 18px 50px rgba(0,0,0,0.22)",
 												cursor: isActive ? "default" : "pointer",
-											touchAction: "none",
+											touchAction: isMobileViewport ? "none" : "none",
 											}}
 										>
 											<div onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
