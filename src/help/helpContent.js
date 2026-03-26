@@ -15,6 +15,7 @@ export function guessTopicIdFromPath(pathname) {
   if (p.includes("newsletter") || p.includes("public")) return "newsletter";
   if (p.includes("orgs") || p.includes("demo")) return "demo-mode";
   if (p.includes("drive")) return "drive";
+  if (p.includes("studio")) return "studio";
   if (p.includes("overview") || p.includes("people") || p.includes("signin") || p.includes("sign-in")) return "getting-started";
 
   return "getting-started";
@@ -82,7 +83,7 @@ export const HELP_TOPICS = [
   {
     "id": "drive",
     "title": "Drive",
-    "blurb": "Bondfire Drive is the org workspace for notes, folders, files, sheets, forms, templates, and encrypted documents. Use it like a working operations room, not a dumping ground.",
+    "blurb": "Bondfire Drive is a compact, Obsidian style workspace for notes, folders, files, templates, and markdown editing inside each org.",
     "keywords": [
       "drive",
       "notes",
@@ -91,94 +92,162 @@ export const HELP_TOPICS = [
       "files",
       "folders",
       "frontmatter",
-      "backlinks",
-      "sheet",
-      "spreadsheet",
-      "form",
-      "mobile",
-      "encryption",
-      "public share"
+      "backlinks"
     ],
     "sections": [
       {
-        "h": "What Drive is for",
+        "h": "What Drive is",
         "p": [
-          "Drive is where an org keeps its working knowledge. That includes operational notes, intake forms, uploaded documents, spreadsheets, meeting prep, inventory references, and reusable templates. If it helps the org remember, coordinate, or respond, it belongs here.",
-          "Treat Drive like a live workspace. Folders give structure, templates reduce repeated setup, sheets handle grid based tracking, and forms let you gather information without making everyone improvise from scratch."
+          "Drive is your org workspace for notes, uploaded files, and reusable templates. It is built to feel familiar if you already use markdown based tools like Obsidian, just without the usual desktop app drama.",
+          "Explorer and templates live on the left. The editor, preview, and inspector live on the right. Compatible markdown files can be opened, edited, and saved in app."
         ]
       },
       {
-        "h": "How the layout works",
+        "h": "Templates",
         "p": [
-          "The explorer lives on the left, the current document lives on the right, and the help button stays available from anywhere. On desktop you can keep the explorer open and resize panels. On mobile, the explorer is meant to open as a separate layer so the document area keeps enough room to actually work.",
-          "The reading area changes based on file type. Notes open in markdown editing and preview modes. Sheets open as grid documents. Forms open as builders with a live response view. Standard uploaded files preview when the format is supported and fall back to open in browser when it is not."
-        ]
-      },
-      {
-        "h": "Notes, markdown, and properties",
-        "p": [
-          "Rich notes are still the backbone of Drive. Use them for meeting notes, logistics, running plans, narratives, links, and anything that benefits from flexible writing. The toolbar helps with headings, lists, quotes, code, links, and wiki links without forcing you to hand type every markdown token.",
-          "Frontmatter properties let you attach structured metadata to a note. That is useful for status, owner, tags, dates, or any field you may want to sort or inspect later. Backlinks connect notes that reference each other, which makes Drive feel like a real knowledge web instead of a dead folder tree."
-        ]
-      },
-      {
-        "h": "Templates without nonsense",
-        "p": [
-          "Templates are for repeatable work. Use them for meeting agendas, intake flows, supply run checklists, incident records, or recurring updates. A good template removes friction without locking people into robotic writing.",
-          "You can use a template to create a brand new note or insert it into the note you already have open. Supported date and title tokens are there so you can stamp time based content without rebuilding the same shell every time."
-        ]
-      },
-      {
-        "h": "Sheets",
-        "p": [
-          "Sheets are for real grid work: rosters, stock counts, schedules, distribution tracking, cost math, and anything where rows and columns matter more than prose. Click a cell and type directly. Use the formula bar when you want to edit or insert formulas. Use the Functions menu when you want a quick starting point instead of remembering every function name by heart like a tiny accountant wizard.",
-          "Column widths and row heights can be adjusted for the selected column or row. Auto fit is there when content starts spilling. Add rows, add columns, and add additional sheets when one tab is not enough. Keep separate tabs for different slices of the same operation instead of shoving everything into one cursed mega sheet."
-        ]
-      },
-      {
-        "h": "Forms and responses",
-        "p": [
-          "Forms are for collecting information in a consistent shape. Use them for volunteer signups, supply offers, event RSVP, requests, followup checklists, or simple public polls. Each field type changes how the person answering experiences the form, so pick the simplest field that gets you the data you actually need.",
-          "Responses are stored with the form so the org can review what came in without hunting through chat or email. Public sharing is meant for people who are not in the org or even in Bondfire at all. If public sharing is enabled, send the generated link to responders and treat the form as a focused intake door instead of a general discussion thread."
+          "Templates can create a brand new note or insert into the current note. Insert keeps your existing note and adds the template content instead of replacing everything.",
+          'Supported tokens include <% tp.date.now("YYYY-MM-DD") %>, <% tp.date.now("HH:mm") %>, <% tp.date.now("dddd") %>, <% tp.date.now("YYYY-[W]WW") %>, <% tp.file.title %>, plus the short forms {{date:YYYY-MM-DD}}, {{date:HH:mm}}, {{date:dddd}}, and {{title}}.'
         ]
       },
       {
         "h": "Files and previews",
         "p": [
-          "Drive is not limited to notes. You can upload images, PDFs, audio, video, and other files. If a file type can be previewed sensibly in app, Bondfire shows it there. If not, use open in browser or download. That is not a failure. It is the app declining to fake support it does not actually have.",
-          "When naming files, be clear and boring in the useful way. A filename like spring-food-run-2026-03-24.pdf is infinitely more helpful than final_final_real_one.pdf, which is how humans announce they have given up."
+          "Markdown and other text based uploads open in app so you can edit them directly. PDFs, images, audio, and video preview in app when supported.",
+          "If a format is not previewable, Bondfire falls back to opening it in the browser instead of pretending it knows magic."
         ]
       },
       {
-        "h": "Mobile use",
+        "h": "Properties and backlinks",
         "p": [
-          "On mobile, the priority is to keep one task readable at a time. Open the explorer when you need to switch documents, then close it and work. The document itself should get the screen, not the chrome around it. Expect the grid and long documents to scroll horizontally when they need to. That is normal for small screens.",
-          "For better mobile results, keep titles concise, avoid giant frontmatter blocks, and break oversized notes into smaller documents when they are really separate pieces of work. A phone can handle real work, but it should not be forced to display your entire organizational subconscious in one panel."
-        ]
-      },
-      {
-        "h": "Encryption and what the server still knows",
-        "p": [
-          "Authenticated Drive content is designed to follow the same zero knowledge direction as the rest of Bondfire. Folder names, note content, document content, and sensitive metadata are meant to be encrypted client side before storage. Decryption happens in the browser with the org key, not on the server.",
-          "That does not mean literally nothing is visible. The system may still know that a record exists, when it changed, its rough size, and how records relate to each other. That is metadata leakage, not content leakage. The server should not be able to read the note body, file content, or actual document meaning without the org key."
-        ]
-      },
-      {
-        "h": "Good habits that keep Drive usable",
-        "p": [
-          "Name things clearly. Delete junk drafts. Use templates for repeated workflows. Split giant documents when they become several documents pretending to be one. Put forms where people will actually use them. Keep the explorer organized enough that a new member can guess where something lives without receiving a lecture.",
-          "Drive gets powerful fast, which means it can also become a mess fast. Structure is not bureaucracy here. It is mercy for whoever has to find the right thing during an actual need."
-        ]
-      },
-      {
-        "h": "When something feels wrong",
-        "p": [
-          "If a document loads but acts strangely, check whether it is opening in the right mode and whether the format is one Drive can edit in app. If a preview looks wrong, try open in browser to determine whether the issue is the file itself or the in app renderer.",
-          "If encrypted data suddenly looks unreadable on a device that used to work, that usually points to a missing org key, device key mismatch, or a session problem rather than the file spontaneously becoming evil. Check security and key status before you assume the document is gone."
+          "Frontmatter properties can be viewed and edited without manually digging through raw yaml every time. Backlinks detect wiki style note references so related notes stay connected.",
+          "Use the inspector for note metadata and backlinks, and use split view when you want source and rendered markdown side by side."
         ]
       }
     ]
   },
+{
+  "id": "studio",
+  "title": "Studio Basics",
+  "blurb": "Build flyers, posts, stories, banners, and reusable visual blocks inside Bondfire Studio.",
+  "keywords": ["studio", "design", "flyer", "banner", "pages", "layers", "assets", "export"],
+  "sections": [
+    {
+      "h": "What Studio is for",
+      "p": [
+        "Studio is Bondfire's built in design workspace for flyers, social posts, stories, banners, and quick org graphics. It is meant to keep common design work inside the app instead of making you jump out to another tool every time you need a meeting flyer or call for volunteers graphic.",
+        "Studio supports multiple pages, templates, assets, live Bondfire data bindings, PNG export, PDF export, drag and resize editing, and reusable saved blocks."
+      ]
+    },
+    {
+      "h": "How to start",
+      "p": [
+        "Use Add to place text, shapes, images, QR codes, and guides. Use Templates when you want a faster starting structure instead of a blank page.",
+        "Documents live in the Documents panel. Pages stack vertically, and Add Page appears beneath the page list."
+      ]
+    },
+    {
+      "h": "How editing works",
+      "p": [
+        "Click an item to select it. Drag to move. A quick toolbar appears for common actions like duplicate, delete, flip, opacity, and inspector. The inspector covers detailed values like position, size, font settings, fit mode, and colors.",
+        "If something is selected, the global help button should follow your current editing context instead of dropping you into generic app help."
+      ]
+    },
+    {
+      "h": "What is saved",
+      "p": [
+        "Studio keeps a local cache for fast recovery and also syncs docs and saved blocks through the org encrypted path when the org key is available.",
+        "Exports are plaintext by design, because a PNG or PDF has to be readable outside the app."
+      ]
+    }
+  ]
+},
+{
+  "id": "studio-text",
+  "title": "Studio Text Editing",
+  "blurb": "Write, style, and bind live org data inside text layers.",
+  "keywords": ["studio", "text", "font", "alignment", "line height", "letter spacing", "binding"],
+  "sections": [
+    {
+      "h": "Editing text",
+      "p": [
+        "Text layers can be edited directly on canvas and more precisely through the inspector. Use the inspector for font family, size, weight, alignment, line height, and letter spacing.",
+        "Quick color chips in the top toolbar are for fast edits. The inspector is where you go when the change needs precision."
+      ]
+    },
+    {
+      "h": "Live data bindings",
+      "p": [
+        "Studio text can include Bondfire data tokens like org name, meeting title, date, location, and need details. This lets one design stay reusable while the actual data changes.",
+        "Use the Bondfire Data panel to insert tokens and preview how current org data resolves."
+      ]
+    }
+  ]
+},
+{
+  "id": "studio-images",
+  "title": "Studio Images and Assets",
+  "blurb": "Place uploads, Drive assets, Pixabay images, and editable built in graphics.",
+  "keywords": ["studio", "image", "asset", "drive", "pixabay", "background removal", "fit", "qr"],
+  "sections": [
+    {
+      "h": "Asset sources",
+      "p": [
+        "Built in assets are editable graphics. Drive assets and Pixabay results come in as image layers. Uploads from your device also become image layers.",
+        "Image layers support fit mode, opacity, flip, duplicate, delete, and export with the rest of the design."
+      ]
+    },
+    {
+      "h": "Background removal",
+      "p": [
+        "Remove BG runs locally in the browser and works best on people, portraits, and clear foreground subjects. Busy scenes, hard edges, objects, and non human subjects may still need cleanup.",
+        "QR layers are intentionally excluded from background removal so they stay scannable."
+      ]
+    }
+  ]
+},
+{
+  "id": "studio-assets",
+  "title": "Studio Asset Panels",
+  "blurb": "Use built in graphics, Pixabay, Drive assets, templates, docs, and data panels without leaving the editor.",
+  "keywords": ["studio", "assets", "templates", "docs", "data", "drive", "pixabay", "built in"],
+  "sections": [
+    {
+      "h": "Panels in Studio",
+      "p": [
+        "Built in assets are good for shapes, icons, and editable graphics. Pixabay is for quick stock image searching. Drive pulls from your org connected files. Templates jump start common layouts. Documents switch between saved designs. Data inserts live Bondfire tokens into text.",
+        "On mobile, these panels open as bottom sheets instead of staying pinned to the side."
+      ]
+    },
+    {
+      "h": "Practical use",
+      "p": [
+        "Use templates when the structure is repetitive. Use Drive when your org already has photos or files ready. Use Pixabay when you need something fast. Use Data when the design should stay reusable across meetings or needs."
+      ]
+    }
+  ]
+},
+{
+  "id": "studio-mobile",
+  "title": "Studio on Mobile",
+  "blurb": "Phone mode keeps the canvas central and moves tools into bottom sheets and a bottom dock.",
+  "keywords": ["studio", "mobile", "phone", "dock", "bottom sheet", "touch", "resize"],
+  "sections": [
+    {
+      "h": "How mobile mode changes things",
+      "p": [
+        "Studio on mobile hides the desktop side rail and uses a bottom dock for Add, Templates, Assets, Data, Docs, and Edit. The inspector opens as a bottom sheet so the canvas stays visible.",
+        "Resize handles are larger on mobile because tiny precision controls on glass are an insult to human thumbs."
+      ]
+    },
+    {
+      "h": "Best way to work on a phone",
+      "p": [
+        "Keep zoom moderate when arranging multiple items. Use templates and data bindings to reduce repetitive typing. Open Edit when you need exact controls instead of trying to do everything directly on canvas.",
+        "Mobile Studio is for quick useful work, not heroic suffering."
+      ]
+    }
+  ]
+},
   {
     "id": "security",
     "title": "Security & Encryption",

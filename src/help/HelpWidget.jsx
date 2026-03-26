@@ -27,6 +27,15 @@ export default function HelpWidget() {
     setActiveId(guessTopicIdFromPath(location.pathname));
   }, [location.pathname]);
 
+  React.useEffect(() => {
+    const onTopic = (e) => {
+      const nextId = String(e?.detail?.id || "").trim();
+      if (nextId) setActiveId(nextId);
+    };
+    window.addEventListener("bf-help-topic", onTopic);
+    return () => window.removeEventListener("bf-help-topic", onTopic);
+  }, []);
+
   const activeTopic = React.useMemo(() => {
     return HELP_TOPICS.find((topic) => topic.id === activeId) || HELP_TOPICS[0];
   }, [activeId]);

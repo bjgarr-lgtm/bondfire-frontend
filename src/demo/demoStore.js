@@ -19,6 +19,98 @@ function tsPlus(days, hour = 18, minute = 0) {
   return d.getTime();
 }
 
+
+function buildDemoStarterSheet() {
+  return JSON.stringify({
+    type: "bondfire-sheet",
+    version: 3,
+    sheets: [
+      {
+        id: "sheet_1",
+        name: "Sheet1",
+        rowCount: 25,
+        columnCount: 8,
+        rowHeights: {},
+        columnWidths: {},
+        cells: {
+          A1: { input: "Item" },
+          B1: { input: "Qty" },
+          C1: { input: "Status" },
+          A2: { input: "Water cases" },
+          B2: { input: "48" },
+          C2: { input: "staged" },
+          A3: { input: "Blankets" },
+          B3: { input: "26" },
+          C3: { input: "sorted" }
+        }
+      }
+    ]
+  }, null, 2);
+}
+
+function buildDemoStarterForm() {
+  return JSON.stringify({
+    type: "bondfire-form",
+    version: 2,
+    title: "Volunteer interest form",
+    description: "Quick demo form for incoming volunteers.",
+    fields: [
+      { id: "field_1", type: "text", label: "Your name", required: true, options: [] },
+      { id: "field_2", type: "choice", label: "Preferred shift", required: false, options: ["Morning", "Afternoon", "Evening"] },
+      { id: "field_3", type: "paragraph", label: "Anything we should know?", required: false, options: [] }
+    ],
+    responses: [
+      { id: "resp_1", submittedAt: Date.now() - 7200000, values: { field_1: "Rin", field_2: "Morning", field_3: "Can help with setup." } }
+    ],
+    publicShare: { enabled: false, token: "" }
+  }, null, 2);
+}
+
+function buildDriveSeed(t) {
+  return {
+    folders: [
+      { id: "df_1", parentId: null, name: "Operations", createdAt: t - 86400000, updatedAt: t - 3600000 },
+      { id: "df_2", parentId: null, name: "Outreach", createdAt: t - 86400000, updatedAt: t - 1800000 }
+    ],
+    notes: [
+      { id: "dn_1", parentId: "df_1", title: "distribution checklist", body: "# distribution checklist\n\n- [ ] stage tables\n- [ ] set out water\n- [ ] count blankets", tags: ["ops"], createdAt: t - 86000000, updatedAt: t - 2400000 }
+    ],
+    files: [
+      { id: "dfile_1", parentId: "df_1", name: "supply tracker.bfsheet", mime: "application/vnd.bondfire.sheet+json", size: 0, textContent: buildDemoStarterSheet(), dataUrl: "", createdAt: t - 84000000, updatedAt: t - 1500000 },
+      { id: "dfile_2", parentId: "df_2", name: "volunteer form.bfform", mime: "application/vnd.bondfire.form+json", size: 0, textContent: buildDemoStarterForm(), dataUrl: "", createdAt: t - 82000000, updatedAt: t - 1200000 }
+    ],
+    templates: [
+      { id: "dtpl_1", name: "meeting notes", title: "meeting notes", body: "# meeting notes\n\n## agenda\n- [ ] \n\n## discussion\n\n## action items\n- [ ] ", createdAt: t - 81000000, updatedAt: t - 1100000 }
+    ]
+  };
+}
+
+function ensureDriveShape(state) {
+  if (!state.drive) state.drive = buildDriveSeed(now());
+  state.drive.folders = Array.isArray(state.drive.folders) ? state.drive.folders : [];
+  state.drive.notes = Array.isArray(state.drive.notes) ? state.drive.notes : [];
+  state.drive.files = Array.isArray(state.drive.files) ? state.drive.files : [];
+  state.drive.templates = Array.isArray(state.drive.templates) ? state.drive.templates : [];
+  return state.drive;
+}
+
+function stripFile(file, includeData = false) {
+  const out = {
+    id: file.id,
+    parentId: file.parentId ?? null,
+    name: file.name || "file",
+    mime: file.mime || "application/octet-stream",
+    size: Number(file.size || 0),
+    createdAt: Number(file.createdAt || 0),
+    updatedAt: Number(file.updatedAt || 0),
+  };
+  if (includeData) {
+    out.textContent = String(file.textContent || "");
+    out.dataUrl = String(file.dataUrl || "");
+  }
+  return out;
+}
+
 function buildSeed() {
   const t = now();
   return {
@@ -103,6 +195,7 @@ function buildSeed() {
         { label: "Request Assistance", url: "modal:get_help" },
       ],
     },
+    drive: buildDriveSeed(t),
     publicInbox: [
       { id: "pi1", type: "intake", kind: "get_help", name: "Sam", contact: "sam@example.org", details: "Need diapers and pantry staples.", status: "new", review_status: "new", created_at: t - 6200000 },
       { id: "pi2", type: "intake", kind: "offer_resources", name: "Jules", contact: "jules@example.org", details: "Can donate blankets and socks.", status: "new", review_status: "reviewed", created_at: t - 4200000 },
@@ -259,6 +352,50 @@ export function demoHandle(path, opts = {}) {
     if (method === "POST") { const row = { id: uid("pl"), created_at: now(), ...body }; state.pledges = [row, ...state.pledges]; writeDemoState(state); return { ok: true, pledge: clone(row), id: row.id }; }
     if (method === "PUT") { state.pledges = upsert(state.pledges, body); writeDemoState(state); return { ok: true }; }
     if (method === "DELETE") { const id = url.searchParams.get("id") || body.id; state.pledges = removeById(state.pledges, id); writeDemoState(state); return { ok: true }; }
+  }
+
+  if (parts[3] === "drive") {
+    const drive = ensureDriveShape(state);
+    const drivePart = parts[4] || "";
+    const driveId = decodeURIComponent(parts[5] || "");
+
+    if (!drivePart && method === "GET") {
+      return { ok: true, folders: clone(drive.folders), notes: clone(drive.notes), files: drive.files.map((f) => stripFile(f, false)), templates: clone(drive.templates) };
+    }
+    if (drivePart === "import" && method === "POST") {
+      if (Array.isArray(body.folders)) drive.folders = clone(body.folders);
+      if (Array.isArray(body.notes)) drive.notes = clone(body.notes);
+      if (Array.isArray(body.files)) drive.files = clone(body.files);
+      if (Array.isArray(body.templates)) drive.templates = clone(body.templates);
+      writeDemoState(state);
+      return { ok: true };
+    }
+    if (drivePart === "folders") {
+      if (method === "GET") return { ok: true, folders: clone(drive.folders) };
+      if (method === "POST") { const t = now(); const row = { id: uid("df"), parentId: body.parentId ?? null, name: String(body.name || "untitled folder"), createdAt: t, updatedAt: t }; drive.folders = [...drive.folders, row]; writeDemoState(state); return { ok: true, folder: clone(row) }; }
+      if (driveId && method === "PATCH") { const idx = drive.folders.findIndex((f) => String(f.id) === String(driveId)); if (idx === -1) return { ok: false, error: "NOT_FOUND" }; drive.folders[idx] = { ...drive.folders[idx], ...(Object.prototype.hasOwnProperty.call(body, "parentId") ? { parentId: body.parentId ?? null } : {}), ...(body.name !== undefined ? { name: String(body.name || "untitled folder") } : {}), updatedAt: now() }; writeDemoState(state); return { ok: true, folder: clone(drive.folders[idx]) }; }
+      if (driveId && method === "DELETE") { const folder = drive.folders.find((f) => String(f.id) === String(driveId)); if (!folder) return { ok: false, error: "NOT_FOUND" }; const parent = folder.parentId ?? null; drive.folders = drive.folders.filter((f) => String(f.id) !== String(driveId)); drive.notes = drive.notes.map((n) => String(n.parentId) === String(driveId) ? { ...n, parentId: parent, updatedAt: now() } : n); drive.files = drive.files.map((f) => String(f.parentId) === String(driveId) ? { ...f, parentId: parent, updatedAt: now() } : f); writeDemoState(state); return { ok: true, deleted: true, id: driveId }; }
+    }
+    if (drivePart === "notes") {
+      if (method === "GET") return { ok: true, notes: clone(drive.notes) };
+      if (method === "POST") { const t = now(); const row = { id: uid("dn"), parentId: body.parentId ?? null, title: String(body.title || "untitled"), body: String(body.body || body.content || ""), tags: Array.isArray(body.tags) ? body.tags : [], createdAt: t, updatedAt: t }; drive.notes = [row, ...drive.notes]; writeDemoState(state); return { ok: true, note: clone(row) }; }
+      if (driveId && method === "GET") { const row = drive.notes.find((n) => String(n.id) === String(driveId)); return row ? { ok: true, note: clone(row) } : { ok: false, error: "NOT_FOUND" }; }
+      if (driveId && method === "PATCH") { const idx = drive.notes.findIndex((n) => String(n.id) === String(driveId)); if (idx === -1) return { ok: false, error: "NOT_FOUND" }; drive.notes[idx] = { ...drive.notes[idx], ...(Object.prototype.hasOwnProperty.call(body, "parentId") ? { parentId: body.parentId ?? null } : {}), ...(body.title !== undefined ? { title: String(body.title || "untitled") } : {}), ...(body.body !== undefined || body.content !== undefined ? { body: String(body.body ?? body.content ?? "") } : {}), ...(body.tags !== undefined ? { tags: Array.isArray(body.tags) ? body.tags : [] } : {}), updatedAt: now() }; writeDemoState(state); return { ok: true, note: clone(drive.notes[idx]) }; }
+      if (driveId && method === "DELETE") { drive.notes = drive.notes.filter((n) => String(n.id) !== String(driveId)); writeDemoState(state); return { ok: true, deleted: true, id: driveId }; }
+    }
+    if (drivePart === "files") {
+      if (method === "GET") return { ok: true, files: drive.files.map((f) => stripFile(f, false)) };
+      if (method === "POST") { const t = now(); const textContent = String(body.textContent || ""); const dataUrl = String(body.dataUrl || ""); const mime = String(body.mime || "application/octet-stream"); const row = { id: uid("dfile"), parentId: body.parentId ?? null, name: String(body.name || "file"), mime, size: Number(body.size || dataUrl.length || textContent.length || 0), textContent, dataUrl, createdAt: t, updatedAt: t }; drive.files = [row, ...drive.files]; writeDemoState(state); return { ok: true, file: stripFile(row, false) }; }
+      if (driveId && method === "GET") { const row = drive.files.find((f) => String(f.id) === String(driveId)); return row ? { ok: true, file: stripFile(row, true) } : { ok: false, error: "NOT_FOUND" }; }
+      if (driveId && method === "PATCH") { const idx = drive.files.findIndex((f) => String(f.id) === String(driveId)); if (idx === -1) return { ok: false, error: "NOT_FOUND" }; const existing = drive.files[idx]; const next = { ...existing, ...(Object.prototype.hasOwnProperty.call(body, "parentId") ? { parentId: body.parentId ?? null } : {}), ...(body.name !== undefined ? { name: String(body.name || "file") } : {}), ...(body.mime !== undefined ? { mime: String(body.mime || existing.mime || "application/octet-stream") } : {}), ...(body.textContent !== undefined ? { textContent: String(body.textContent || "") } : {}), ...(body.dataUrl !== undefined ? { dataUrl: String(body.dataUrl || "") } : {}), ...(body.size !== undefined ? { size: Number(body.size || 0) } : {}), updatedAt: now() }; drive.files[idx] = next; writeDemoState(state); return { ok: true, file: stripFile(next, true) }; }
+      if (driveId && method === "DELETE") { drive.files = drive.files.filter((f) => String(f.id) !== String(driveId)); writeDemoState(state); return { ok: true, deleted: true, id: driveId }; }
+    }
+    if (drivePart === "templates") {
+      if (method === "GET") return { ok: true, templates: clone(drive.templates) };
+      if (method === "POST") { const t = now(); const row = { id: uid("dtpl"), name: String(body.name || "template"), title: String(body.title || "untitled"), body: String(body.body || body.content || ""), createdAt: t, updatedAt: t }; drive.templates = [row, ...drive.templates]; writeDemoState(state); return { ok: true, template: clone(row) }; }
+      if (driveId && method === "PATCH") { const idx = drive.templates.findIndex((n) => String(n.id) === String(driveId)); if (idx === -1) return { ok: false, error: "NOT_FOUND" }; drive.templates[idx] = { ...drive.templates[idx], ...(body.name !== undefined ? { name: String(body.name || "template") } : {}), ...(body.title !== undefined ? { title: String(body.title || "untitled") } : {}), ...(body.body !== undefined || body.content !== undefined ? { body: String(body.body ?? body.content ?? "") } : {}), updatedAt: now() }; writeDemoState(state); return { ok: true, template: clone(drive.templates[idx]) }; }
+      if (driveId && method === "DELETE") { drive.templates = drive.templates.filter((n) => String(n.id) !== String(driveId)); writeDemoState(state); return { ok: true, deleted: true, id: driveId }; }
+    }
   }
 
   if (parts[3] === "newsletter") {
