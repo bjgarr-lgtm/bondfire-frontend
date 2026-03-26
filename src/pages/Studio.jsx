@@ -680,6 +680,10 @@ export default function Studio() {
 		setStudioRemoteNotice(null);
 		studioLastLocalEditRef.current = 0;
 		studioLastRemoteApplyRef.current = 0;
+		studioRemoteSigRef.current = "";
+		studioPendingRemoteRef.current = null;
+		studioNeedsRemoteHydrationRef.current = false;
+		studioHasAppliedRemoteRef.current = false;
 
 		(async () => {
 if (!orgId) {
@@ -787,7 +791,7 @@ React.useEffect(() => {
 		window.removeEventListener("visibilitychange", onVisible);
 		window.removeEventListener("focus", onFocus);
 	};
-}, [orgId, fetchAndApplyRemoteStudioState]);
+}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
 
 React.useEffect(() => {
 	if (!studioLoadedRef.current || !orgId) return;
@@ -811,7 +815,25 @@ React.useEffect(() => {
 			studioStreamRef.current = null;
 		}
 	};
-}, [orgId, fetchAndApplyRemoteStudioState]);
+}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
+
+React.useEffect(() => {
+	if (!studioLoadedRef.current || !orgId) return;
+	if (!studioNeedsRemoteHydrationRef.current) return;
+	let cancelled = false;
+	const id = window.setTimeout(async () => {
+		try {
+			let orgKey = null;
+			try { orgKey = getCachedOrgKey(orgId); } catch {}
+			if (!orgKey) return;
+			await fetchAndApplyRemoteStudioState({ queueIfBusy: false, forceApply: true, reason: "rehydrate" });
+		} catch {} 
+	}, 600);
+	return () => {
+		cancelled = true;
+		window.clearTimeout(id);
+	};
+}, [orgId, studioSyncMsg, docs.length, savedBlocks.length, textEditId, dragState, resizeState, marquee, panState, guideDrag]);
 
 React.useEffect(() => {
 	const pending = studioPendingRemoteRef.current;
@@ -869,7 +891,15 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	}
 	const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
 	const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
-	if (!forceApply && queueIfBusy && (hasActiveInteraction || hasRecentLocalEdits)) {
+	const hasLocalDocs = Array.isArray(docs) && docs.length > 0;
+	const hasLocalBlocks = Array.isArray(savedBlocks) && savedBlocks.length > 0;
+	const needsAuthoritativeRemoteHydration = hasRemoteRows && (
+		forceApply ||
+		!studioHasAppliedRemoteRef.current ||
+		studioNeedsRemoteHydrationRef.current ||
+		(!hasLocalDocs && !hasLocalBlocks)
+	);
+	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || hasRecentLocalEdits)) {
 		studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
 		setStudioRemoteNotice({
 			kind: "queued",
@@ -889,7 +919,7 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	studioHasAppliedRemoteRef.current = true;
 	studioNeedsRemoteHydrationRef.current = false;
 	setStudioRemoteNotice(null);
-	setStudioSyncMsg(reason === "initial" ? "Studio docs are now synced with org-key encryption." : "Remote Studio changes applied.");
+	setStudioSyncMsg(reason === "initial" || needsAuthoritativeRemoteHydration ? "Studio loaded shared encrypted docs from the server." : "Remote Studio changes applied.");
 	return true;
 }
 
