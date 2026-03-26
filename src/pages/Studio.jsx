@@ -4,6 +4,7 @@ import { api } from "../utils/api.js";
 import { STUDIO_ASSETS } from "../data/studioAssets.js";
 import { searchPixabayImages } from "../utils/pixabay.js";
 import { buildQrCodeUrl } from "../utils/qr.js";
+import { removeImageBackground } from "../utils/removeBackground.js";
 import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import { useStudioFonts } from "../hooks/useStudioFonts.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
@@ -593,6 +594,8 @@ export default function Studio() {
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
 	const [textEditId, setTextEditId] = React.useState(null);
+	const [isMobileViewport, setIsMobileViewport] = React.useState(() => window.innerWidth <= 900);
+	const [bgRemoving, setBgRemoving] = React.useState(false);
 	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
 	const studioLoadedRef = React.useRef(false);
@@ -663,6 +666,18 @@ export default function Studio() {
 		})();
 		return () => { cancelled = true; };
 	}, [orgId]);
+
+	React.useEffect(() => {
+		const onResize = () => setIsMobileViewport(window.innerWidth <= 900);
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
+
+	React.useEffect(() => {
+		if (!isMobileViewport) return;
+		setShowRulers(false);
+		setLeftPanel(null);
+	}, [isMobileViewport]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
@@ -785,7 +800,7 @@ export default function Studio() {
 		if (currentDoc) {
 			setTimeout(() => fitCanvas(currentPage || currentDoc), 0);
 		}
-	}, [currentId, activePageIndex]);
+	}, [currentId, activePageIndex, isMobileViewport]);
 
 	React.useEffect(() => {
 		const onResize = () => fitCanvas(currentPage || currentDoc);
@@ -943,7 +958,27 @@ export default function Studio() {
 		} catch {}
 	};
 
-	const loadPixabayAssets = React.useCallback(async () => {
+		const removeSelectedImageBackground = React.useCallback(async () => {
+		if (!selected || selected.type !== "image" || selected.qrValue || !selected.src || bgRemoving) return;
+		setBgRemoving(true);
+		try {
+			const nextSrc = await removeImageBackground(selected.src);
+			snapshot();
+			updateElement(selected.id, {
+				src: nextSrc,
+				name: `${selected.name || "Image"} Cutout`,
+				originalSrc: selected.originalSrc || selected.src,
+				fit: "contain",
+			});
+			setStudioSyncMsg("Background removed locally.");
+		} catch (err) {
+			window.alert(String(err?.message || err || "Background removal failed"));
+		} finally {
+			setBgRemoving(false);
+		}
+	}, [selected, bgRemoving, snapshot, updateElement]);
+
+const loadPixabayAssets = React.useCallback(async () => {
 		const query = assetSearch.trim() || "community poster";
 		setPixabayLoading(true);
 		setPixabayError("");
@@ -1935,7 +1970,7 @@ const addImage = () => {
 			</div>
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
-				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
+				<div style={isMobileViewport ? { display: "none" } : { position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
 					<button
 						title="Add"
 						style={iconButtonStyle(leftPanel === "create")}
@@ -1974,7 +2009,7 @@ const addImage = () => {
 				</div>
 
 				{leftPanel ? (
-					<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 56) : 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+					<div style={isMobileViewport ? { position: "absolute", left: 12, right: 12, bottom: 72, maxHeight: "58vh", zIndex: 31, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" } : { position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 56) : 60, bottom: 12, width: 300, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 10 }}>
 							<div style={{ fontWeight: 800 }}>{leftPanel === "create" ? "Add" : leftPanel === "templates" ? "Templates" : leftPanel === "assets" ? "Assets" : leftPanel === "data" ? "Bondfire Data" : "Documents"}</div>
 							<button style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(17,24,39,0.92)", color: "white" }} onClick={() => setLeftPanel(null)}>✕</button>
@@ -2161,6 +2196,7 @@ const addImage = () => {
 						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); removeSelected(); }}>Delete</button>
 						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipX: !item.flipX })); }}>Flip H</button>
 						<button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); updateElements(selectedIds, (item) => ({ flipY: !item.flipY })); }}>Flip V</button>
+						{selected?.type === "image" && !selected?.qrValue ? <button type="button" style={{ ...panelButtonStyle(false), width: "auto", padding: "2px 8px", minHeight: 26 }} onClick={(e) => { e.stopPropagation(); removeSelectedImageBackground(); }} disabled={bgRemoving}>{bgRemoving ? "Removing..." : "Remove BG"}</button> : null}
 						<div style={{ display: "flex", alignItems: "center", gap: 4, color: "white", fontSize: 11 }}>
 							<span>Opacity</span>
 							<div style={{ width: 140, display: "flex", alignItems: "center" }}>
@@ -2194,7 +2230,7 @@ const addImage = () => {
 					onDragOver={onWorkspaceDragOver}
 					onDragEnter={onWorkspaceDragEnter}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
-					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+					style={{ position: "absolute", inset: 0, overflow: "auto", paddingBottom: isMobileViewport ? 72 : 0, cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
 					{currentDoc ? (
 						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight, paddingTop: 0 }}>
 							{showRulers ? (
@@ -2297,7 +2333,7 @@ const addImage = () => {
 															{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "ns-resize" },
 															{ key: "sw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nesw-resize" },
 															{ key: "w", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
-														].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
+														].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: isMobileViewport ? 18 : 12, height: isMobileViewport ? 18 : 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
 														{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 													</>
 												) : (
@@ -2323,6 +2359,16 @@ const addImage = () => {
 					) : <div style={{ minHeight: 600, display: "grid", placeItems: "center", opacity: 0.7 }}>Create a document to start.</div>}
 				</div>
 
+				{isMobileViewport ? (
+					<div style={{ position: "absolute", left: 12, right: 12, bottom: 12, height: 50, zIndex: 33, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, padding: 6 }}>
+						<button onClick={() => setLeftPanel((v) => v === "create" ? null : "create")} style={{ borderRadius: 10 }}>Add</button>
+						<button onClick={() => setLeftPanel((v) => v === "templates" ? null : "templates")} style={{ borderRadius: 10 }}>Templates</button>
+						<button onClick={() => setLeftPanel((v) => v === "assets" ? null : "assets")} style={{ borderRadius: 10 }}>Assets</button>
+						<button onClick={() => setLeftPanel((v) => v === "data" ? null : "data")} style={{ borderRadius: 10 }}>Data</button>
+						<button onClick={() => setLeftPanel((v) => v === "docs" ? null : "docs")} style={{ borderRadius: 10 }}>Docs</button>
+						<button onClick={() => setInspectorOpen((v) => !v)} style={{ borderRadius: 10 }}>Edit</button>
+					</div>
+				) : null}
 				{contextMenu ? (
 					<div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 220), width: 190, zIndex: 80, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 8, boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "grid", gap: 6 }}>
@@ -2355,7 +2401,7 @@ const addImage = () => {
 					</div>
 				) : null}
 				{inspectorOpen ? (
-					<div style={{ position: "absolute", top: 12, right: 12, bottom: 12, width: 340, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
+					<div style={isMobileViewport ? { position: "absolute", left: 12, right: 12, bottom: 72, maxHeight: "62vh", zIndex: 32, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" } : { position: "absolute", top: 12, right: 12, bottom: 12, width: 340, zIndex: 26, background: "rgba(17,24,39,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 14, overflow: "auto", boxShadow: "0 18px 60px rgba(0,0,0,0.35)" }}>
 						<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
 							<div style={{ fontWeight: 800 }}>Inspector</div>
 							<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2430,6 +2476,7 @@ const addImage = () => {
 								{selected.type === "image" ? (
 									<>
 										<label>Fit<select value={selected.fit || "cover"} onChange={(e) => updateElement(selected.id, { fit: e.target.value })} style={{ width: "100%" }}><option value="cover">Cover</option><option value="contain">Contain</option><option value="fill">Fill</option></select></label>
+										{!selected.qrValue ? <button type="button" onClick={removeSelectedImageBackground} disabled={bgRemoving}>{bgRemoving ? "Removing background..." : "Remove background"}</button> : null}
 										{selected.qrValue ? (
 											<>
 												<label>QR value<textarea value={selected.qrValue || ""} onChange={(e) => updateElement(selected.id, { qrValue: e.target.value, src: buildQrCodeUrl(e.target.value, { fg: selected.qrFg || "#000000", bg: selected.qrBg || "#ffffff" }) })} rows={4} style={{ width: "100%" }} /></label>
