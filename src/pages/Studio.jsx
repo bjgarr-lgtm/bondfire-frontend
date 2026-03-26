@@ -293,12 +293,19 @@ async function saveStudioStateToServer(orgId, payload) {
 function openStudioUpdatesStream(orgId, onMessage) {
 	if (!orgId || typeof window === "undefined" || typeof window.EventSource === "undefined") return null;
 	const es = new window.EventSource(`/api/orgs/${encodeURIComponent(orgId)}/studio/updates`);
-	es.onmessage = (event) => {
+	const handle = (event) => {
 		try {
 			onMessage?.(JSON.parse(String(event?.data || "{}")));
 		} catch {}
 	};
+	es.onmessage = handle;
+	es.addEventListener("ready", handle);
+	es.addEventListener("studio-updated", handle);
 	return es;
+}
+
+function hasStudioRemoteRows(resp) {
+	return !!((Array.isArray(resp?.docs) && resp.docs.length) || (Array.isArray(resp?.blocks) && resp.blocks.length));
 }
 
 function buildStudioRemoteSignature(resp) {
@@ -648,6 +655,8 @@ export default function Studio() {
 	const studioLastRemoteApplyRef = React.useRef(0);
 	const studioStreamRef = React.useRef(null);
 	const studioFastPollUntilRef = React.useRef(0);
+	const studioNeedsRemoteHydrationRef = React.useRef(false);
+	const studioHasAppliedRemoteRef = React.useRef(false);
 	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
@@ -673,39 +682,17 @@ export default function Studio() {
 		studioLastRemoteApplyRef.current = 0;
 
 		(async () => {
-			if (!orgId) {
-				studioLoadedRef.current = true;
-				return;
-			}
-			let orgKey = null;
-			try { orgKey = getCachedOrgKey(orgId); } catch {}
-			if (!orgKey) {
-				studioLoadedRef.current = true;
-				setStudioSyncMsg("Studio is using local cache on this device until the org key is available.");
-				return;
-			}
-			try {
-				const resp = await loadStudioStateFromServer(orgId);
-				studioRemoteSigRef.current = buildStudioRemoteSignature(resp);
-				const remoteState = await decryptStudioStatePayload(orgId, resp);
-				const remoteDocs = remoteState?.docs || [];
-				const remoteBlocks = remoteState?.blocks || [];
-				if (cancelled) return;
-				const nextDocs = remoteDocs.length ? normalizeDocs(remoteDocs) : cachedDocs;
-				const nextBlocks = remoteBlocks.length ? remoteBlocks : cachedBlocks;
-				setDocs(nextDocs);
-				setSavedBlocks(nextBlocks);
-				saveDocs(orgId, nextDocs);
-				saveBlocks(orgId, nextBlocks);
-				setCurrentId((prev) => nextDocs.some((doc) => doc.id === prev) ? prev : (nextDocs[0]?.id || null));
-				studioLastRemoteApplyRef.current = Date.now();
-				setStudioRemoteNotice(null);
-				setStudioSyncMsg("Studio docs are now synced with org-key encryption.");
-			} catch (err) {
-				if (!cancelled) setStudioSyncMsg(String(err?.message || err || "Studio sync failed. Using local cache."));
-			} finally {
-				if (!cancelled) studioLoadedRef.current = true;
-			}
+if (!orgId) {
+	studioLoadedRef.current = true;
+	return;
+}
+try {
+	await fetchAndApplyRemoteStudioState({ queueIfBusy: false, forceApply: true, reason: "initial" });
+} catch (err) {
+	if (!cancelled) setStudioSyncMsg(String(err?.message || err || "Studio sync failed. Using local cache."));
+} finally {
+	if (!cancelled) studioLoadedRef.current = true;
+}
 		})();
 		return () => { cancelled = true; };
 	}, [orgId]);
@@ -758,124 +745,76 @@ export default function Studio() {
 		});
 	}, [orgId]);
 
-	React.useEffect(() => {
-		if (!studioLoadedRef.current || !orgId) return;
-		let cancelled = false;
-		let intervalId = null;
+React.useEffect(() => {
+	if (!studioLoadedRef.current || !orgId) return;
+	let cancelled = false;
+	let intervalId = null;
 
-		const poll = async () => {
-			try {
-				const resp = await loadStudioStateFromServer(orgId);
-				if (cancelled) return;
-				const sig = buildStudioRemoteSignature(resp);
-				if (!sig || sig === studioRemoteSigRef.current) return;
-				const remoteState = await decryptStudioStatePayload(orgId, resp);
-				if (!remoteState) return;
-				const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
-				const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
-				if (hasActiveInteraction || hasRecentLocalEdits) {
-					studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
-					setStudioRemoteNotice({
-						kind: "queued",
-						text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
-					});
-					setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes available.");
-					return;
-				}
-				studioRemoteSigRef.current = sig;
-				studioPendingRemoteRef.current = null;
-				setDocs(remoteState.docs);
-				setSavedBlocks(remoteState.blocks);
-				saveDocs(orgId, remoteState.docs);
-				saveBlocks(orgId, remoteState.blocks);
-				setCurrentId((prev) => remoteState.docs.some((doc) => doc.id === prev) ? prev : (remoteState.docs[0]?.id || null));
-				studioLastRemoteApplyRef.current = Date.now();
-				setStudioRemoteNotice(null);
-				setStudioSyncMsg("Remote Studio changes applied.");
-			} catch {}
-		};
+	const poll = async () => {
+		try {
+			await fetchAndApplyRemoteStudioState({ queueIfBusy: true, forceApply: false, reason: "poll" });
+		} catch {}
+	};
 
-		const resetInterval = () => {
-			if (intervalId) window.clearInterval(intervalId);
-			const visible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
-			const inFastMode = Date.now() < studioFastPollUntilRef.current;
-			const intervalMs = visible ? (inFastMode ? 1200 : 3000) : 12000;
-			intervalId = window.setInterval(poll, intervalMs);
-		};
+	const resetInterval = () => {
+		if (intervalId) window.clearInterval(intervalId);
+		const visible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+		const inFastMode = Date.now() < studioFastPollUntilRef.current || studioNeedsRemoteHydrationRef.current;
+		const intervalMs = visible ? (inFastMode ? 1200 : 3000) : 12000;
+		intervalId = window.setInterval(poll, intervalMs);
+	};
 
-		poll();
-		resetInterval();
-		const onVisible = () => {
-			if (typeof document === "undefined") return;
-			if (document.visibilityState === "visible") {
-				studioFastPollUntilRef.current = Math.max(studioFastPollUntilRef.current, Date.now() + 8000);
-				poll();
-			}
-			resetInterval();
-		};
-		const onFocus = () => {
+	poll();
+	resetInterval();
+	const onVisible = () => {
+		if (typeof document === "undefined") return;
+		if (document.visibilityState === "visible") {
 			studioFastPollUntilRef.current = Math.max(studioFastPollUntilRef.current, Date.now() + 8000);
 			poll();
-			resetInterval();
-		};
-		window.addEventListener("visibilitychange", onVisible);
-		window.addEventListener("focus", onFocus);
-		return () => {
-			cancelled = true;
-			if (intervalId) window.clearInterval(intervalId);
-			window.removeEventListener("visibilitychange", onVisible);
-			window.removeEventListener("focus", onFocus);
-		};
-	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+		}
+		resetInterval();
+	};
+	const onFocus = () => {
+		studioFastPollUntilRef.current = Math.max(studioFastPollUntilRef.current, Date.now() + 8000);
+		poll();
+		resetInterval();
+	};
+	window.addEventListener("visibilitychange", onVisible);
+	window.addEventListener("focus", onFocus);
+	return () => {
+		cancelled = true;
+		if (intervalId) window.clearInterval(intervalId);
+		window.removeEventListener("visibilitychange", onVisible);
+		window.removeEventListener("focus", onFocus);
+	};
+}, [orgId, fetchAndApplyRemoteStudioState]);
 
-	React.useEffect(() => {
-		if (!studioLoadedRef.current || !orgId) return;
+React.useEffect(() => {
+	if (!studioLoadedRef.current || !orgId) return;
+	if (studioStreamRef.current) {
+		try { studioStreamRef.current.close(); } catch {}
+		studioStreamRef.current = null;
+	}
+	const es = openStudioUpdatesStream(orgId, async (payload) => {
+		const sig = String(payload?.sig || "");
+		if (!sig || sig === studioRemoteSigRef.current) return;
+		studioFastPollUntilRef.current = Date.now() + 12000;
+		setStudioSyncMsg("Studio update signal received. Refreshing…");
+		try {
+			await fetchAndApplyRemoteStudioState({ queueIfBusy: true, forceApply: false, reason: "push" });
+		} catch {}
+	});
+	studioStreamRef.current = es;
+	return () => {
 		if (studioStreamRef.current) {
 			try { studioStreamRef.current.close(); } catch {}
 			studioStreamRef.current = null;
 		}
-		const es = openStudioUpdatesStream(orgId, (payload) => {
-			const sig = String(payload?.sig || "");
-			if (!sig || sig === studioRemoteSigRef.current) return;
-			studioFastPollUntilRef.current = Date.now() + 12000;
-			setStudioSyncMsg("Studio update signal received. Refreshing…");
-			loadStudioStateFromServer(orgId).then(async (resp) => {
-				const liveSig = buildStudioRemoteSignature(resp);
-				if (!liveSig || liveSig === studioRemoteSigRef.current) return;
-				const remoteState = await decryptStudioStatePayload(orgId, resp);
-				if (!remoteState) return;
-				const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
-				const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
-				if (hasActiveInteraction || hasRecentLocalEdits) {
-					studioPendingRemoteRef.current = { sig: liveSig, remoteState, receivedAt: Date.now() };
-					setStudioRemoteNotice({
-						kind: "queued",
-						text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
-					});
-					return;
-				}
-				studioRemoteSigRef.current = liveSig;
-				setDocs(remoteState.docs);
-				setSavedBlocks(remoteState.blocks);
-				saveDocs(orgId, remoteState.docs);
-				saveBlocks(orgId, remoteState.blocks);
-				setCurrentId((prev) => remoteState.docs.some((doc) => doc.id === prev) ? prev : (remoteState.docs[0]?.id || null));
-				studioLastRemoteApplyRef.current = Date.now();
-				setStudioRemoteNotice(null);
-				setStudioSyncMsg("Remote Studio changes applied.");
-			}).catch(() => {});
-		});
-		studioStreamRef.current = es;
-		return () => {
-			if (studioStreamRef.current) {
-				try { studioStreamRef.current.close(); } catch {}
-				studioStreamRef.current = null;
-			}
-		};
-	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+	};
+}, [orgId, fetchAndApplyRemoteStudioState]);
 
-	React.useEffect(() => {
-		const pending = studioPendingRemoteRef.current;
+React.useEffect(() => {
+	const pending = studioPendingRemoteRef.current;
 		if (!pending) return;
 		if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
 		if (studioLastLocalEditRef.current > studioLastRemoteApplyRef.current) return;
@@ -888,12 +827,71 @@ export default function Studio() {
 			setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
 			studioPendingRemoteRef.current = null;
 			studioLastRemoteApplyRef.current = Date.now();
+			studioHasAppliedRemoteRef.current = true;
+			studioNeedsRemoteHydrationRef.current = false;
 			setStudioRemoteNotice(null);
 			setStudioSyncMsg("Queued Studio changes applied.");
 		}, 750);
 		return () => window.clearTimeout(id);
 	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
 
+
+const fetchAndApplyRemoteStudioState = React.useCallback(async ({ queueIfBusy = true, forceApply = false, reason = "poll" } = {}) => {
+	if (!orgId) return false;
+	const resp = await loadStudioStateFromServer(orgId);
+	const sig = buildStudioRemoteSignature(resp);
+	const hasRemoteRows = hasStudioRemoteRows(resp);
+	let orgKey = null;
+	try { orgKey = getCachedOrgKey(orgId); } catch {}
+	if (!orgKey) {
+		studioNeedsRemoteHydrationRef.current = hasRemoteRows;
+		if (hasRemoteRows) setStudioSyncMsg("Studio found synced docs but this device is still waiting for the org key.");
+		return false;
+	}
+	const remoteState = await decryptStudioStatePayload(orgId, resp);
+	if (!remoteState) {
+		studioNeedsRemoteHydrationRef.current = hasRemoteRows;
+		return false;
+	}
+	const remoteDocs = remoteState.docs || [];
+	const remoteBlocks = remoteState.blocks || [];
+	if (hasRemoteRows && !remoteDocs.length && !remoteBlocks.length) {
+		studioNeedsRemoteHydrationRef.current = true;
+		setStudioSyncMsg("Studio found remote state but this device could not decrypt it yet.");
+		return false;
+	}
+	if (!sig || sig === studioRemoteSigRef.current) {
+		if (remoteDocs.length || remoteBlocks.length) {
+			studioHasAppliedRemoteRef.current = true;
+			studioNeedsRemoteHydrationRef.current = false;
+		}
+		return false;
+	}
+	const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
+	const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
+	if (!forceApply && queueIfBusy && (hasActiveInteraction || hasRecentLocalEdits)) {
+		studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
+		setStudioRemoteNotice({
+			kind: "queued",
+			text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
+		});
+		setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes available.");
+		return false;
+	}
+	studioRemoteSigRef.current = sig;
+	studioPendingRemoteRef.current = null;
+	setDocs(remoteDocs);
+	setSavedBlocks(remoteBlocks);
+	saveDocs(orgId, remoteDocs);
+	saveBlocks(orgId, remoteBlocks);
+	setCurrentId((prev) => remoteDocs.some((doc) => doc.id === prev) ? prev : (remoteDocs[0]?.id || null));
+	studioLastRemoteApplyRef.current = Date.now();
+	studioHasAppliedRemoteRef.current = true;
+	studioNeedsRemoteHydrationRef.current = false;
+	setStudioRemoteNotice(null);
+	setStudioSyncMsg(reason === "initial" ? "Studio docs are now synced with org-key encryption." : "Remote Studio changes applied.");
+	return true;
+}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
 
 	const snapshot = React.useCallback(() => {
 		setHistory((prev) => [...prev, clone(docs)]);
@@ -2074,6 +2072,8 @@ React.useEffect(() => {
 		setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
 		studioPendingRemoteRef.current = null;
 		studioLastRemoteApplyRef.current = Date.now();
+		studioHasAppliedRemoteRef.current = true;
+		studioNeedsRemoteHydrationRef.current = false;
 		setStudioRemoteNotice(null);
 		setStudioSyncMsg("Remote Studio changes applied.");
 	}, [orgId]);
