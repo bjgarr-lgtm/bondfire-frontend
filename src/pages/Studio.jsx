@@ -290,6 +290,17 @@ async function saveStudioStateToServer(orgId, payload) {
 	});
 }
 
+function openStudioUpdatesStream(orgId, onMessage) {
+	if (!orgId || typeof window === "undefined" || typeof window.EventSource === "undefined") return null;
+	const es = new window.EventSource(`/api/orgs/${encodeURIComponent(orgId)}/studio/updates`);
+	es.onmessage = (event) => {
+		try {
+			onMessage?.(JSON.parse(String(event?.data || "{}")));
+		} catch {}
+	};
+	return es;
+}
+
 function buildStudioRemoteSignature(resp) {
 	const docsSig = (Array.isArray(resp?.docs) ? resp.docs : [])
 		.map((row) => `${row?.id || ""}:${row?.updated_at || 0}`)
@@ -635,6 +646,8 @@ export default function Studio() {
 	const studioPendingRemoteRef = React.useRef(null);
 	const studioLastLocalEditRef = React.useRef(0);
 	const studioLastRemoteApplyRef = React.useRef(0);
+	const studioStreamRef = React.useRef(null);
+	const studioFastPollUntilRef = React.useRef(0);
 	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
@@ -747,47 +760,8 @@ export default function Studio() {
 
 	React.useEffect(() => {
 		if (!studioLoadedRef.current || !orgId) return;
-		let orgKey = null;
-		try { orgKey = getCachedOrgKey(orgId); } catch {}
-		if (!orgKey) return;
-		if (studioSyncTimerRef.current) clearTimeout(studioSyncTimerRef.current);
-		studioSyncTimerRef.current = setTimeout(async () => {
-			try {
-				const encDocs = [];
-				for (const doc of normalizeDocs(docs)) {
-					encDocs.push({
-						id: String(doc.id || ""),
-						name: "__encrypted__",
-						encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(normalizeDoc(doc))),
-					});
-				}
-				const encBlocks = [];
-				for (const block of Array.isArray(savedBlocks) ? savedBlocks : []) {
-					encBlocks.push({
-						id: String(block.id || ""),
-						name: "__encrypted__",
-						encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(block)),
-					});
-				}
-				await saveStudioStateToServer(orgId, { docs: encDocs, blocks: encBlocks });
-				setStudioSyncMsg("Studio synced with org-key encryption.");
-			} catch (err) {
-				setStudioSyncMsg(String(err?.message || err || "Studio encrypted sync failed."));
-			}
-		}, 700);
-		return () => {
-			if (studioSyncTimerRef.current) {
-				clearTimeout(studioSyncTimerRef.current);
-				studioSyncTimerRef.current = null;
-			}
-		};
-	}, [orgId, docs, savedBlocks]);
-
-	React.useEffect(() => {
-		if (!studioLoadedRef.current || !orgId) return;
-		const shouldPollFast = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
-		const intervalMs = shouldPollFast ? 3000 : 12000;
 		let cancelled = false;
+		let intervalId = null;
 
 		const poll = async () => {
 			try {
@@ -821,18 +795,82 @@ export default function Studio() {
 			} catch {}
 		};
 
+		const resetInterval = () => {
+			if (intervalId) window.clearInterval(intervalId);
+			const visible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+			const inFastMode = Date.now() < studioFastPollUntilRef.current;
+			const intervalMs = visible ? (inFastMode ? 1200 : 3000) : 12000;
+			intervalId = window.setInterval(poll, intervalMs);
+		};
+
 		poll();
-		const id = window.setInterval(poll, intervalMs);
+		resetInterval();
 		const onVisible = () => {
-			if (document.visibilityState === "visible") poll();
+			if (typeof document === "undefined") return;
+			if (document.visibilityState === "visible") {
+				studioFastPollUntilRef.current = Math.max(studioFastPollUntilRef.current, Date.now() + 8000);
+				poll();
+			}
+			resetInterval();
+		};
+		const onFocus = () => {
+			studioFastPollUntilRef.current = Math.max(studioFastPollUntilRef.current, Date.now() + 8000);
+			poll();
+			resetInterval();
 		};
 		window.addEventListener("visibilitychange", onVisible);
-		window.addEventListener("focus", poll);
+		window.addEventListener("focus", onFocus);
 		return () => {
 			cancelled = true;
-			window.clearInterval(id);
+			if (intervalId) window.clearInterval(intervalId);
 			window.removeEventListener("visibilitychange", onVisible);
-			window.removeEventListener("focus", poll);
+			window.removeEventListener("focus", onFocus);
+		};
+	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+
+	React.useEffect(() => {
+		if (!studioLoadedRef.current || !orgId) return;
+		if (studioStreamRef.current) {
+			try { studioStreamRef.current.close(); } catch {}
+			studioStreamRef.current = null;
+		}
+		const es = openStudioUpdatesStream(orgId, (payload) => {
+			const sig = String(payload?.sig || "");
+			if (!sig || sig === studioRemoteSigRef.current) return;
+			studioFastPollUntilRef.current = Date.now() + 12000;
+			setStudioSyncMsg("Studio update signal received. Refreshing…");
+			loadStudioStateFromServer(orgId).then(async (resp) => {
+				const liveSig = buildStudioRemoteSignature(resp);
+				if (!liveSig || liveSig === studioRemoteSigRef.current) return;
+				const remoteState = await decryptStudioStatePayload(orgId, resp);
+				if (!remoteState) return;
+				const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
+				const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
+				if (hasActiveInteraction || hasRecentLocalEdits) {
+					studioPendingRemoteRef.current = { sig: liveSig, remoteState, receivedAt: Date.now() };
+					setStudioRemoteNotice({
+						kind: "queued",
+						text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
+					});
+					return;
+				}
+				studioRemoteSigRef.current = liveSig;
+				setDocs(remoteState.docs);
+				setSavedBlocks(remoteState.blocks);
+				saveDocs(orgId, remoteState.docs);
+				saveBlocks(orgId, remoteState.blocks);
+				setCurrentId((prev) => remoteState.docs.some((doc) => doc.id === prev) ? prev : (remoteState.docs[0]?.id || null));
+				studioLastRemoteApplyRef.current = Date.now();
+				setStudioRemoteNotice(null);
+				setStudioSyncMsg("Remote Studio changes applied.");
+			}).catch(() => {});
+		});
+		studioStreamRef.current = es;
+		return () => {
+			if (studioStreamRef.current) {
+				try { studioStreamRef.current.close(); } catch {}
+				studioStreamRef.current = null;
+			}
 		};
 	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
 
