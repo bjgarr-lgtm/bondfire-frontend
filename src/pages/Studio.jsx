@@ -1424,6 +1424,14 @@ const addImage = () => {
 		});
 	}, [currentDoc]);
 
+	const getEventClientPoint = (e) => {
+		const touch = e?.touches?.[0] || e?.changedTouches?.[0] || null;
+		return {
+			clientX: touch ? touch.clientX : e.clientX,
+			clientY: touch ? touch.clientY : e.clientY,
+		};
+	};
+
 	const startElementDrag = (e, el) => {
 		if (!currentDoc || el.locked) return;
 		if (e.button === 2) {
@@ -1433,6 +1441,7 @@ const addImage = () => {
 		}
 		e.preventDefault();
 		e.stopPropagation();
+		const { clientX, clientY } = getEventClientPoint(e);
 		const add = e.shiftKey || e.ctrlKey || e.metaKey;
 		if (add) {
 			selectElement(el, true);
@@ -1450,7 +1459,7 @@ const addImage = () => {
 			return item && !item.locked;
 		});
 		if (!ids.length) return;
-		const point = getCanvasPoint(e.clientX, e.clientY);
+		const point = getCanvasPoint(clientX, clientY);
 		const origins = Object.fromEntries(ids.map((id) => {
 			const item = (currentPage?.elements || []).find((x) => x.id === id);
 			return [id, { x: Number(item?.x || 0), y: Number(item?.y || 0) }];
@@ -1468,9 +1477,10 @@ const addImage = () => {
 		if (!selected || selected.locked) return;
 		e.preventDefault();
 		e.stopPropagation();
+		const { clientX, clientY } = getEventClientPoint(e);
 		setResizeState({
-			startX: e.clientX,
-			startY: e.clientY,
+			startX: clientX,
+			startY: clientY,
 			x: Number(selected.x || 0),
 			y: Number(selected.y || 0),
 			width: Number(selected.width || 1),
@@ -1508,26 +1518,28 @@ const addImage = () => {
 		if (e.button === 2) {
 			return;
 		}
+		const { clientX, clientY } = getEventClientPoint(e);
 		if (spacePan || tool === "hand" || e.button === 1) {
-			setPanState({ startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y });
+			setPanState({ startX: clientX, startY: clientY, panX: pan.x, panY: pan.y });
 			return;
 		}
 		setSelectedIds([]);
 		setSelectedGuideId(null);
 		setTextEditId(null);
 		if (tool === "select") {
-			const point = getMarqueePoint(e.clientX, e.clientY);
+			const point = getMarqueePoint(clientX, clientY);
 			setMarquee({ left: point.x, top: point.y, width: 0, height: 0, startX: point.x, startY: point.y });
 		}
 	};
 
 	React.useEffect(() => {
 		const onMove = (e) => {
+			const { clientX, clientY } = getEventClientPoint(e);
 			if (panState) {
-				setPan({ x: panState.panX + (e.clientX - panState.startX), y: panState.panY + (e.clientY - panState.startY) });
+				setPan({ x: panState.panX + (clientX - panState.startX), y: panState.panY + (clientY - panState.startY) });
 			}
 			if (dragState && currentDoc) {
-				const point = getCanvasPoint(e.clientX, e.clientY);
+				const point = getCanvasPoint(clientX, clientY);
 				const anchorOrigin = dragState.origins?.[dragState.anchorId] || { x: 0, y: 0 };
 				const dx = point.x - Number(dragState.grabOffset?.x || 0) - Number(anchorOrigin.x || 0);
 				const dy = point.y - Number(dragState.grabOffset?.y || 0) - Number(anchorOrigin.y || 0);
@@ -1542,8 +1554,8 @@ const addImage = () => {
 			if (resizeState && currentPage) {
 				const el = (currentPage?.elements || []).find((item) => item.id === resizeState.id);
 				if (!el) return;
-				const dx = (e.clientX - resizeState.startX) / zoom;
-				const dy = (e.clientY - resizeState.startY) / zoom;
+				const dx = (clientX - resizeState.startX) / zoom;
+				const dy = (clientY - resizeState.startY) / zoom;
 				const handle = resizeState.handle || "se";
 				let nextX = resizeState.x;
 				let nextY = resizeState.y;
@@ -1576,7 +1588,7 @@ const addImage = () => {
 				updateElement(resizeState.id, { x: nextX, y: nextY, width: nextWidth, height: nextHeight });
 			}
 			if (marquee) {
-				const point = getMarqueePoint(e.clientX, e.clientY);
+				const point = getMarqueePoint(clientX, clientY);
 				const next = {
 					...marquee,
 					left: Math.min(marquee.startX, point.x),
@@ -1587,7 +1599,7 @@ const addImage = () => {
 				setMarquee(next);
 			}
 			if (guideDrag && currentPage) {
-				const point = getCanvasPoint(e.clientX, e.clientY);
+				const point = getCanvasPoint(clientX, clientY);
 				const position = guideDrag.orientation === "vertical" ? clamp(point.x, 0, currentPage.width) : clamp(point.y, 0, currentPage.height);
 				updateDoc({
 					guides: (currentDoc.guides || []).map((guide) => guide.id === guideDrag.id ? { ...guide, position } : guide),
@@ -1609,9 +1621,15 @@ const addImage = () => {
 		};
 		window.addEventListener("mousemove", onMove);
 		window.addEventListener("mouseup", onUp);
+		window.addEventListener("touchmove", onMove, { passive: false });
+		window.addEventListener("touchend", onUp);
+		window.addEventListener("touchcancel", onUp);
 		return () => {
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
+			window.removeEventListener("touchmove", onMove);
+			window.removeEventListener("touchend", onUp);
+			window.removeEventListener("touchcancel", onUp);
 		};
 	}, [panState, dragState, resizeState, marquee, guideDrag, currentDoc, currentPage, zoom, getCanvasPoint, getMarqueePoint, updateElements, updateElement, updateDoc]);
 
@@ -2195,6 +2213,7 @@ React.useEffect(() => {
 				<div
 					ref={workspaceRef}
 					onMouseDown={startWorkspaceAction}
+					onTouchStart={startWorkspaceAction}
 					onClick={(e) => {
 						if (suppressCanvasClickRef.current) {
 							suppressCanvasClickRef.current = false;
@@ -2206,7 +2225,7 @@ React.useEffect(() => {
 					onDragOver={onWorkspaceDragOver}
 					onDragEnter={onWorkspaceDragEnter}
 					onContextMenu={(e) => { e.preventDefault(); if (!selectedIds.length || selectedGuideId) setContextMenu({ x: e.clientX, y: e.clientY }); }}
-					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default" }}>
+					style={{ position: "absolute", inset: 0, overflow: "auto", cursor: panState || spacePan || tool === "hand" ? "grab" : "default", touchAction: "none" }}>
 					{currentDoc ? (
 						<div style={{ position: "relative", width: "100%", minHeight: pageStackHeight, paddingTop: 0 }}>
 							{showRulers ? (
@@ -2270,6 +2289,7 @@ React.useEffect(() => {
 												overflow: "visible",
 												boxShadow: isActive ? "0 24px 80px rgba(0,0,0,0.35)" : "0 18px 50px rgba(0,0,0,0.22)",
 												cursor: isActive ? "default" : "pointer",
+											touchAction: "none",
 											}}
 										>
 											<div onDrop={onWorkspaceDrop} onDragOver={onWorkspaceDragOver} style={{ position: "absolute", inset: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: "top left", background: page.background || "#ffffff", overflow: "hidden", borderRadius: 18 / Math.max(zoom, 1) }}>
@@ -2284,10 +2304,10 @@ React.useEffect(() => {
 															if (el.hidden) return null;
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
-															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto" };
+															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? "2px solid #ef4444" : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto", touchAction: "none" };
 															if (el.type === "text") return <div
 															key={el.id}
-															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
+															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }} onTouchStart={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
 															onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) { if (selectedIds.includes(el.id)) setTextEditId(el.id); else selectElement(el, false); } closeMenus(); }}
 															onContextMenu={(e) => openContextMenu(e, el)}
 															contentEditable={textEditId === el.id}
@@ -2295,9 +2315,9 @@ React.useEffect(() => {
 															onBlur={(e) => { updateElement(el.id, { text: e.currentTarget.innerText }); setTextEditId(null); }}
 															style={{ ...common, color: el.color, fontSize: el.fontSize, fontWeight: el.fontWeight, fontFamily: el.fontFamily || FALLBACK_FONT, lineHeight: el.lineHeight, letterSpacing: `${el.letterSpacing || 0}px`, textAlign: el.align, whiteSpace: "pre-wrap", overflow: "hidden", cursor: textEditId === el.id ? "text" : common.cursor }}
 														>{showBoundPreview ? applyBindings(el.text, bindings) : el.text}</div>;
-															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
-															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
-															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
+															if (el.type === "shape") return <div key={el.id} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, background: el.fill, border: `${el.strokeWidth || 0}px solid ${el.stroke || "transparent"}`, borderRadius: el.radius || 0 }} />;
+															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
+															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
 														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: "1px dashed rgba(255,255,255,0.75)", pointerEvents: "none", zIndex: 8 }} /> : null}
 														{selected && !selected.locked ? [
@@ -2309,7 +2329,7 @@ React.useEffect(() => {
 															{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "ns-resize" },
 															{ key: "sw", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) - 6, cursor: "nesw-resize" },
 															{ key: "w", left: Number(selected.x || 0) - 6, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - 6, cursor: "ew-resize" },
-														].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10 }} />) : null}
+														].map((handle) => <div key={handle.key} onMouseDown={(e) => startResize(e, handle.key)} onTouchStart={(e) => startResize(e, handle.key)} style={{ position: "absolute", left: handle.left, top: handle.top, width: 12, height: 12, borderRadius: 999, background: "#ef4444", border: "2px solid white", cursor: handle.cursor, zIndex: 10, touchAction: "none" }} />) : null}
 														{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 													</>
 												) : (
