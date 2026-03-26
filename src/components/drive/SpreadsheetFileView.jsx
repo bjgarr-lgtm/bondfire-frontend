@@ -277,7 +277,7 @@ function MenuButton({ item, onSelect }) {
         display: "grid",
         gap: 2,
         width: "100%",
-        padding: "7px 9px",
+        padding: isMobile ? "6px 8px" : "7px 9px",
         background: "transparent",
         color: "#fff",
         border: "none",
@@ -292,31 +292,6 @@ function MenuButton({ item, onSelect }) {
   );
 }
 
-function getRangeBounds(anchorKey, focusKey) {
-  const anchor = parseCellRef(anchorKey);
-  const focus = parseCellRef(focusKey);
-  if (!anchor || !focus) return null;
-  return {
-    startRow: Math.min(anchor.row, focus.row),
-    endRow: Math.max(anchor.row, focus.row),
-    startCol: Math.min(anchor.col, focus.col),
-    endCol: Math.max(anchor.col, focus.col),
-  };
-}
-
-function rangeLabel(anchorKey, focusKey) {
-  if (!anchorKey || !focusKey) return "A1";
-  if (anchorKey === focusKey) return anchorKey;
-  const bounds = getRangeBounds(anchorKey, focusKey);
-  if (!bounds) return anchorKey;
-  return `${cellKey(bounds.startRow, bounds.startCol)}:${cellKey(bounds.endRow, bounds.endCol)}`;
-}
-
-function isCellWithinBounds(rowIndex, colIndex, bounds) {
-  if (!bounds) return false;
-  return rowIndex >= bounds.startRow && rowIndex <= bounds.endRow && colIndex >= bounds.startCol && colIndex <= bounds.endCol;
-}
-
 export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) {
   const doc = useMemo(() => normalizeSheet(safeParse(value)), [value]);
   const readOnly = mode === "preview";
@@ -326,20 +301,14 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const [sheetNameDraft, setSheetNameDraft] = useState("");
   const [renamingSheetId, setRenamingSheetId] = useState("");
   const [functionsOpen, setFunctionsOpen] = useState(false);
-  const [selectionAnchor, setSelectionAnchor] = useState("A1");
-  const [selectionFocus, setSelectionFocus] = useState("A1");
-  const [isDraggingSelection, setIsDraggingSelection] = useState(false);
   const inputRefs = useRef({});
   const formulaInputRef = useRef(null);
   const functionsRef = useRef(null);
-  const dragRef = useRef(null);
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 760 : false));
 
   const activeSheet = doc.sheets.find((sheet) => sheet.id === doc.activeSheetId) || doc.sheets[0];
   const selectedInput = String(activeSheet?.cells?.[selectedCell]?.input || "");
   const selectedRef = parseCellRef(selectedCell) || { row: 0, col: 0 };
-  const selectionBounds = useMemo(() => getRangeBounds(selectionAnchor, selectionFocus), [selectionAnchor, selectionFocus]);
-  const selectedRangeLabel = useMemo(() => rangeLabel(selectionAnchor, selectionFocus), [selectionAnchor, selectionFocus]);
-  const hasMultiSelection = Boolean(selectionBounds) && (selectionBounds.startRow !== selectionBounds.endRow || selectionBounds.startCol !== selectionBounds.endCol);
 
   useEffect(() => {
     setFormulaDraft(selectedInput);
@@ -354,6 +323,19 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   }, [editingCell, activeSheet?.id, readOnly]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia("(max-width: 760px)");
+    const sync = () => setIsMobile(!!media.matches);
+    sync();
+    if (typeof media.addEventListener === "function") media.addEventListener("change", sync);
+    else media.addListener(sync);
+    return () => {
+      if (typeof media.removeEventListener === "function") media.removeEventListener("change", sync);
+      else media.removeListener(sync);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!functionsOpen) return undefined;
     const onDown = (e) => {
       if (!functionsRef.current?.contains(e.target)) setFunctionsOpen(false);
@@ -361,43 +343,6 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [functionsOpen]);
-
-  useEffect(() => {
-    if (readOnly) return undefined;
-    const updateDragFromPoint = (clientX, clientY) => {
-      const target = document.elementFromPoint(clientX, clientY)?.closest?.("[data-cell-key]");
-      const key = target?.getAttribute?.("data-cell-key");
-      if (!key) return;
-      setSelectedCell(key);
-      setSelectionFocus(key);
-    };
-    const onMouseMove = (e) => {
-      if (!dragRef.current) return;
-      const deltaX = Math.abs(e.clientX - dragRef.current.startX);
-      const deltaY = Math.abs(e.clientY - dragRef.current.startY);
-      if (!isDraggingSelection && deltaX < 4 && deltaY < 4) return;
-      if (!isDraggingSelection) {
-        setIsDraggingSelection(true);
-        setEditingCell("");
-        document.body.style.userSelect = "none";
-      }
-      updateDragFromPoint(e.clientX, e.clientY);
-    };
-    const onMouseUp = (e) => {
-      if (!dragRef.current) return;
-      if (isDraggingSelection) updateDragFromPoint(e.clientX, e.clientY);
-      dragRef.current = null;
-      setTimeout(() => setIsDraggingSelection(false), 0);
-      document.body.style.userSelect = "";
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      document.body.style.userSelect = "";
-    };
-  }, [isDraggingSelection, readOnly]);
 
   const commit = (nextDoc) => onChange?.(serialize(nextDoc));
 
@@ -467,18 +412,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
 
   const selectCell = (cell, shouldEdit = true) => {
     setSelectedCell(cell);
-    setSelectionAnchor(cell);
-    setSelectionFocus(cell);
     if (shouldEdit) setEditingCell(cell);
-    else setEditingCell("");
-  };
-
-  const startSelectionDrag = (e, cell) => {
-    if (readOnly || e.button !== 0) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, cell };
-    setSelectedCell(cell);
-    setSelectionAnchor(cell);
-    setSelectionFocus(cell);
   };
 
   const moveSelection = (deltaRow, deltaCol) => {
@@ -492,18 +426,6 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const commitFormulaBar = () => {
     if (readOnly) return;
     setCellInput(selectedCell, formulaDraft);
-  };
-
-  const clearSelectedRange = () => {
-    if (readOnly || !selectionBounds) return;
-    patchActiveSheet((sheet) => {
-      const nextCells = { ...sheet.cells };
-      for (let row = selectionBounds.startRow; row <= selectionBounds.endRow; row += 1) {
-        for (let col = selectionBounds.startCol; col <= selectionBounds.endCol; col += 1) delete nextCells[cellKey(row, col)];
-      }
-      return { ...sheet, cells: nextCells };
-    });
-    setFormulaDraft("");
   };
 
   const insertFunction = (item) => {
@@ -523,34 +445,28 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
 
   const selectedColWidth = Number(activeSheet.columnWidths?.[columnLabel(selectedRef.col)] || DEFAULT_COL_WIDTH);
   const selectedRowHeight = Number(activeSheet.rowHeights?.[String(selectedRef.row + 1)] || DEFAULT_ROW_HEIGHT);
-  const selectedCellsText = hasMultiSelection && selectionBounds
-    ? Array.from({ length: selectionBounds.endRow - selectionBounds.startRow + 1 }, (_, rowOffset) => (
-        Array.from({ length: selectionBounds.endCol - selectionBounds.startCol + 1 }, (_, colOffset) => {
-          const key = cellKey(selectionBounds.startRow + rowOffset, selectionBounds.startCol + colOffset);
-          return String(activeSheet?.cells?.[key]?.input || "");
-        }).join("\t")
-      )).join("\n")
-    : "";
+  const mobileFieldHeight = isMobile ? 34 : DENSITY.fieldHeight;
+  const compactButtonPad = isMobile ? "6px 9px" : DENSITY.buttonPad;
 
   return (
-    <div style={{ display: "grid", gap: DENSITY.gap }}>
+    <div style={{ display: "grid", gap: DENSITY.gap, maxWidth: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: DENSITY.gap, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {!readOnly ? (
             <>
-              <button className="btn" type="button" onClick={() => addRow(25)} style={{ padding: DENSITY.buttonPad }}>Add 25 rows</button>
-              <button className="btn" type="button" onClick={() => addColumn(5)} style={{ padding: DENSITY.buttonPad }}>Add 5 columns</button>
+              <button className="btn" type="button" onClick={() => addRow(25)} style={{ padding: compactButtonPad }}>Add 25 rows</button>
+              <button className="btn" type="button" onClick={() => addColumn(5)} style={{ padding: compactButtonPad }}>Add 5 columns</button>
             </>
           ) : null}
         </div>
         <div className="helper">{activeSheet.rowCount} rows · {activeSheet.columnCount} columns</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: readOnly ? "84px minmax(0,1fr)" : "84px auto minmax(0,1fr)", gap: 6, alignItems: "center" }}>
-        <div style={{ fontWeight: 700 }}>{selectedRangeLabel}</div>
+      <div style={{ display: "grid", gridTemplateColumns: readOnly ? (isMobile ? "1fr" : "84px minmax(0,1fr)") : (isMobile ? "1fr" : "84px auto minmax(0,1fr)"), gap: 6, alignItems: "center" }}>
+        <div style={{ fontWeight: 700, minWidth: 0 }}>{selectedCell}</div>
         {!readOnly ? (
           <div ref={functionsRef} style={{ position: "relative" }}>
-            <button className="btn" type="button" onClick={() => setFunctionsOpen((v) => !v)} style={{ padding: DENSITY.buttonPad, whiteSpace: "nowrap" }}>Functions</button>
+            <button className="btn" type="button" onClick={() => setFunctionsOpen((v) => !v)} style={{ padding: compactButtonPad, whiteSpace: "nowrap", width: isMobile ? "100%" : "auto" }}>Functions</button>
             {functionsOpen ? (
               <div style={{ position: "absolute", left: 0, top: "calc(100% + 6px)", width: 320, maxHeight: 340, overflow: "auto", background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 8, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 120, display: "grid", gap: 8 }}>
                 {FUNCTION_GROUPS.map((group) => (
@@ -578,50 +494,33 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               e.preventDefault();
               commitFormulaBar();
             }
-            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && hasMultiSelection) {
-              e.preventDefault();
-              navigator.clipboard?.writeText(selectedCellsText).catch(() => {});
-            }
           }}
           placeholder="Value or formula, like =SUM(A1:B4)"
-          style={{ padding: DENSITY.inputPad, height: DENSITY.fieldHeight }}
+          style={{ padding: isMobile ? "7px 10px" : DENSITY.inputPad, height: mobileFieldHeight, width: "100%" }}
         />
       </div>
 
       {!readOnly ? (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {isMobile ? <div className="helper" style={{ width: "100%" }}>Tip: swipe to pan the grid, tap a cell to edit, and use the formula bar for formulas.</div> : null}
           <div className="helper">Column {columnLabel(selectedRef.col)} width</div>
-          <input className="input" type="number" min="60" max="420" value={selectedColWidth} onChange={(e) => setColumnWidth(selectedRef.col, e.target.value)} style={{ width: 82, padding: "7px 9px", height: DENSITY.fieldHeight }} />
-          <button className="btn" type="button" onClick={() => autoFitColumn(selectedRef.col)} style={{ padding: DENSITY.buttonPad }}>Auto-fit column</button>
+          <input className="input" type="number" min="60" max="420" value={selectedColWidth} onChange={(e) => setColumnWidth(selectedRef.col, e.target.value)} style={{ width: isMobile ? 72 : 82, padding: isMobile ? "6px 8px" : "7px 9px", height: mobileFieldHeight }} />
+          <button className="btn" type="button" onClick={() => autoFitColumn(selectedRef.col)} style={{ padding: compactButtonPad }}>Auto-fit column</button>
           <div className="helper">Row {selectedRef.row + 1} height</div>
-          <input className="input" type="number" min="24" max="180" value={selectedRowHeight} onChange={(e) => setRowHeight(selectedRef.row, e.target.value)} style={{ width: 82, padding: "7px 9px", height: DENSITY.fieldHeight }} />
-          <button className="btn" type="button" onClick={() => autoFitRow(selectedRef.row)} style={{ padding: DENSITY.buttonPad }}>Auto-fit row</button>
+          <input className="input" type="number" min="24" max="180" value={selectedRowHeight} onChange={(e) => setRowHeight(selectedRef.row, e.target.value)} style={{ width: isMobile ? 72 : 82, padding: isMobile ? "6px 8px" : "7px 9px", height: mobileFieldHeight }} />
+          <button className="btn" type="button" onClick={() => autoFitRow(selectedRef.row)} style={{ padding: compactButtonPad }}>Auto-fit row</button>
         </div>
       ) : null}
 
-      <div
-        style={{ overflow: "auto", border: DENSITY.border, borderRadius: DENSITY.radius, background: DENSITY.panelBg, userSelect: isDraggingSelection ? "none" : "auto" }}
-        onKeyDown={(e) => {
-          if (readOnly) return;
-          if ((e.key === "Delete" || e.key === "Backspace") && !editingCell) {
-            e.preventDefault();
-            clearSelectedRange();
-          }
-          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && hasMultiSelection) {
-            e.preventDefault();
-            navigator.clipboard?.writeText(selectedCellsText).catch(() => {});
-          }
-        }}
-        tabIndex={0}
-      >
+      <div style={{ overflow: "auto", border: DENSITY.border, borderRadius: DENSITY.radius, background: DENSITY.panelBg, WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y", maxWidth: "100%" }}>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: `52px ${columnLabels.map((label) => `${Number(activeSheet.columnWidths?.[label] || DEFAULT_COL_WIDTH)}px`).join(" ")}`,
-            minWidth: "max-content",
+            minWidth: isMobile ? `${Math.max(680, activeSheet.columnCount * 92)}px` : "max-content",
           }}
         >
-          <div style={{ position: "sticky", left: 0, top: 0, zIndex: 4, borderBottom: "1px solid #222", borderRight: "1px solid #222", background: "#0f1012", minHeight: 36 }} />
+          <div style={{ position: "sticky", left: 0, top: 0, zIndex: 4, borderBottom: "1px solid #222", borderRight: "1px solid #222", background: "#0f1012", minHeight: isMobile ? 34 : 36 }} />
           {columnLabels.map((label, colIndex) => (
             <button
               key={label}
@@ -637,7 +536,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                 borderRight: "1px solid #222",
                 background: selectedRef.col === colIndex ? "rgba(24,129,242,0.18)" : "#0f1012",
                 color: "#fff",
-                minHeight: 36,
+                minHeight: isMobile ? 34 : 36,
                 fontWeight: 800,
                 cursor: "pointer",
               }}
@@ -665,6 +564,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                   background: selectedRef.row === rowIndex ? "rgba(24,129,242,0.18)" : "#0f1012",
                   color: "#fff",
                   height: rowHeight,
+                  minHeight: isMobile ? 34 : rowHeight,
                   fontWeight: 800,
                   cursor: "pointer",
                 }}
@@ -677,40 +577,27 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               const input = String(activeSheet?.cells?.[key]?.input || "");
               const display = input.startsWith("=") ? getDisplayValue(activeSheet, key) : input;
               const selected = selectedCell === key;
-              const inRange = isCellWithinBounds(rowIndex, colIndex, selectionBounds);
-              const rangeEdge = inRange && selectionBounds
-                ? {
-                    borderTop: rowIndex === selectionBounds.startRow ? "1px solid rgba(24,129,242,0.85)" : undefined,
-                    borderBottom: rowIndex === selectionBounds.endRow ? "1px solid rgba(24,129,242,0.85)" : undefined,
-                    borderLeft: colIndex === selectionBounds.startCol ? "1px solid rgba(24,129,242,0.85)" : undefined,
-                    borderRight: colIndex === selectionBounds.endCol ? "1px solid rgba(24,129,242,0.85)" : undefined,
-                  }
-                : null;
               return (
                 <div
                   key={key}
-                  data-cell-key={key}
-                  onMouseDown={(e) => startSelectionDrag(e, key)}
                   style={{
                     borderBottom: "1px solid #1d1d1d",
                     borderRight: "1px solid #1d1d1d",
                     height: rowHeight,
-                    background: selected ? "rgba(24,129,242,0.08)" : (inRange ? "rgba(24,129,242,0.12)" : "transparent"),
-                    ...rangeEdge,
+                  minHeight: isMobile ? 34 : rowHeight,
+                    background: selected ? "rgba(24,129,242,0.08)" : "transparent",
                   }}
                 >
                   {readOnly ? (
-                    <div style={{ padding: "7px 9px", whiteSpace: "pre-wrap", overflow: "hidden", textOverflow: "ellipsis", height: "100%" }}>{display}</div>
+                    <div style={{ padding: isMobile ? "6px 8px" : "7px 9px", whiteSpace: "pre-wrap", overflow: "hidden", textOverflow: "ellipsis", height: "100%" }}>{display}</div>
                   ) : (
                     <input
                       ref={(node) => { inputRefs.current[key] = node; }}
-                      data-cell-key={key}
                       className="input"
                       value={selected && editingCell === key ? input : (selected ? input : display)}
-                      onFocus={() => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); setFormulaDraft(input); }}
-                      onClick={() => { if (!isDraggingSelection) { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); } }}
-                      onDoubleClick={() => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); }}
-                      onChange={(e) => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); setFormulaDraft(e.target.value); setCellInput(key, e.target.value); }}
+                      onFocus={() => { setSelectedCell(key); setEditingCell(key); setFormulaDraft(input); }}
+                      onClick={() => { setSelectedCell(key); setEditingCell(key); }}
+                      onChange={(e) => { setSelectedCell(key); setEditingCell(key); setFormulaDraft(e.target.value); setCellInput(key, e.target.value); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -738,7 +625,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                         border: selected ? "1px solid #1881f2" : "1px solid transparent",
                         borderRadius: 0,
                         background: "transparent",
-                        padding: "7px 9px",
+                        padding: isMobile ? "6px 8px" : "7px 9px",
                         boxShadow: "none",
                         outline: "none",
                       }}
@@ -775,7 +662,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                     }
                     if (e.key === "Escape") setRenamingSheetId("");
                   }}
-                  style={{ width: 120, padding: "7px 9px", height: 34 }}
+                  style={{ width: 120, padding: isMobile ? "6px 8px" : "7px 9px", height: 34 }}
                 />
               ) : (
                 <button
@@ -793,7 +680,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                   }}
                   title={readOnly ? sheet.name : `${sheet.name} · double click to rename`}
                   style={{
-                    padding: "7px 11px",
+                    padding: isMobile ? "6px 10px" : "7px 11px",
                     borderRadius: 12,
                     background: active ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.02)",
                     borderColor: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)",
@@ -806,7 +693,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
           );
         })}
         {!readOnly ? (
-          <button className="btn" type="button" onClick={addSheet} style={{ padding: "7px 10px", borderRadius: 12 }}>＋ Sheet</button>
+          <button className="btn" type="button" onClick={addSheet} style={{ padding: isMobile ? "6px 9px" : "7px 10px", borderRadius: 12 }}>＋ Sheet</button>
         ) : null}
       </div>
     </div>

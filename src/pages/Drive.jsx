@@ -221,6 +221,8 @@ export default function Drive() {
   const [loadState, setLoadState] = useState("loading");
   const [loadError, setLoadError] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 900 : false));
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const saveTimer = useRef(null);
   const skipNextSave = useRef(false);
@@ -960,6 +962,23 @@ export default function Drive() {
     setTemplates((prev) => prev.filter((tpl) => tpl.id !== id));
   }
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = () => setIsMobile(!!media.matches);
+    sync();
+    if (typeof media.addEventListener === "function") media.addEventListener("change", sync);
+    else media.addListener(sync);
+    return () => {
+      if (typeof media.removeEventListener === "function") media.removeEventListener("change", sync);
+      else media.removeListener(sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) setMobileSidebarOpen(false);
+  }, [isMobile]);
+
   const showEditableDocument = selectedKind === "note" || (selectedKind === "file" && fileIsEditable);
   const showEditor = showEditableDocument && viewMode !== "read";
   const showPreview = showEditableDocument && viewMode !== "edit";
@@ -973,64 +992,124 @@ export default function Drive() {
     { id: "form", label: "Form", hint: "Build an intake form with a live preview.", icon: "☑", onClick: createForm },
   ];
 
+  const driveGridStyle = isMobile ? { display: "block", height: "100%" } : { display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)`, height: "100%" };
+
   return (
     <div style={{ position: focusMode ? "fixed" : "relative", inset: focusMode ? 0 : "auto", zIndex: focusMode ? 80 : "auto", background: "#0b0b0b", height: workspaceHeight }}>
       <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFiles} />
       <input ref={folderInputRef} type="file" multiple style={{ display: "none" }} onChange={onUploadFolder} />
 
-      <div style={{ display: "grid", gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)`, height: "100%" }}>
-        <div style={{ borderRight: "1px solid #1b1b1b", overflow: "hidden" }}>
-          <DriveSidebar
-            folders={folders}
-            notes={notes}
-            files={files}
-            currentFolder={currentFolder}
-            selectedId={selectedId}
-            selectedKind={selectedKind}
-            search={search}
-            setSearch={setSearch}
-            onSelectFolder={setCurrentFolder}
-            onSelectNote={selectNote}
-            onSelectFile={openFile}
-            onNewNote={createNote}
-            onNewFolder={createFolder}
-            onNewSpreadsheet={createSpreadsheet}
-            onNewForm={createForm}
-            onOpenCreatePicker={() => setCreateModalOpen(true)}
-            onUploadFile={() => {
-              if (fileInputRef.current) fileInputRef.current.value = "";
-              fileInputRef.current?.click();
-            }}
-            onUploadFolder={() => {
-              const input = folderInputRef.current;
-              if (input) {
-                input.value = "";
-                input.setAttribute("webkitdirectory", "true");
-                input.setAttribute("directory", "true");
-              }
-              input?.click();
-            }}
-            onRenameFolder={renameFolder}
-            onDeleteFolder={deleteFolder}
-            onRenameNote={renameNote}
-            onMoveNote={moveNote}
-            onDeleteNote={deleteNote}
-            onRenameFile={renameFile}
-            onMoveFile={moveFile}
-            onDeleteFile={deleteFile}
-            onDownloadFile={downloadFile}
-            onOpenFileInBrowser={openFileInBrowser}
-            templates={templates}
-            onApplyTemplate={applyTemplate}
-            onNewFromTemplate={createNoteFromTemplate}
-            onDeleteTemplate={deleteTemplate}
-            onEditTemplate={editTemplate}
-          />
-        </div>
+      <div style={driveGridStyle}>
+        {isMobile ? (
+          <>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "8px 8px 0" }}>
+              <button className="btn" type="button" onClick={() => setMobileSidebarOpen(true)} style={{ padding: "7px 10px" }}>Explorer</button>
+              <button className="btn" type="button" onClick={() => setCreateModalOpen(true)} style={{ padding: "7px 10px" }}>New</button>
+              <button className="btn" type="button" onClick={() => { if (fileInputRef.current) fileInputRef.current.value = ""; fileInputRef.current?.click(); }} style={{ padding: "7px 10px" }}>Upload</button>
+              <div className="helper" style={{ marginLeft: "auto" }}>Mobile Drive</div>
+            </div>
+            {mobileSidebarOpen ? (
+              <div style={{ position: "fixed", inset: focusMode ? 0 : "56px 8px 8px", zIndex: 95, background: "rgba(10,10,12,0.98)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, overflow: "hidden", boxShadow: "0 18px 48px rgba(0,0,0,0.45)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)", background: "#101012" }}>
+                  <div style={{ fontWeight: 800 }}>Drive Explorer</div>
+                  <button className="btn" type="button" onClick={() => setMobileSidebarOpen(false)} style={{ padding: "6px 10px" }}>Done</button>
+                </div>
+                <div style={{ height: "calc(100% - 48px)", overflow: "auto" }}>
+                  <DriveSidebar
+                    folders={folders}
+                    notes={notes}
+                    files={files}
+                    currentFolder={currentFolder}
+                    selectedId={selectedId}
+                    selectedKind={selectedKind}
+                    search={search}
+                    setSearch={setSearch}
+                    onSelectFolder={(id) => { setCurrentFolder(id); setMobileSidebarOpen(false); }}
+                    onSelectNote={(id) => { selectNote(id); setMobileSidebarOpen(false); }}
+                    onSelectFile={(file) => { openFile(file); setMobileSidebarOpen(false); }}
+                    onNewNote={createNote}
+                    onNewFolder={createFolder}
+                    onNewSpreadsheet={createSpreadsheet}
+                    onNewForm={createForm}
+                    onOpenCreatePicker={() => setCreateModalOpen(true)}
+                    onUploadFile={() => { if (fileInputRef.current) fileInputRef.current.value = ""; fileInputRef.current?.click(); }}
+                    onUploadFolder={() => { const input = folderInputRef.current; if (input) { input.value = ""; input.setAttribute("webkitdirectory", "true"); input.setAttribute("directory", "true"); } input?.click(); }}
+                    onRenameFolder={renameFolder}
+                    onDeleteFolder={deleteFolder}
+                    onRenameNote={renameNote}
+                    onMoveNote={moveNote}
+                    onDeleteNote={deleteNote}
+                    onRenameFile={renameFile}
+                    onMoveFile={moveFile}
+                    onDeleteFile={deleteFile}
+                    onDownloadFile={downloadFile}
+                    onOpenFileInBrowser={openFileInBrowser}
+                    templates={templates}
+                    onApplyTemplate={applyTemplate}
+                    onNewFromTemplate={createNoteFromTemplate}
+                    onDeleteTemplate={deleteTemplate}
+                    onEditTemplate={editTemplate}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div style={{ borderRight: "1px solid #1b1b1b", overflow: "hidden" }}>
+              <DriveSidebar
+                folders={folders}
+                notes={notes}
+                files={files}
+                currentFolder={currentFolder}
+                selectedId={selectedId}
+                selectedKind={selectedKind}
+                search={search}
+                setSearch={setSearch}
+                onSelectFolder={setCurrentFolder}
+                onSelectNote={selectNote}
+                onSelectFile={openFile}
+                onNewNote={createNote}
+                onNewFolder={createFolder}
+                onNewSpreadsheet={createSpreadsheet}
+                onNewForm={createForm}
+                onOpenCreatePicker={() => setCreateModalOpen(true)}
+                onUploadFile={() => {
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                  fileInputRef.current?.click();
+                }}
+                onUploadFolder={() => {
+                  const input = folderInputRef.current;
+                  if (input) {
+                    input.value = "";
+                    input.setAttribute("webkitdirectory", "true");
+                    input.setAttribute("directory", "true");
+                  }
+                  input?.click();
+                }}
+                onRenameFolder={renameFolder}
+                onDeleteFolder={deleteFolder}
+                onRenameNote={renameNote}
+                onMoveNote={moveNote}
+                onDeleteNote={deleteNote}
+                onRenameFile={renameFile}
+                onMoveFile={moveFile}
+                onDeleteFile={deleteFile}
+                onDownloadFile={downloadFile}
+                onOpenFileInBrowser={openFileInBrowser}
+                templates={templates}
+                onApplyTemplate={applyTemplate}
+                onNewFromTemplate={createNoteFromTemplate}
+                onDeleteTemplate={deleteTemplate}
+                onEditTemplate={editTemplate}
+              />
+            </div>
 
-        <div onMouseDown={() => beginResize("sidebar")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)" }} title="Drag to resize explorer" />
+            <div onMouseDown={() => beginResize("sidebar")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)" }} title="Drag to resize explorer" />
+          </>
+        )}
 
-        <div style={{ minWidth: 0, overflow: "auto", padding: 8 }}>
+        <div style={{ minWidth: 0, overflow: "auto", padding: isMobile ? 8 : 8 }}>
           <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} compact />
 
           {loadState === "loading" ? (
@@ -1047,7 +1126,7 @@ export default function Drive() {
           ) : showEditableDocument ? (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" style={{ flex: 1, minWidth: 220, fontSize: 20, fontWeight: 800, background: "transparent", border: "none", outline: "none", color: "#fff", padding: "2px 0" }} />
+                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled" style={{ flex: 1, minWidth: isMobile ? 120 : 220, fontSize: isMobile ? 18 : 20, fontWeight: 800, background: "transparent", border: "none", outline: "none", color: "#fff", padding: "2px 0" }} />
                 <span className="helper">{status}</span>
                 {selectedFile && !fileIsEditable ? <span className="helper">read only</span> : null}
               </div>
@@ -1078,7 +1157,7 @@ export default function Drive() {
                 ].filter(Boolean)}
               /> : null}
 
-              <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: viewMode === "split" ? 6 : 0, alignItems: "start" }}>
+              <div id="bf-drive-editor-zone" style={{ display: "grid", gridTemplateColumns: !isMobile && viewMode === "split" ? `${Math.round(splitRatio * 100)}% 6px minmax(0,1fr)` : "minmax(0,1fr)", gap: !isMobile && viewMode === "split" ? 6 : 0, alignItems: "start" }}>
                 {showEditor ? (
                   <div style={{ minWidth: 0 }}>
                     {selectedFileSubtype === "sheet" ? (
@@ -1090,7 +1169,7 @@ export default function Drive() {
                     )}
                   </div>
                 ) : null}
-                {viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
+                {!isMobile && viewMode === "split" ? <div onMouseDown={() => beginResize("split")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)", minHeight: focusMode ? "84vh" : "72vh" }} title="Drag to resize split" /> : null}
                 {showPreview ? (
                   <div style={{ minWidth: 0 }}>
                     {selectedFileSubtype === "sheet" ? (
@@ -1143,7 +1222,7 @@ export default function Drive() {
       <DriveCreateModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} actions={createModalActions} />
 
       {inspectorOpen && selectedNote ? (
-        <div style={{ position: "fixed", top: focusMode ? 8 : 94, right: 8, width: 250, maxHeight: focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)", overflow: "auto", zIndex: 90 }}>
+        <div style={{ position: "fixed", top: isMobile ? "auto" : (focusMode ? 8 : 94), right: isMobile ? 8 : 8, left: isMobile ? 8 : "auto", bottom: isMobile ? 8 : "auto", width: isMobile ? "auto" : 250, maxHeight: isMobile ? "55vh" : (focusMode ? "calc(100vh - 16px)" : "calc(100vh - 102px)"), overflow: "auto", zIndex: 90 }}>
           <NoteInspector note={selectedNote} backlinks={backlinks} onOpenNote={selectNote} onClose={() => setInspectorOpen(false)} compact />
         </div>
       ) : null}

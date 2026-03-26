@@ -217,3 +217,63 @@
     max-height: 240px;
   }
 }
+
+@media (max-width: 640px) {
+  .bf-help-panel {
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: 100vw;
+    height: calc(100vh - 58px);
+    border-radius: 18px 18px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .bf-help-top {
+    padding: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .bf-help-top h3 {
+    font-size: 16px;
+  }
+
+  .bf-help-tour,
+  .bf-help-close {
+    height: 32px;
+    padding: 0 10px;
+  }
+
+  .bf-help-nav {
+    padding: 10px;
+    max-height: 220px;
+  }
+
+  .bf-help-search {
+    height: 38px;
+    margin-bottom: 10px;
+  }
+
+  .bf-help-navbtn {
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 12px;
+  }
+
+  .bf-help-content {
+    padding: 14px 12px 22px;
+  }
+
+  .bf-help-topic-title {
+    font-size: 22px;
+  }
+
+  .bf-help-topic-blurb,
+  .bf-help-sec p {
+    line-height: 1.55;
+    font-size: 14px;
+  }
+}
