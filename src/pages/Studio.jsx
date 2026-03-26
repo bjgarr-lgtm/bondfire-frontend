@@ -628,10 +628,13 @@ export default function Studio() {
 	const [isMobileViewport, setIsMobileViewport] = React.useState(() => typeof window !== "undefined" ? window.innerWidth <= 900 : false);
 	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
+	const [studioRemoteNotice, setStudioRemoteNotice] = React.useState(null);
 	const studioLoadedRef = React.useRef(false);
 	const studioSyncTimerRef = React.useRef(null);
 	const studioRemoteSigRef = React.useRef("");
 	const studioPendingRemoteRef = React.useRef(null);
+	const studioLastLocalEditRef = React.useRef(0);
+	const studioLastRemoteApplyRef = React.useRef(0);
 	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
@@ -652,6 +655,9 @@ export default function Studio() {
 		setHistory([]);
 		setFuture([]);
 		setStudioSyncMsg("");
+		setStudioRemoteNotice(null);
+		studioLastLocalEditRef.current = 0;
+		studioLastRemoteApplyRef.current = 0;
 
 		(async () => {
 			if (!orgId) {
@@ -679,6 +685,8 @@ export default function Studio() {
 				saveDocs(orgId, nextDocs);
 				saveBlocks(orgId, nextBlocks);
 				setCurrentId((prev) => nextDocs.some((doc) => doc.id === prev) ? prev : (nextDocs[0]?.id || null));
+				studioLastRemoteApplyRef.current = Date.now();
+				setStudioRemoteNotice(null);
 				setStudioSyncMsg("Studio docs are now synced with org-key encryption.");
 			} catch (err) {
 				if (!cancelled) setStudioSyncMsg(String(err?.message || err || "Studio sync failed. Using local cache."));
@@ -728,6 +736,7 @@ export default function Studio() {
 	}, [selected?.id, selected?.type, selected?.fontFamily, ensureFontLoaded]);
 
 	const commitDocs = React.useCallback((updater) => {
+		studioLastLocalEditRef.current = Date.now();
 		setDocs((prev) => {
 			const next = normalizeDocs(typeof updater === "function" ? updater(prev) : updater);
 			saveDocs(orgId, next);
@@ -789,9 +798,14 @@ export default function Studio() {
 				const remoteState = await decryptStudioStatePayload(orgId, resp);
 				if (!remoteState) return;
 				const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
-				if (hasActiveInteraction) {
-					studioPendingRemoteRef.current = { sig, remoteState };
-					setStudioSyncMsg("Remote Studio changes detected. Applying when editing pauses.");
+				const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
+				if (hasActiveInteraction || hasRecentLocalEdits) {
+					studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
+					setStudioRemoteNotice({
+						kind: "queued",
+						text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
+					});
+					setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes available.");
 					return;
 				}
 				studioRemoteSigRef.current = sig;
@@ -801,6 +815,8 @@ export default function Studio() {
 				saveDocs(orgId, remoteState.docs);
 				saveBlocks(orgId, remoteState.blocks);
 				setCurrentId((prev) => remoteState.docs.some((doc) => doc.id === prev) ? prev : (remoteState.docs[0]?.id || null));
+				studioLastRemoteApplyRef.current = Date.now();
+				setStudioRemoteNotice(null);
 				setStudioSyncMsg("Remote Studio changes applied.");
 			} catch {}
 		};
@@ -824,6 +840,7 @@ export default function Studio() {
 		const pending = studioPendingRemoteRef.current;
 		if (!pending) return;
 		if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
+		if (studioLastLocalEditRef.current > studioLastRemoteApplyRef.current) return;
 		const id = window.setTimeout(() => {
 			studioRemoteSigRef.current = pending.sig;
 			setDocs(pending.remoteState.docs);
@@ -832,10 +849,12 @@ export default function Studio() {
 			saveBlocks(orgId, pending.remoteState.blocks);
 			setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
 			studioPendingRemoteRef.current = null;
+			studioLastRemoteApplyRef.current = Date.now();
+			setStudioRemoteNotice(null);
 			setStudioSyncMsg("Queued Studio changes applied.");
 		}, 750);
 		return () => window.clearTimeout(id);
-	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId]);
+	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
 
 
 	const snapshot = React.useCallback(() => {
@@ -2006,6 +2025,26 @@ React.useEffect(() => {
 	} catch {}
 }, [isMobileViewport, leftPanel, selected?.type]);
 
+	const applyQueuedRemoteChanges = React.useCallback(() => {
+		const pending = studioPendingRemoteRef.current;
+		if (!pending) return;
+		studioRemoteSigRef.current = pending.sig;
+		setDocs(pending.remoteState.docs);
+		setSavedBlocks(pending.remoteState.blocks);
+		saveDocs(orgId, pending.remoteState.docs);
+		saveBlocks(orgId, pending.remoteState.blocks);
+		setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
+		studioPendingRemoteRef.current = null;
+		studioLastRemoteApplyRef.current = Date.now();
+		setStudioRemoteNotice(null);
+		setStudioSyncMsg("Remote Studio changes applied.");
+	}, [orgId]);
+
+	const dismissQueuedRemoteChanges = React.useCallback(() => {
+		if (!studioPendingRemoteRef.current) return;
+		setStudioRemoteNotice({ kind: "dismissed", text: "Remote Studio changes are still available and will reappear on the next poll." });
+	}, []);
+
 	const activePageLayout = React.useMemo(() => {
 		if (!pageLayouts.length) return null;
 		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
@@ -2095,6 +2134,14 @@ React.useEffect(() => {
 					) : null}
 				</div>
 			</div>
+
+			{studioRemoteNotice ? (
+				<div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 14, background: "rgba(17,24,39,0.92)", border: "1px solid rgba(255,255,255,0.12)" }}>
+					<div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, minWidth: 220 }}>{studioRemoteNotice.text}</div>
+					{studioPendingRemoteRef.current ? <button onClick={applyQueuedRemoteChanges} style={{ padding: "8px 10px", borderRadius: 10 }}>Apply remote</button> : null}
+					{studioPendingRemoteRef.current ? <button onClick={dismissQueuedRemoteChanges} style={{ padding: "8px 10px", borderRadius: 10 }}>Keep mine for now</button> : null}
+				</div>
+			) : null}
 
 			<div style={{ position: "relative", minHeight: "calc(100vh - 170px)", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, overflow: "hidden" }}>
 				<div style={{ position: "absolute", top: showRulers ? 40 : 12, left: showRulers ? (RULER_SIZE + 8) : 12, zIndex: 25, display: "grid", gap: 8 }}>
