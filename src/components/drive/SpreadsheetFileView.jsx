@@ -292,6 +292,31 @@ function MenuButton({ item, onSelect }) {
   );
 }
 
+function getRangeBounds(anchorKey, focusKey) {
+  const anchor = parseCellRef(anchorKey);
+  const focus = parseCellRef(focusKey);
+  if (!anchor || !focus) return null;
+  return {
+    startRow: Math.min(anchor.row, focus.row),
+    endRow: Math.max(anchor.row, focus.row),
+    startCol: Math.min(anchor.col, focus.col),
+    endCol: Math.max(anchor.col, focus.col),
+  };
+}
+
+function rangeLabel(anchorKey, focusKey) {
+  if (!anchorKey || !focusKey) return "A1";
+  if (anchorKey === focusKey) return anchorKey;
+  const bounds = getRangeBounds(anchorKey, focusKey);
+  if (!bounds) return anchorKey;
+  return `${cellKey(bounds.startRow, bounds.startCol)}:${cellKey(bounds.endRow, bounds.endCol)}`;
+}
+
+function isCellWithinBounds(rowIndex, colIndex, bounds) {
+  if (!bounds) return false;
+  return rowIndex >= bounds.startRow && rowIndex <= bounds.endRow && colIndex >= bounds.startCol && colIndex <= bounds.endCol;
+}
+
 export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) {
   const doc = useMemo(() => normalizeSheet(safeParse(value)), [value]);
   const readOnly = mode === "preview";
@@ -301,13 +326,20 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const [sheetNameDraft, setSheetNameDraft] = useState("");
   const [renamingSheetId, setRenamingSheetId] = useState("");
   const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [selectionAnchor, setSelectionAnchor] = useState("A1");
+  const [selectionFocus, setSelectionFocus] = useState("A1");
+  const [isDraggingSelection, setIsDraggingSelection] = useState(false);
   const inputRefs = useRef({});
   const formulaInputRef = useRef(null);
   const functionsRef = useRef(null);
+  const dragRef = useRef(null);
 
   const activeSheet = doc.sheets.find((sheet) => sheet.id === doc.activeSheetId) || doc.sheets[0];
   const selectedInput = String(activeSheet?.cells?.[selectedCell]?.input || "");
   const selectedRef = parseCellRef(selectedCell) || { row: 0, col: 0 };
+  const selectionBounds = useMemo(() => getRangeBounds(selectionAnchor, selectionFocus), [selectionAnchor, selectionFocus]);
+  const selectedRangeLabel = useMemo(() => rangeLabel(selectionAnchor, selectionFocus), [selectionAnchor, selectionFocus]);
+  const hasMultiSelection = Boolean(selectionBounds) && (selectionBounds.startRow !== selectionBounds.endRow || selectionBounds.startCol !== selectionBounds.endCol);
 
   useEffect(() => {
     setFormulaDraft(selectedInput);
@@ -329,6 +361,43 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [functionsOpen]);
+
+  useEffect(() => {
+    if (readOnly) return undefined;
+    const updateDragFromPoint = (clientX, clientY) => {
+      const target = document.elementFromPoint(clientX, clientY)?.closest?.("[data-cell-key]");
+      const key = target?.getAttribute?.("data-cell-key");
+      if (!key) return;
+      setSelectedCell(key);
+      setSelectionFocus(key);
+    };
+    const onMouseMove = (e) => {
+      if (!dragRef.current) return;
+      const deltaX = Math.abs(e.clientX - dragRef.current.startX);
+      const deltaY = Math.abs(e.clientY - dragRef.current.startY);
+      if (!isDraggingSelection && deltaX < 4 && deltaY < 4) return;
+      if (!isDraggingSelection) {
+        setIsDraggingSelection(true);
+        setEditingCell("");
+        document.body.style.userSelect = "none";
+      }
+      updateDragFromPoint(e.clientX, e.clientY);
+    };
+    const onMouseUp = (e) => {
+      if (!dragRef.current) return;
+      if (isDraggingSelection) updateDragFromPoint(e.clientX, e.clientY);
+      dragRef.current = null;
+      setTimeout(() => setIsDraggingSelection(false), 0);
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      document.body.style.userSelect = "";
+    };
+  }, [isDraggingSelection, readOnly]);
 
   const commit = (nextDoc) => onChange?.(serialize(nextDoc));
 
@@ -398,7 +467,18 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
 
   const selectCell = (cell, shouldEdit = true) => {
     setSelectedCell(cell);
+    setSelectionAnchor(cell);
+    setSelectionFocus(cell);
     if (shouldEdit) setEditingCell(cell);
+    else setEditingCell("");
+  };
+
+  const startSelectionDrag = (e, cell) => {
+    if (readOnly || e.button !== 0) return;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, cell };
+    setSelectedCell(cell);
+    setSelectionAnchor(cell);
+    setSelectionFocus(cell);
   };
 
   const moveSelection = (deltaRow, deltaCol) => {
@@ -412,6 +492,18 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const commitFormulaBar = () => {
     if (readOnly) return;
     setCellInput(selectedCell, formulaDraft);
+  };
+
+  const clearSelectedRange = () => {
+    if (readOnly || !selectionBounds) return;
+    patchActiveSheet((sheet) => {
+      const nextCells = { ...sheet.cells };
+      for (let row = selectionBounds.startRow; row <= selectionBounds.endRow; row += 1) {
+        for (let col = selectionBounds.startCol; col <= selectionBounds.endCol; col += 1) delete nextCells[cellKey(row, col)];
+      }
+      return { ...sheet, cells: nextCells };
+    });
+    setFormulaDraft("");
   };
 
   const insertFunction = (item) => {
@@ -431,6 +523,14 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
 
   const selectedColWidth = Number(activeSheet.columnWidths?.[columnLabel(selectedRef.col)] || DEFAULT_COL_WIDTH);
   const selectedRowHeight = Number(activeSheet.rowHeights?.[String(selectedRef.row + 1)] || DEFAULT_ROW_HEIGHT);
+  const selectedCellsText = hasMultiSelection && selectionBounds
+    ? Array.from({ length: selectionBounds.endRow - selectionBounds.startRow + 1 }, (_, rowOffset) => (
+        Array.from({ length: selectionBounds.endCol - selectionBounds.startCol + 1 }, (_, colOffset) => {
+          const key = cellKey(selectionBounds.startRow + rowOffset, selectionBounds.startCol + colOffset);
+          return String(activeSheet?.cells?.[key]?.input || "");
+        }).join("\t")
+      )).join("\n")
+    : "";
 
   return (
     <div style={{ display: "grid", gap: DENSITY.gap }}>
@@ -447,7 +547,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: readOnly ? "84px minmax(0,1fr)" : "84px auto minmax(0,1fr)", gap: 6, alignItems: "center" }}>
-        <div style={{ fontWeight: 700 }}>{selectedCell}</div>
+        <div style={{ fontWeight: 700 }}>{selectedRangeLabel}</div>
         {!readOnly ? (
           <div ref={functionsRef} style={{ position: "relative" }}>
             <button className="btn" type="button" onClick={() => setFunctionsOpen((v) => !v)} style={{ padding: DENSITY.buttonPad, whiteSpace: "nowrap" }}>Functions</button>
@@ -478,6 +578,10 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               e.preventDefault();
               commitFormulaBar();
             }
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && hasMultiSelection) {
+              e.preventDefault();
+              navigator.clipboard?.writeText(selectedCellsText).catch(() => {});
+            }
           }}
           placeholder="Value or formula, like =SUM(A1:B4)"
           style={{ padding: DENSITY.inputPad, height: DENSITY.fieldHeight }}
@@ -495,7 +599,21 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
         </div>
       ) : null}
 
-      <div style={{ overflow: "auto", border: DENSITY.border, borderRadius: DENSITY.radius, background: DENSITY.panelBg }}>
+      <div
+        style={{ overflow: "auto", border: DENSITY.border, borderRadius: DENSITY.radius, background: DENSITY.panelBg, userSelect: isDraggingSelection ? "none" : "auto" }}
+        onKeyDown={(e) => {
+          if (readOnly) return;
+          if ((e.key === "Delete" || e.key === "Backspace") && !editingCell) {
+            e.preventDefault();
+            clearSelectedRange();
+          }
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && hasMultiSelection) {
+            e.preventDefault();
+            navigator.clipboard?.writeText(selectedCellsText).catch(() => {});
+          }
+        }}
+        tabIndex={0}
+      >
         <div
           style={{
             display: "grid",
@@ -559,14 +677,26 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               const input = String(activeSheet?.cells?.[key]?.input || "");
               const display = input.startsWith("=") ? getDisplayValue(activeSheet, key) : input;
               const selected = selectedCell === key;
+              const inRange = isCellWithinBounds(rowIndex, colIndex, selectionBounds);
+              const rangeEdge = inRange && selectionBounds
+                ? {
+                    borderTop: rowIndex === selectionBounds.startRow ? "1px solid rgba(24,129,242,0.85)" : undefined,
+                    borderBottom: rowIndex === selectionBounds.endRow ? "1px solid rgba(24,129,242,0.85)" : undefined,
+                    borderLeft: colIndex === selectionBounds.startCol ? "1px solid rgba(24,129,242,0.85)" : undefined,
+                    borderRight: colIndex === selectionBounds.endCol ? "1px solid rgba(24,129,242,0.85)" : undefined,
+                  }
+                : null;
               return (
                 <div
                   key={key}
+                  data-cell-key={key}
+                  onMouseDown={(e) => startSelectionDrag(e, key)}
                   style={{
                     borderBottom: "1px solid #1d1d1d",
                     borderRight: "1px solid #1d1d1d",
                     height: rowHeight,
-                    background: selected ? "rgba(24,129,242,0.08)" : "transparent",
+                    background: selected ? "rgba(24,129,242,0.08)" : (inRange ? "rgba(24,129,242,0.12)" : "transparent"),
+                    ...rangeEdge,
                   }}
                 >
                   {readOnly ? (
@@ -574,11 +704,13 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                   ) : (
                     <input
                       ref={(node) => { inputRefs.current[key] = node; }}
+                      data-cell-key={key}
                       className="input"
                       value={selected && editingCell === key ? input : (selected ? input : display)}
-                      onFocus={() => { setSelectedCell(key); setEditingCell(key); setFormulaDraft(input); }}
-                      onClick={() => { setSelectedCell(key); setEditingCell(key); }}
-                      onChange={(e) => { setSelectedCell(key); setEditingCell(key); setFormulaDraft(e.target.value); setCellInput(key, e.target.value); }}
+                      onFocus={() => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); setFormulaDraft(input); }}
+                      onClick={() => { if (!isDraggingSelection) { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); } }}
+                      onDoubleClick={() => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); }}
+                      onChange={(e) => { setSelectedCell(key); setSelectionAnchor(key); setSelectionFocus(key); setEditingCell(key); setFormulaDraft(e.target.value); setCellInput(key, e.target.value); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
