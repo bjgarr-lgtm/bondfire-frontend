@@ -4,6 +4,7 @@ import { api } from "../utils/api.js";
 import { STUDIO_ASSETS } from "../data/studioAssets.js";
 import { searchPixabayImages } from "../utils/pixabay.js";
 import { buildQrCodeUrl } from "../utils/qr.js";
+import { decryptWithOrgKey, encryptWithOrgKey, getCachedOrgKey } from "../lib/zk.js";
 import { useStudioFonts } from "../hooks/useStudioFonts.js";
 import { Plus, LayoutGrid, Image as ImageIcon, Database, FileText } from "lucide-react";
 
@@ -276,6 +277,17 @@ function readBlocks(orgId) {
 
 function saveBlocks(orgId, blocks) {
 	localStorage.setItem(blocksKey(orgId), JSON.stringify(blocks));
+}
+
+async function loadStudioStateFromServer(orgId) {
+	return api(`/api/orgs/${encodeURIComponent(orgId)}/studio/state`);
+}
+
+async function saveStudioStateToServer(orgId, payload) {
+	return api(`/api/orgs/${encodeURIComponent(orgId)}/studio/state`, {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
 }
 
 function getBrandKit(orgId) {
@@ -581,16 +593,75 @@ export default function Studio() {
 	const [guideDrag, setGuideDrag] = React.useState(null);
 	const [spacePan, setSpacePan] = React.useState(false);
 	const [textEditId, setTextEditId] = React.useState(null);
+	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
+	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
+	const studioLoadedRef = React.useRef(false);
+	const studioSyncTimerRef = React.useRef(null);
 
 	React.useEffect(() => {
-		const nextDocs = normalizeDocs(readDocs(orgId));
-		setDocs(nextDocs);
-		setCurrentId(nextDocs[0]?.id || null);
+		let cancelled = false;
+		studioLoadedRef.current = false;
+		if (studioSyncTimerRef.current) {
+			clearTimeout(studioSyncTimerRef.current);
+			studioSyncTimerRef.current = null;
+		}
+		const cachedDocs = normalizeDocs(readDocs(orgId));
+		const cachedBlocks = readBlocks(orgId);
+		setDocs(cachedDocs);
+		setSavedBlocks(cachedBlocks);
+		setCurrentId(cachedDocs[0]?.id || null);
 		setActivePageIndex(0);
 		setSelectedIds([]);
 		setTextEditId(null);
 		setHistory([]);
 		setFuture([]);
+		setStudioSyncMsg("");
+
+		(async () => {
+			if (!orgId) {
+				studioLoadedRef.current = true;
+				return;
+			}
+			let orgKey = null;
+			try { orgKey = getCachedOrgKey(orgId); } catch {}
+			if (!orgKey) {
+				studioLoadedRef.current = true;
+				setStudioSyncMsg("Studio is using local cache on this device until the org key is available.");
+				return;
+			}
+			try {
+				const resp = await loadStudioStateFromServer(orgId);
+				const remoteDocs = [];
+				for (const row of Array.isArray(resp?.docs) ? resp.docs : []) {
+					if (!row?.encrypted_blob) continue;
+					try {
+						remoteDocs.push(normalizeDoc(JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob))));
+					} catch {}
+				}
+				const remoteBlocks = [];
+				for (const row of Array.isArray(resp?.blocks) ? resp.blocks : []) {
+					if (!row?.encrypted_blob) continue;
+					try {
+						const parsed = JSON.parse(await decryptWithOrgKey(orgKey, row.encrypted_blob));
+						if (parsed && parsed.id) remoteBlocks.push(parsed);
+					} catch {}
+				}
+				if (cancelled) return;
+				const nextDocs = remoteDocs.length ? normalizeDocs(remoteDocs) : cachedDocs;
+				const nextBlocks = remoteBlocks.length ? remoteBlocks : cachedBlocks;
+				setDocs(nextDocs);
+				setSavedBlocks(nextBlocks);
+				saveDocs(orgId, nextDocs);
+				saveBlocks(orgId, nextBlocks);
+				setCurrentId((prev) => nextDocs.some((doc) => doc.id === prev) ? prev : (nextDocs[0]?.id || null));
+				setStudioSyncMsg("Studio docs are now synced with org-key encryption.");
+			} catch (err) {
+				if (!cancelled) setStudioSyncMsg(String(err?.message || err || "Studio sync failed. Using local cache."));
+			} finally {
+				if (!cancelled) studioLoadedRef.current = true;
+			}
+		})();
+		return () => { cancelled = true; };
 	}, [orgId]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
@@ -639,6 +710,44 @@ export default function Studio() {
 			return next;
 		});
 	}, [orgId]);
+
+	React.useEffect(() => {
+		if (!studioLoadedRef.current || !orgId) return;
+		let orgKey = null;
+		try { orgKey = getCachedOrgKey(orgId); } catch {}
+		if (!orgKey) return;
+		if (studioSyncTimerRef.current) clearTimeout(studioSyncTimerRef.current);
+		studioSyncTimerRef.current = setTimeout(async () => {
+			try {
+				const encDocs = [];
+				for (const doc of normalizeDocs(docs)) {
+					encDocs.push({
+						id: String(doc.id || ""),
+						name: "__encrypted__",
+						encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(normalizeDoc(doc))),
+					});
+				}
+				const encBlocks = [];
+				for (const block of Array.isArray(savedBlocks) ? savedBlocks : []) {
+					encBlocks.push({
+						id: String(block.id || ""),
+						name: "__encrypted__",
+						encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(block)),
+					});
+				}
+				await saveStudioStateToServer(orgId, { docs: encDocs, blocks: encBlocks });
+				setStudioSyncMsg("Studio synced with org-key encryption.");
+			} catch (err) {
+				setStudioSyncMsg(String(err?.message || err || "Studio encrypted sync failed."));
+			}
+		}, 700);
+		return () => {
+			if (studioSyncTimerRef.current) {
+				clearTimeout(studioSyncTimerRef.current);
+				studioSyncTimerRef.current = null;
+			}
+		};
+	}, [orgId, docs, savedBlocks]);
 
 	const snapshot = React.useCallback(() => {
 		setHistory((prev) => [...prev, clone(docs)]);
@@ -1885,6 +1994,7 @@ const addImage = () => {
 									<button style={{ ...panelButtonStyle(tool === "hand"), textAlign: "center" }} onClick={() => setTool("hand")}>Hand</button>
 								</div>
 								<div style={{ fontSize: 12, opacity: 0.65 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
+								{studioSyncMsg ? <div style={{ fontSize: 12, lineHeight: 1.35, opacity: 0.78 }}>{studioSyncMsg}</div> : null}
 							</div>
 						) : null}
 
