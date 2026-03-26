@@ -12,7 +12,6 @@ import DriveCreateModal from "../components/drive/DriveCreateModal.jsx";
 import SpreadsheetFileView from "../components/drive/SpreadsheetFileView.jsx";
 import FormFileView from "../components/drive/FormFileView.jsx";
 import { renderTemplate } from "../components/drive/templateEngine.js";
-import { DRIVE_ZK_FILE_MIME, decryptDriveBytesString, decryptDriveJson, decryptDriveText, encryptDriveBytesToString, encryptDriveJson, encryptDriveText, getDriveOrgKey, isZkString } from "../lib/driveZk.js";
 
 const LEGACY_STORAGE_KEY = "bf_drive_v14";
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -116,73 +115,6 @@ function buildStarterForm() {
     publicShare: { enabled: false, token: "" },
   }, null, 2);
 }
-
-const ZK_FILE_PLACEHOLDER = "encrypted file";
-
-function uint8ToText(bytes) {
-  try { return new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || [])); } catch { return ""; }
-}
-
-async function decryptFolderForDrive(orgId, folder) {
-  if (!folder) return folder;
-  if (!isZkString(folder.name)) return folder;
-  return { ...folder, zkEncrypted: true, encryptedName: folder.name, name: await decryptDriveText(orgId, folder.name, "untitled folder") || "untitled folder" };
-}
-async function decryptNoteForDrive(orgId, note) {
-  if (!note) return note;
-  if (!isZkString(note.title) && !isZkString(note.body) && !isZkString(note.tags)) return note;
-  const tags = await decryptDriveJson(orgId, note.tags, Array.isArray(note.tags) ? note.tags : []);
-  return {
-    ...note,
-    zkEncrypted: true,
-    encryptedTitle: note.title,
-    encryptedBody: note.body,
-    encryptedTags: note.tags,
-    title: await decryptDriveText(orgId, note.title, "untitled") || "untitled",
-    body: await decryptDriveText(orgId, note.body, ""),
-    tags: Array.isArray(tags) ? tags : [],
-  };
-}
-async function decryptTemplateForDrive(orgId, template) {
-  if (!template) return template;
-  if (!isZkString(template.name) && !isZkString(template.title) && !isZkString(template.body)) return template;
-  return {
-    ...template,
-    zkEncrypted: true,
-    encryptedName: template.name,
-    encryptedTitle: template.title,
-    encryptedBody: template.body,
-    name: await decryptDriveText(orgId, template.name, "template") || "template",
-    title: await decryptDriveText(orgId, template.title, "untitled") || "untitled",
-    body: await decryptDriveText(orgId, template.body, ""),
-  };
-}
-async function decryptFileMetaForDrive(orgId, file) {
-  if (!file) return file;
-  if (String(file?.mime || "") !== DRIVE_ZK_FILE_MIME || !isZkString(file?.name)) return file;
-  const meta = await decryptDriveJson(orgId, file.name, null);
-  return {
-    ...file,
-    zkEncrypted: true,
-    encryptedName: file.name,
-    encryptedMime: file.mime,
-    name: String(meta?.name || ZK_FILE_PLACEHOLDER),
-    mime: String(meta?.mime || "application/octet-stream"),
-    size: Number(meta?.size || file.size || 0),
-  };
-}
-async function decryptDriveTree(orgId, data) {
-  const folders = await Promise.all((Array.isArray(data?.folders) ? data.folders : []).map((row) => decryptFolderForDrive(orgId, row)));
-  const notes = await Promise.all((Array.isArray(data?.notes) ? data.notes : []).map((row) => decryptNoteForDrive(orgId, row)));
-  const files = await Promise.all((Array.isArray(data?.files) ? data.files : []).map((row) => decryptFileMetaForDrive(orgId, row)));
-  const templates = await Promise.all((Array.isArray(data?.templates) ? data.templates : []).map((row) => decryptTemplateForDrive(orgId, row)));
-  return { folders, notes, files, templates };
-}
-
-async function encryptDriveFileMeta(orgId, meta) {
-  return encryptDriveJson(orgId, { name: meta?.name || ZK_FILE_PLACEHOLDER, mime: meta?.mime || "application/octet-stream", size: Number(meta?.size || 0) });
-}
-
 
 function buildDriveFileUrls(orgId, fileId) {
   const encodedOrgId = encodeURIComponent(String(orgId || ""));
@@ -342,11 +274,10 @@ export default function Drive() {
           }
         } catch {}
       }
-      const decrypted = await decryptDriveTree(orgId, data || {});
-      const nextFolders = Array.isArray(decrypted?.folders) ? decrypted.folders : [];
-      const nextNotes = Array.isArray(decrypted?.notes) ? decrypted.notes : [];
-      const nextFiles = (Array.isArray(decrypted?.files) ? decrypted.files : []).map((file) => withFileUrls(orgId, file));
-      const nextTemplates = Array.isArray(decrypted?.templates) && decrypted.templates.length ? decrypted.templates : STARTER_TEMPLATES;
+      const nextFolders = Array.isArray(data?.folders) ? data.folders : [];
+      const nextNotes = Array.isArray(data?.notes) ? data.notes : [];
+      const nextFiles = (Array.isArray(data?.files) ? data.files : []).map((file) => withFileUrls(orgId, file));
+      const nextTemplates = Array.isArray(data?.templates) && data.templates.length ? data.templates : STARTER_TEMPLATES;
       setFolders(nextFolders);
       setNotes(nextNotes);
       setFiles(nextFiles);
@@ -464,12 +395,11 @@ export default function Drive() {
   async function createFolder() {
     const name = prompt("Folder name?");
     if (!name) return;
-    const payloadName = getDriveOrgKey(orgId) ? await encryptDriveText(orgId, String(name).trim()) : String(name).trim();
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders`, {
       method: "POST",
-      body: JSON.stringify({ name: payloadName, parentId: currentFolder }),
+      body: JSON.stringify({ name: String(name).trim(), parentId: currentFolder }),
     });
-    const folder = await decryptFolderForDrive(orgId, res?.folder);
+    const folder = res?.folder;
     if (!folder) return;
     setFolders((prev) => [...prev, folder]);
     setCurrentFolder(folder.id);
@@ -478,14 +408,12 @@ export default function Drive() {
     const folder = folders.find((f) => f.id === id);
     const name = prompt("Rename folder", folder?.name || "");
     if (!name) return;
-    const payloadName = getDriveOrgKey(orgId) ? await encryptDriveText(orgId, String(name).trim()) : String(name).trim();
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: payloadName }),
+      body: JSON.stringify({ name: String(name).trim() }),
     });
-    const nextFolder = await decryptFolderForDrive(orgId, res?.folder);
-    if (!nextFolder) return;
-    setFolders((prev) => prev.map((f) => (f.id === id ? nextFolder : f)));
+    if (!res?.folder) return;
+    setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
   }
   async function deleteFolder(id) {
     await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -497,17 +425,11 @@ export default function Drive() {
   }
 
   async function createNoteWithPayload(payload) {
-    const toSend = getDriveOrgKey(orgId) ? {
-      ...payload,
-      title: await encryptDriveText(orgId, payload?.title || "untitled"),
-      body: await encryptDriveText(orgId, payload?.body || payload?.content || ""),
-      tags: await encryptDriveJson(orgId, Array.isArray(payload?.tags) ? payload.tags : []),
-    } : payload;
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes`, {
       method: "POST",
-      body: JSON.stringify(toSend),
+      body: JSON.stringify(payload),
     });
-    const note = await decryptNoteForDrive(orgId, res?.note);
+    const note = res?.note;
     if (!note) return null;
     skipNextSave.current = true;
     setNotes((prev) => [note, ...prev]);
@@ -522,58 +444,29 @@ export default function Drive() {
     await createNoteWithPayload({ title: "untitled", body: "", parentId: currentFolder, tags: [] });
   }
   async function createFileWithPayload(payload) {
-    const name = String(payload?.name || "untitled.txt");
     const mime = String(payload?.mime || "text/plain;charset=utf-8");
     const textContent = String(payload?.textContent || "");
-    const bytes = new TextEncoder().encode(textContent);
-    const orgKey = getDriveOrgKey(orgId);
-    if (!orgKey) {
-      const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-          parentId: payload?.parentId ?? currentFolder,
-          mime,
-          size: new Blob([textContent], { type: mime }).size,
-          textContent,
-          dataUrl: textToDataUrl(textContent, mime),
-        }),
-      });
-      const file = res?.file ? withFileUrls(orgId, res.file) : null;
-      if (!file) return null;
-      setFiles((prev) => [file, ...prev.filter((existing) => existing.id !== file.id)]);
-      skipNextSave.current = true;
-      setSelectedId(file.id);
-      setSelectedKind("file");
-      setTitle(file.name || "untitled");
-      setContent(file.textContent || textContent);
-      setStatus("saved");
-      return file;
-    }
-    const metaCipher = await encryptDriveFileMeta(orgId, { name, mime, size: bytes.byteLength });
-    const contentCipher = await encryptDriveBytesToString(orgId, bytes);
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
       method: "POST",
       body: JSON.stringify({
-        name: metaCipher,
+        name: payload?.name || "untitled.txt",
         parentId: payload?.parentId ?? currentFolder,
-        mime: DRIVE_ZK_FILE_MIME,
-        size: bytes.byteLength,
-        textContent: contentCipher,
-        dataUrl: textToDataUrl(contentCipher, "text/plain;charset=utf-8"),
+        mime,
+        size: new Blob([textContent], { type: mime }).size,
+        textContent,
+        dataUrl: textToDataUrl(textContent, mime),
       }),
     });
-    const file = res?.file ? withFileUrls(orgId, await decryptFileMetaForDrive(orgId, res.file)) : null;
+    const file = res?.file ? withFileUrls(orgId, res.file) : null;
     if (!file) return null;
-    const nextFile = { ...file, textContent, zkEncrypted: true };
-    setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== file.id)]);
+    setFiles((prev) => [file, ...prev.filter((existing) => existing.id !== file.id)]);
     skipNextSave.current = true;
     setSelectedId(file.id);
     setSelectedKind("file");
-    setTitle(nextFile.name || "untitled");
-    setContent(textContent);
+    setTitle(file.name || "untitled");
+    setContent(file.textContent || textContent);
     setStatus("saved");
-    return nextFile;
+    return file;
   }
   async function createSpreadsheet() {
     await createFileWithPayload({
@@ -612,9 +505,8 @@ export default function Drive() {
       method: "PATCH",
       body: JSON.stringify({ title: String(name).trim() }),
     });
-    const nextNote = await decryptNoteForDrive(orgId, res?.note);
-    if (!nextNote) return;
-    setNotes((prev) => prev.map((n) => (n.id === id ? nextNote : n)));
+    if (!res?.note) return;
+    setNotes((prev) => prev.map((n) => (n.id === id ? res.note : n)));
     if (selectedId === id && selectedKind === "note") {
       skipNextSave.current = true;
       setTitle(res.note.title || "untitled");
@@ -638,27 +530,24 @@ export default function Drive() {
       method: "PATCH",
       body: JSON.stringify({ parentId: target || null }),
     });
-    const nextNote = await decryptNoteForDrive(orgId, res?.note);
-    if (!nextNote) return;
-    setNotes((prev) => prev.map((n) => (n.id === id ? nextNote : n)));
+    if (!res?.note) return;
+    setNotes((prev) => prev.map((n) => (n.id === id ? res.note : n)));
   }
 
   async function renameFile(id) {
     const file = files.find((f) => f.id === id);
     const name = prompt("Rename file", file?.name || "");
     if (!name) return;
-    const payload = file?.zkEncrypted ? { name: await encryptDriveFileMeta(orgId, { name: String(name).trim(), mime: file.mime, size: file.size }) } : { name: String(name).trim() };
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ name: String(name).trim() }),
     });
-    const nextFile = await decryptFileMetaForDrive(orgId, res?.file);
-    if (!nextFile) return;
-    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...nextFile }) : f)));
+    if (!res?.file) return;
+    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...res.file }) : f)));
     if (selectedId === id && selectedKind === "file") {
       skipNextSave.current = true;
-      setTitle(nextFile.name || "untitled");
-      setContent(file?.textContent || content);
+      setTitle(res.file.name || "untitled");
+      setContent(res.file.textContent || content);
       setStatus("saved");
     }
   }
@@ -678,47 +567,28 @@ export default function Drive() {
       method: "PATCH",
       body: JSON.stringify({ parentId: target || null }),
     });
-    const nextFile = await decryptFileMetaForDrive(orgId, res?.file);
-    if (!nextFile) return;
-    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...nextFile }) : f)));
+    if (!res?.file) return;
+    setFiles((prev) => prev.map((f) => (f.id === id ? withFileUrls(orgId, { ...f, ...res.file }) : f)));
   }
 
   async function hydrateFile(fileId) {
     const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(fileId)}`);
-    let hydrated = res?.file || null;
+    const hydrated = res?.file || null;
     if (!hydrated) return null;
-    hydrated = await decryptFileMetaForDrive(orgId, hydrated);
-    if (hydrated?.zkEncrypted) {
-      const cipher = String(res?.file?.textContent || hydrated?.textContent || "");
-      if (cipher) {
-        try {
-          const bytes = await decryptDriveBytesString(orgId, cipher);
-          const blob = new Blob([bytes], { type: hydrated.mime || "application/octet-stream" });
-          const objectUrl = URL.createObjectURL(blob);
-          objectUrlRegistry.current.add(objectUrl);
-          hydrated = { ...hydrated, previewObjectUrl: objectUrl, dataUrl: objectUrl };
-          if (isEditableTextFile(hydrated) || isMarkdownFile(hydrated)) hydrated = { ...hydrated, textContent: uint8ToText(bytes) };
-        } catch (e) {
-          console.error("Drive decrypt failed", e);
-        }
-      }
-    }
     setFiles((prev) => prev.map((f) => (f.id === fileId ? withFileUrls(orgId, { ...f, ...hydrated }) : f)));
     return hydrated;
   }
 
-  async function openFileInBrowser(file) {
-    let current = file;
-    if (current?.zkEncrypted && !current?.dataUrl && !current?.previewObjectUrl && current?.id) current = await hydrateFile(current.id);
-    const name = String(current?.name || "");
-    const mime = String(current?.mime || "");
-    const textContent = String(current?.textContent || "");
+  function openFileInBrowser(file) {
+    const name = String(file?.name || "");
+    const mime = String(file?.mime || "");
+    const textContent = String(file?.textContent || "");
     if ((/\.bfform$/i.test(name) || mime === "application/vnd.bondfire.form+json") && textContent) {
       try {
         const parsed = JSON.parse(textContent);
         const token = String(parsed?.publicShare?.token || "");
         if (parsed?.publicShare?.enabled && token) {
-          window.open(`${window.location.origin}/api/public/forms/${encodeURIComponent(current.id)}?token=${encodeURIComponent(token)}`, "_blank", "noopener,noreferrer");
+          window.open(`${window.location.origin}/api/public/forms/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token)}`, "_blank", "noopener,noreferrer");
           return;
         }
         const blob = new Blob([`<!doctype html><html><head><meta charset="utf-8" /><title>${name}</title><style>body{font-family:Inter,system-ui,sans-serif;background:#090909;color:#fff;padding:24px}pre{white-space:pre-wrap;background:#111214;border:1px solid #232427;border-radius:12px;padding:16px}</style></head><body><h1>${name}</h1><pre>${textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></body></html>`], { type: "text/html" });
@@ -743,20 +613,20 @@ export default function Drive() {
         return;
       } catch {}
     }
-    if (current?.dataUrl) {
+    if (file?.dataUrl) {
       const a = document.createElement("a");
-      a.href = current.dataUrl;
+      a.href = file.dataUrl;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       a.click();
       return;
     }
-    window.open(current?.previewUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(current.id)}/download`, "_blank", "noopener,noreferrer");
+    window.open(file?.previewUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download`, "_blank", "noopener,noreferrer");
   }
   async function openFile(file) {
     let nextFile = withFileUrls(orgId, file);
     if (!nextFile) return;
-    if (((nextFile.zkEncrypted || isEditableTextFile(nextFile)) && !nextFile.textContent && !nextFile.dataUrl && !nextFile.previewObjectUrl) || (nextFile.zkEncrypted && !nextFile.previewObjectUrl && !nextFile.textContent)) {
+    if (isEditableTextFile(nextFile) && !nextFile.textContent && !nextFile.dataUrl) {
       nextFile = await hydrateFile(nextFile.id);
       if (!nextFile) return;
       nextFile = withFileUrls(orgId, nextFile);
@@ -772,12 +642,10 @@ export default function Drive() {
     }
     openFileInBrowser(nextFile);
   }
-  async function downloadFile(file) {
-    let nextFile = file;
-    if (nextFile?.zkEncrypted && !nextFile?.dataUrl && !nextFile?.previewObjectUrl) nextFile = await hydrateFile(file.id);
+  function downloadFile(file) {
     const a = document.createElement("a");
-    a.href = nextFile?.dataUrl || nextFile?.previewObjectUrl || nextFile?.downloadUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
-    a.download = nextFile?.name || "download";
+    a.href = file?.downloadUrl || `/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(file.id)}/download?download=1`;
+    a.download = file.name || "download";
     a.click();
   }
 
@@ -788,42 +656,31 @@ export default function Drive() {
         const parsed = parseFrontmatter(content);
         const propertyTags = parsed.properties.find((p) => p.key.toLowerCase() === "tags")?.value || "";
         const combinedTags = [...new Set([...parseTags(parsed.body), ...String(propertyTags).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
-        const notePayload = getDriveOrgKey(orgId) ? { title: await encryptDriveText(orgId, title), body: await encryptDriveText(orgId, content), tags: await encryptDriveJson(orgId, combinedTags) } : { title, body: content, tags: combinedTags };
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/notes/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
-          body: JSON.stringify(notePayload),
+          body: JSON.stringify({ title, body: content, tags: combinedTags }),
         });
-        const nextNote = await decryptNoteForDrive(orgId, res?.note);
-        if (nextNote) {
-          setNotes((prev) => prev.map((n) => (n.id === selectedId ? nextNote : n)));
+        if (res?.note) {
+          setNotes((prev) => prev.map((n) => (n.id === selectedId ? res.note : n)));
         }
         setStatus("saved");
         return;
       }
       if (selectedKind === "file" && fileIsEditable) {
         const mime = selectedFile?.mime || (fileIsMarkdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
-        let payload;
-        if (selectedFile?.zkEncrypted) {
-          const bytes = new TextEncoder().encode(content);
-          const cipher = await encryptDriveBytesToString(orgId, bytes);
-          payload = {
-            name: await encryptDriveFileMeta(orgId, { name: title, mime, size: bytes.byteLength }),
-            mime: DRIVE_ZK_FILE_MIME,
-            size: bytes.byteLength,
-            dataUrl: textToDataUrl(cipher, "text/plain;charset=utf-8"),
-            textContent: cipher,
-          };
-        } else {
-          const dataUrl = textToDataUrl(content, mime);
-          payload = { name: title, mime, size: new Blob([content], { type: mime }).size, dataUrl, textContent: content };
-        }
+        const dataUrl = textToDataUrl(content, mime);
         const res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files/${encodeURIComponent(selectedId)}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            name: title,
+            mime,
+            size: new Blob([content], { type: mime }).size,
+            dataUrl,
+            textContent: content,
+          }),
         });
-        const nextFile = await decryptFileMetaForDrive(orgId, res?.file);
-        if (nextFile) {
-          setFiles((prev) => prev.map((file) => (file.id === selectedId ? withFileUrls(orgId, { ...file, ...nextFile, textContent: content }) : file)));
+        if (res?.file) {
+          setFiles((prev) => prev.map((file) => (file.id === selectedId ? withFileUrls(orgId, { ...file, ...res.file }) : file)));
         }
         setStatus("saved");
       }
@@ -875,50 +732,43 @@ export default function Drive() {
       updatedAt: Date.now(),
       previewObjectUrl: localPreviewUrl || undefined,
       isUploading: true,
-      zkEncrypted: !!getDriveOrgKey(orgId),
     });
     setFiles((prev) => [optimisticFile, ...prev.filter((existing) => existing.id !== tempId)]);
 
     try {
+      const headers = {
+        "x-drive-name": record.name || rawFile.name || "file",
+        "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
+      };
+      if (parentId) headers["x-drive-parent-id"] = String(parentId);
+      if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
+
       let res;
-      if (getDriveOrgKey(orgId)) {
-        const bytes = new Uint8Array(await rawFile.arrayBuffer());
-        const encryptedString = await encryptDriveBytesToString(orgId, bytes);
-        const encryptedBytes = new TextEncoder().encode(encryptedString);
-        const headers = {
-          "x-drive-name": await encryptDriveFileMeta(orgId, { name: record.name || rawFile.name || "file", mime: record.mime || rawFile.type || "application/octet-stream", size: Number(rawFile?.size || bytes.byteLength || 0) }),
-          "x-drive-mime": DRIVE_ZK_FILE_MIME,
-        };
-        if (parentId) headers["x-drive-parent-id"] = String(parentId);
-        if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, { method: "POST", headers, body: encryptedBytes });
-      } else {
-        const headers = {
-          "x-drive-name": record.name || rawFile.name || "file",
-          "x-drive-mime": record.mime || rawFile.type || "application/octet-stream",
-        };
-        if (parentId) headers["x-drive-parent-id"] = String(parentId);
-        if (relativePath) headers["x-drive-relative-path"] = String(relativePath);
-        try {
-          res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, { method: "POST", headers, body: rawFile });
-        } catch {
-          const form = new FormData();
-          form.append("file", rawFile, rawFile.name || record.name || "file");
-          form.append("name", record.name || rawFile.name || "file");
-          form.append("mime", record.mime || rawFile.type || "application/octet-stream");
-          if (parentId) form.append("parentId", String(parentId));
-          if (relativePath) form.append("relativePath", String(relativePath));
-          res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, { method: "POST", body: form });
-        }
+      try {
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          headers,
+          body: rawFile,
+        });
+      } catch {
+        const form = new FormData();
+        form.append("file", rawFile, rawFile.name || record.name || "file");
+        form.append("name", record.name || rawFile.name || "file");
+        form.append("mime", record.mime || rawFile.type || "application/octet-stream");
+        if (parentId) form.append("parentId", String(parentId));
+        if (relativePath) form.append("relativePath", String(relativePath));
+        res = await api(`/api/orgs/${encodeURIComponent(orgId)}/drive/files`, {
+          method: "POST",
+          body: form,
+        });
       }
 
       const createdFile = res?.file || (res?.id ? { id: res.id } : null);
       if (!createdFile?.id) throw new Error("UPLOAD_FAILED");
 
-      const decryptedCreated = await decryptFileMetaForDrive(orgId, createdFile);
       const nextFile = withFileUrls(orgId, {
         ...record,
-        ...decryptedCreated,
+        ...createdFile,
         previewObjectUrl: localPreviewUrl || undefined,
       });
       setFiles((prev) => [nextFile, ...prev.filter((existing) => existing.id !== tempId && existing.id !== nextFile.id)]);
@@ -1180,16 +1030,16 @@ export default function Drive() {
 
         <div onMouseDown={() => beginResize("sidebar")} style={{ cursor: "col-resize", background: "rgba(255,255,255,0.03)" }} title="Drag to resize explorer" />
 
-        <div style={{ minWidth: 0, overflow: "auto", padding: 10 }}>
+        <div style={{ minWidth: 0, overflow: "auto", padding: 8 }}>
           <Breadcrumbs folders={folders} currentFolder={currentFolder} setCurrentFolder={setCurrentFolder} compact />
 
           {loadState === "loading" ? (
-            <div className="card" style={{ padding: 18, maxWidth: 560 }}>
+            <div className="card" style={{ padding: 14, maxWidth: 560 }}>
               <h2 style={{ marginTop: 0, marginBottom: 10 }}>Drive</h2>
               <div className="helper">Loading org Drive…</div>
             </div>
           ) : loadState === "error" ? (
-            <div className="card" style={{ padding: 18, maxWidth: 560 }}>
+            <div className="card" style={{ padding: 14, maxWidth: 560 }}>
               <h2 style={{ marginTop: 0, marginBottom: 10 }}>Drive</h2>
               <div className="helper" style={{ marginBottom: 12 }}>{loadError || "Drive failed to load."}</div>
               <button className="btn" type="button" onClick={() => loadDrive({ preserveSelection: false })}>Retry</button>
@@ -1248,7 +1098,7 @@ export default function Drive() {
                     ) : selectedFileSubtype === "form" ? (
                       <FormFileView value={content} onChange={setContent} mode="preview" fileId={selectedFile?.id || ""} orgId={orgId} />
                     ) : selectedKind === "file" && !fileIsMarkdown ? (
-                      <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
+                      <pre style={{ whiteSpace: "pre-wrap", margin: 0, background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 12, minHeight: "72vh", overflow: "auto" }}>{String(content || "")}</pre>
                     ) : (
                       <NotePreview content={content} onOpenLink={openLinkedNoteByTitle} focusMode={focusMode} onUpdateProperty={updateFrontmatterProperty} onAddProperty={addFrontmatterProperty} onRemoveProperty={removeFrontmatterProperty} propertiesCollapsed={propertiesCollapsed} onToggleProperties={() => setPropertiesCollapsed((v) => !v)} compact />
                     )}
@@ -1266,7 +1116,7 @@ export default function Drive() {
               <DriveFilePreview file={selectedFile} />
             </>
           ) : (
-            <div className="card" style={{ padding: 18, maxWidth: 760 }}>
+            <div className="card" style={{ padding: 14, maxWidth: 760 }}>
               <h2 style={{ marginTop: 0, marginBottom: 10 }}>Drive</h2>
               <div className="helper" style={{ marginBottom: 14 }}>
                 Select a note or file from the explorer, or create something new from the sidebar.

@@ -1,13 +1,62 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const DEFAULT_ROW_HEIGHT = 38;
-const DEFAULT_COL_WIDTH = 140;
+const DEFAULT_ROW_HEIGHT = 34;
+const DEFAULT_COL_WIDTH = 120;
 const DEFAULT_ROW_COUNT = 100;
 const DEFAULT_COL_COUNT = 26;
 
+const DENSITY = {
+  gap: 8,
+  radius: 10,
+  border: "1px solid #1f1f1f",
+  panelBg: "rgba(255,255,255,0.015)",
+  buttonPad: "7px 10px",
+  inputPad: "8px 10px",
+  fieldHeight: 36,
+};
+
+const FUNCTION_GROUPS = [
+  {
+    label: "Math",
+    items: [
+      { name: "SUM", stub: "=SUM()", caretOffset: 1, description: "Total a range" },
+      { name: "AVERAGE", stub: "=AVERAGE()", caretOffset: 1, description: "Average a range" },
+      { name: "MIN", stub: "=MIN()", caretOffset: 1, description: "Smallest value" },
+      { name: "MAX", stub: "=MAX()", caretOffset: 1, description: "Largest value" },
+      { name: "ROUND", stub: "=ROUND(,0)", caretOffset: 2, description: "Round a number" },
+    ],
+  },
+  {
+    label: "Logic",
+    items: [
+      { name: "IF", stub: "=IF(,,)", caretOffset: 1, description: "Conditional value" },
+      { name: "AND", stub: "=AND(,)", caretOffset: 1, description: "All true" },
+      { name: "OR", stub: "=OR(,)", caretOffset: 1, description: "Any true" },
+      { name: "NOT", stub: "=NOT()", caretOffset: 1, description: "Invert value" },
+    ],
+  },
+  {
+    label: "Text",
+    items: [
+      { name: "CONCAT", stub: "=CONCAT(,)", caretOffset: 1, description: "Join values" },
+      { name: "LEFT", stub: "=LEFT(,)", caretOffset: 1, description: "Left characters" },
+      { name: "RIGHT", stub: "=RIGHT(,)", caretOffset: 1, description: "Right characters" },
+      { name: "LEN", stub: "=LEN()", caretOffset: 1, description: "Text length" },
+      { name: "TRIM", stub: "=TRIM()", caretOffset: 1, description: "Trim spaces" },
+    ],
+  },
+  {
+    label: "Date",
+    items: [
+      { name: "TODAY", stub: "=TODAY()", caretOffset: 0, description: "Current date" },
+      { name: "NOW", stub: "=NOW()", caretOffset: 0, description: "Current date and time" },
+    ],
+  },
+];
+
 const DEFAULT_SHEET = {
   type: "bondfire-sheet",
-  version: 3,
+  version: 4,
   activeSheetId: "sheet_1",
   sheets: [
     {
@@ -58,7 +107,7 @@ function normalizeLegacySheet(parsed) {
   });
   return {
     type: "bondfire-sheet",
-    version: 3,
+    version: 4,
     activeSheetId: "sheet_1",
     sheets: [
       {
@@ -93,7 +142,7 @@ function normalizeSheet(input) {
         : {},
     }));
     const activeSheetId = sheets.some((sheet) => sheet.id === input.activeSheetId) ? input.activeSheetId : sheets[0].id;
-    return { type: "bondfire-sheet", version: 3, activeSheetId, sheets };
+    return { type: "bondfire-sheet", version: 4, activeSheetId, sheets };
   }
   return normalizeLegacySheet(input);
 }
@@ -127,23 +176,53 @@ function evaluateFormula(input, getter, stack = new Set()) {
   const raw = String(input || "").trim();
   if (!raw.startsWith("=")) return raw;
   const expr = raw.slice(1).trim();
-  const fnMatch = expr.match(/^(SUM|AVG|MIN|MAX)\(([^)]+)\)$/i);
+  const fnMatch = expr.match(/^(SUM|AVERAGE|AVG|MIN|MAX|ROUND|CONCAT|LEFT|RIGHT|LEN|TRIM|TODAY|NOW|IF|AND|OR|NOT)\((.*)\)$/i);
   if (fnMatch) {
     const fn = fnMatch[1].toUpperCase();
-    const refs = fnMatch[2].split(",").flatMap((token) => {
-      const part = token.trim();
+    const argsRaw = fnMatch[2];
+    const args = argsRaw.length ? argsRaw.split(",").map((token) => token.trim()) : [];
+    const numericRefs = args.flatMap((part) => {
       if (part.includes(":")) {
         const [start, end] = part.split(":");
         return expandRange(start, end);
       }
       return [part];
     });
-    const nums = refs.map((ref) => Number(getter(String(ref).toUpperCase(), stack) || 0)).filter((value) => Number.isFinite(value));
-    if (!nums.length) return "";
-    if (fn === "SUM") return String(nums.reduce((sum, value) => sum + value, 0));
-    if (fn === "AVG") return String(nums.reduce((sum, value) => sum + value, 0) / nums.length);
-    if (fn === "MIN") return String(Math.min(...nums));
-    if (fn === "MAX") return String(Math.max(...nums));
+    if (["SUM", "AVERAGE", "AVG", "MIN", "MAX"].includes(fn)) {
+      const nums = numericRefs
+        .map((ref) => Number(getter(String(ref).toUpperCase(), stack) || 0))
+        .filter((value) => Number.isFinite(value));
+      if (!nums.length) return "";
+      if (fn === "SUM") return String(nums.reduce((sum, value) => sum + value, 0));
+      if (fn === "AVERAGE" || fn === "AVG") return String(nums.reduce((sum, value) => sum + value, 0) / nums.length);
+      if (fn === "MIN") return String(Math.min(...nums));
+      if (fn === "MAX") return String(Math.max(...nums));
+    }
+    if (fn === "ROUND") {
+      const base = Number(args[0] ? getter(String(args[0]).toUpperCase(), stack) || args[0] : 0);
+      const places = Number(args[1] || 0);
+      return Number.isFinite(base) ? String(Number(base).toFixed(Number.isFinite(places) ? places : 0)) : "#ERR";
+    }
+    if (fn === "CONCAT") return args.map((arg) => getter(String(arg).toUpperCase(), stack) || arg.replace(/^"|"$/g, "")).join("");
+    if (fn === "LEFT") {
+      const text = String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "");
+      return text.slice(0, Math.max(0, Number(args[1] || 1)));
+    }
+    if (fn === "RIGHT") {
+      const text = String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "");
+      return text.slice(Math.max(0, text.length - Math.max(0, Number(args[1] || 1))));
+    }
+    if (fn === "LEN") return String(String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "").length);
+    if (fn === "TRIM") return String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "").trim();
+    if (fn === "TODAY") return new Date().toLocaleDateString();
+    if (fn === "NOW") return new Date().toLocaleString();
+    if (fn === "NOT") return String(!(String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "").toLowerCase() === "true"));
+    if (fn === "AND") return String(args.every((arg) => String(getter(String(arg).toUpperCase(), stack) || arg || "").toLowerCase() === "true"));
+    if (fn === "OR") return String(args.some((arg) => String(getter(String(arg).toUpperCase(), stack) || arg || "").toLowerCase() === "true"));
+    if (fn === "IF") {
+      const condition = String(getter(String(args[0] || "").toUpperCase(), stack) || args[0] || "").toLowerCase();
+      return condition === "true" || condition === "1" ? String(getter(String(args[1] || "").toUpperCase(), stack) || args[1] || "") : String(getter(String(args[2] || "").toUpperCase(), stack) || args[2] || "");
+    }
   }
   const replaced = expr.replace(/\b([A-Z]+\d+)\b/g, (_, ref) => {
     const value = getter(ref.toUpperCase(), stack);
@@ -169,23 +248,48 @@ function getDisplayValue(sheet, key, stack = new Set()) {
 }
 
 function estimateWidth(sheet, colIndex) {
-  const label = columnLabel(colIndex);
-  let maxLen = label.length;
+  const targetLabel = columnLabel(colIndex);
+  let maxLen = targetLabel.length;
+  const targetIndex = Number(colIndex);
   Object.entries(sheet?.cells || {}).forEach(([key, cell]) => {
-    if (String(key).startsWith(label)) {
-      const raw = String(cell?.input || "");
-      const shown = raw.startsWith("=") ? getDisplayValue(sheet, key) : raw;
-      const longestLine = String(shown || "").split(/\n/).reduce((m, line) => Math.max(m, line.length), 0);
-      maxLen = Math.max(maxLen, longestLine);
-    }
+    const parsed = parseCellRef(key);
+    if (!parsed || parsed.col !== targetIndex) return;
+    const raw = String(cell?.input || "");
+    const shown = raw.startsWith("=") ? getDisplayValue(sheet, key) : raw;
+    const longestLine = String(shown || "").split(/\n/).reduce((m, line) => Math.max(m, line.length), 0);
+    maxLen = Math.max(maxLen, longestLine);
   });
-  return Math.max(80, Math.min(420, Math.round(maxLen * 9 + 28)));
+  return Math.max(80, Math.min(420, Math.round(maxLen * 8.5 + 24)));
 }
 
 function estimateHeight(value) {
   const text = String(value || "");
   const lines = Math.max(1, text.split(/\n/).length);
-  return Math.max(30, Math.min(180, 22 + (lines * 18)));
+  return Math.max(28, Math.min(180, 18 + (lines * 16)));
+}
+
+function MenuButton({ item, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect?.(item)}
+      style={{
+        display: "grid",
+        gap: 2,
+        width: "100%",
+        padding: "7px 9px",
+        background: "transparent",
+        color: "#fff",
+        border: "none",
+        borderRadius: 8,
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+    >
+      <span style={{ fontWeight: 700 }}>{item.name}</span>
+      <span className="helper" style={{ fontSize: 11 }}>{item.description}</span>
+    </button>
+  );
 }
 
 export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) {
@@ -194,7 +298,12 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const [selectedCell, setSelectedCell] = useState("A1");
   const [editingCell, setEditingCell] = useState("A1");
   const [formulaDraft, setFormulaDraft] = useState("");
+  const [sheetNameDraft, setSheetNameDraft] = useState("");
+  const [renamingSheetId, setRenamingSheetId] = useState("");
+  const [functionsOpen, setFunctionsOpen] = useState(false);
   const inputRefs = useRef({});
+  const formulaInputRef = useRef(null);
+  const functionsRef = useRef(null);
 
   const activeSheet = doc.sheets.find((sheet) => sheet.id === doc.activeSheetId) || doc.sheets[0];
   const selectedInput = String(activeSheet?.cells?.[selectedCell]?.input || "");
@@ -211,6 +320,15 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
       node.select?.();
     }
   }, [editingCell, activeSheet?.id, readOnly]);
+
+  useEffect(() => {
+    if (!functionsOpen) return undefined;
+    const onDown = (e) => {
+      if (!functionsRef.current?.contains(e.target)) setFunctionsOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [functionsOpen]);
 
   const commit = (nextDoc) => onChange?.(serialize(nextDoc));
 
@@ -229,7 +347,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   };
 
   const setSheetProp = (patch) => patchActiveSheet((sheet) => ({ ...sheet, ...patch }));
-  const addRow = (count = 10) => setSheetProp({ rowCount: activeSheet.rowCount + count });
+  const addRow = (count = 25) => setSheetProp({ rowCount: activeSheet.rowCount + count });
   const addColumn = (count = 5) => setSheetProp({ columnCount: activeSheet.columnCount + count });
 
   const addSheet = () => {
@@ -249,12 +367,17 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
     });
     setSelectedCell("A1");
     setEditingCell("A1");
+    setSheetNameDraft(`Sheet${doc.sheets.length + 1}`);
+    setRenamingSheetId(id);
   };
 
-  const renameActiveSheet = () => {
-    const nextName = window.prompt("Sheet name", activeSheet?.name || "Sheet");
-    if (!nextName) return;
-    patchActiveSheet((sheet) => ({ ...sheet, name: String(nextName).trim() || sheet.name }));
+  const renameSheet = (sheetId, nextName) => {
+    const trimmed = String(nextName || "").trim();
+    if (!trimmed) return;
+    commit({
+      ...doc,
+      sheets: doc.sheets.map((sheet) => (sheet.id === sheetId ? { ...sheet, name: trimmed } : sheet)),
+    });
   };
 
   const setColumnWidth = (colIndex, width) => patchActiveSheet((sheet) => ({
@@ -273,9 +396,9 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
   const columnLabels = Array.from({ length: activeSheet.columnCount }, (_, idx) => columnLabel(idx));
   const rowIndices = Array.from({ length: activeSheet.rowCount }, (_, idx) => idx);
 
-  const selectCell = (cell) => {
+  const selectCell = (cell, shouldEdit = true) => {
     setSelectedCell(cell);
-    setEditingCell(cell);
+    if (shouldEdit) setEditingCell(cell);
   };
 
   const moveSelection = (deltaRow, deltaCol) => {
@@ -291,27 +414,59 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
     setCellInput(selectedCell, formulaDraft);
   };
 
+  const insertFunction = (item) => {
+    const next = item.stub;
+    setFormulaDraft(next);
+    setFunctionsOpen(false);
+    if (!readOnly) setCellInput(selectedCell, next);
+    requestAnimationFrame(() => {
+      const node = formulaInputRef.current;
+      if (!node) return;
+      const closeIndex = next.indexOf(")");
+      const position = closeIndex >= 0 ? closeIndex - (item.caretOffset || 0) : next.length;
+      node.focus();
+      node.setSelectionRange(position, position);
+    });
+  };
+
   const selectedColWidth = Number(activeSheet.columnWidths?.[columnLabel(selectedRef.col)] || DEFAULT_COL_WIDTH);
   const selectedRowHeight = Number(activeSheet.rowHeights?.[String(selectedRef.row + 1)] || DEFAULT_ROW_HEIGHT);
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ display: "grid", gap: DENSITY.gap }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: DENSITY.gap, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {!readOnly ? (
             <>
-              <button className="btn" type="button" onClick={() => addRow(25)}>Add 25 rows</button>
-              <button className="btn" type="button" onClick={() => addColumn(5)}>Add 5 columns</button>
-              <button className="btn" type="button" onClick={renameActiveSheet}>Rename sheet</button>
+              <button className="btn" type="button" onClick={() => addRow(25)} style={{ padding: DENSITY.buttonPad }}>Add 25 rows</button>
+              <button className="btn" type="button" onClick={() => addColumn(5)} style={{ padding: DENSITY.buttonPad }}>Add 5 columns</button>
             </>
           ) : null}
         </div>
         <div className="helper">{activeSheet.rowCount} rows · {activeSheet.columnCount} columns</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "84px minmax(0,1fr)", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "grid", gridTemplateColumns: readOnly ? "84px minmax(0,1fr)" : "84px auto minmax(0,1fr)", gap: 6, alignItems: "center" }}>
         <div style={{ fontWeight: 700 }}>{selectedCell}</div>
+        {!readOnly ? (
+          <div ref={functionsRef} style={{ position: "relative" }}>
+            <button className="btn" type="button" onClick={() => setFunctionsOpen((v) => !v)} style={{ padding: DENSITY.buttonPad, whiteSpace: "nowrap" }}>Functions</button>
+            {functionsOpen ? (
+              <div style={{ position: "absolute", left: 0, top: "calc(100% + 6px)", width: 320, maxHeight: 340, overflow: "auto", background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 8, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 120, display: "grid", gap: 8 }}>
+                {FUNCTION_GROUPS.map((group) => (
+                  <div key={group.label} style={{ display: "grid", gap: 4 }}>
+                    <div className="helper" style={{ fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase" }}>{group.label}</div>
+                    <div style={{ display: "grid", gap: 2 }}>
+                      {group.items.map((item) => <MenuButton key={item.name} item={item} onSelect={insertFunction} />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <input
+          ref={formulaInputRef}
           className="input"
           value={formulaDraft}
           disabled={readOnly}
@@ -325,22 +480,22 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
             }
           }}
           placeholder="Value or formula, like =SUM(A1:B4)"
-          style={{ padding: "10px 12px" }}
+          style={{ padding: DENSITY.inputPad, height: DENSITY.fieldHeight }}
         />
       </div>
 
       {!readOnly ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <div className="helper">Column {columnLabel(selectedRef.col)} width</div>
-          <input className="input" type="number" min="60" max="420" value={selectedColWidth} onChange={(e) => setColumnWidth(selectedRef.col, e.target.value)} style={{ width: 90, padding: "8px 10px" }} />
-          <button className="btn" type="button" onClick={() => autoFitColumn(selectedRef.col)}>Auto-fit column</button>
+          <input className="input" type="number" min="60" max="420" value={selectedColWidth} onChange={(e) => setColumnWidth(selectedRef.col, e.target.value)} style={{ width: 82, padding: "7px 9px", height: DENSITY.fieldHeight }} />
+          <button className="btn" type="button" onClick={() => autoFitColumn(selectedRef.col)} style={{ padding: DENSITY.buttonPad }}>Auto-fit column</button>
           <div className="helper">Row {selectedRef.row + 1} height</div>
-          <input className="input" type="number" min="24" max="180" value={selectedRowHeight} onChange={(e) => setRowHeight(selectedRef.row, e.target.value)} style={{ width: 90, padding: "8px 10px" }} />
-          <button className="btn" type="button" onClick={() => autoFitRow(selectedRef.row)}>Auto-fit row</button>
+          <input className="input" type="number" min="24" max="180" value={selectedRowHeight} onChange={(e) => setRowHeight(selectedRef.row, e.target.value)} style={{ width: 82, padding: "7px 9px", height: DENSITY.fieldHeight }} />
+          <button className="btn" type="button" onClick={() => autoFitRow(selectedRef.row)} style={{ padding: DENSITY.buttonPad }}>Auto-fit row</button>
         </div>
       ) : null}
 
-      <div style={{ overflow: "auto", border: "1px solid #1f1f1f", borderRadius: 12, background: "rgba(255,255,255,0.015)" }}>
+      <div style={{ overflow: "auto", border: DENSITY.border, borderRadius: DENSITY.radius, background: DENSITY.panelBg }}>
         <div
           style={{
             display: "grid",
@@ -348,12 +503,12 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
             minWidth: "max-content",
           }}
         >
-          <div style={{ position: "sticky", left: 0, top: 0, zIndex: 4, borderBottom: "1px solid #222", borderRight: "1px solid #222", background: "#0f1012", minHeight: 40 }} />
+          <div style={{ position: "sticky", left: 0, top: 0, zIndex: 4, borderBottom: "1px solid #222", borderRight: "1px solid #222", background: "#0f1012", minHeight: 36 }} />
           {columnLabels.map((label, colIndex) => (
             <button
               key={label}
               type="button"
-              onClick={() => setSelectedCell(cellKey(selectedRef.row, colIndex))}
+              onClick={() => selectCell(cellKey(selectedRef.row, colIndex), false)}
               onDoubleClick={() => autoFitColumn(colIndex)}
               style={{
                 position: "sticky",
@@ -364,7 +519,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                 borderRight: "1px solid #222",
                 background: selectedRef.col === colIndex ? "rgba(24,129,242,0.18)" : "#0f1012",
                 color: "#fff",
-                minHeight: 40,
+                minHeight: 36,
                 fontWeight: 800,
                 cursor: "pointer",
               }}
@@ -380,7 +535,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               <button
                 key={`row_header_${rowKey}`}
                 type="button"
-                onClick={() => setSelectedCell(cellKey(rowIndex, selectedRef.col))}
+                onClick={() => selectCell(cellKey(rowIndex, selectedRef.col), false)}
                 onDoubleClick={() => autoFitRow(rowIndex)}
                 style={{
                   position: "sticky",
@@ -405,9 +560,17 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
               const display = input.startsWith("=") ? getDisplayValue(activeSheet, key) : input;
               const selected = selectedCell === key;
               return (
-                <div key={key} style={{ borderBottom: "1px solid #1d1d1d", borderRight: "1px solid #1d1d1d", height: rowHeight, background: selected ? "rgba(24,129,242,0.08)" : "transparent" }}>
+                <div
+                  key={key}
+                  style={{
+                    borderBottom: "1px solid #1d1d1d",
+                    borderRight: "1px solid #1d1d1d",
+                    height: rowHeight,
+                    background: selected ? "rgba(24,129,242,0.08)" : "transparent",
+                  }}
+                >
                   {readOnly ? (
-                    <div style={{ padding: "8px 10px", whiteSpace: "pre-wrap", overflow: "hidden", textOverflow: "ellipsis", height: "100%" }}>{display}</div>
+                    <div style={{ padding: "7px 9px", whiteSpace: "pre-wrap", overflow: "hidden", textOverflow: "ellipsis", height: "100%" }}>{display}</div>
                   ) : (
                     <input
                       ref={(node) => { inputRefs.current[key] = node; }}
@@ -443,7 +606,7 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
                         border: selected ? "1px solid #1881f2" : "1px solid transparent",
                         borderRadius: 0,
                         background: "transparent",
-                        padding: "8px 10px",
+                        padding: "7px 9px",
                         boxShadow: "none",
                         outline: "none",
                       }}
@@ -457,19 +620,62 @@ export default function SpreadsheetFileView({ value, onChange, mode = "edit" }) 
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-        {doc.sheets.map((sheet) => (
-          <button
-            key={sheet.id}
-            className="btn"
-            type="button"
-            onClick={() => { commit({ ...doc, activeSheetId: sheet.id }); setSelectedCell("A1"); setEditingCell("A1"); }}
-            style={{ background: sheet.id === activeSheet.id ? "rgba(255,255,255,0.12)" : undefined }}
-          >
-            {sheet.name}
-          </button>
-        ))}
-        {!readOnly ? <button className="btn" type="button" onClick={addSheet}>＋ Sheet</button> : null}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, alignItems: "center" }}>
+        {doc.sheets.map((sheet) => {
+          const active = sheet.id === activeSheet.id;
+          const isRenaming = renamingSheetId === sheet.id && !readOnly;
+          return (
+            <div key={sheet.id} style={{ display: "flex", alignItems: "center" }}>
+              {isRenaming ? (
+                <input
+                  className="input"
+                  autoFocus
+                  value={sheetNameDraft}
+                  onChange={(e) => setSheetNameDraft(e.target.value)}
+                  onBlur={() => {
+                    renameSheet(sheet.id, sheetNameDraft || sheet.name);
+                    setRenamingSheetId("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      renameSheet(sheet.id, sheetNameDraft || sheet.name);
+                      setRenamingSheetId("");
+                    }
+                    if (e.key === "Escape") setRenamingSheetId("");
+                  }}
+                  style={{ width: 120, padding: "7px 9px", height: 34 }}
+                />
+              ) : (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    commit({ ...doc, activeSheetId: sheet.id });
+                    setSelectedCell("A1");
+                    setEditingCell("A1");
+                  }}
+                  onDoubleClick={() => {
+                    if (readOnly) return;
+                    setSheetNameDraft(sheet.name);
+                    setRenamingSheetId(sheet.id);
+                  }}
+                  title={readOnly ? sheet.name : `${sheet.name} · double click to rename`}
+                  style={{
+                    padding: "7px 11px",
+                    borderRadius: 12,
+                    background: active ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.02)",
+                    borderColor: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)",
+                  }}
+                >
+                  {sheet.name}
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {!readOnly ? (
+          <button className="btn" type="button" onClick={addSheet} style={{ padding: "7px 10px", borderRadius: 12 }}>＋ Sheet</button>
+        ) : null}
       </div>
     </div>
   );

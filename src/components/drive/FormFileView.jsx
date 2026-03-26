@@ -66,7 +66,7 @@ function serialize(form) {
 
 function FieldPreview({ field, answer, onAnswerChange, readOnly = false }) {
   if (field.type === "paragraph") {
-    return <textarea disabled={readOnly} className="input" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} placeholder="Long answer" style={{ width: "100%", minHeight: 100, padding: 10, resize: "vertical" }} />;
+    return <textarea disabled={readOnly} className="input" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} placeholder="Long answer" style={{ width: "100%", minHeight: 88, padding: 8, resize: "vertical" }} />;
   }
   if (field.type === "choice") {
     return (
@@ -97,9 +97,9 @@ function FieldPreview({ field, answer, onAnswerChange, readOnly = false }) {
     );
   }
   if (field.type === "date") {
-    return <input disabled={readOnly} className="input" type="date" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} style={{ width: "100%", padding: 10 }} />;
+    return <input disabled={readOnly} className="input" type="date" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} style={{ width: "100%", padding: 8 }} />;
   }
-  return <input disabled={readOnly} className="input" type="text" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} placeholder="Short answer" style={{ width: "100%", padding: 10 }} />;
+  return <input disabled={readOnly} className="input" type="text" value={String(answer || "")} onChange={(e) => onAnswerChange?.(e.target.value)} placeholder="Short answer" style={{ width: "100%", padding: 8 }} />;
 }
 
 function answerSummary(field, value) {
@@ -202,9 +202,9 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gap: 14 }}>
+    <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gap: 8 }}>
       {!readOnly ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button className="btn" type="button" onClick={() => addField("text")}>Add text</button>
           <button className="btn" type="button" onClick={() => addField("paragraph")}>Add paragraph</button>
           <button className="btn" type="button" onClick={() => addField("choice")}>Add choice</button>
@@ -213,23 +213,23 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
         </div>
       ) : null}
 
-      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12 }}>
         {readOnly ? (
           <>
             <h2 style={{ marginTop: 0, marginBottom: 8 }}>{form.title}</h2>
             {form.description ? <div className="helper" style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{form.description}</div> : null}
           </>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            <input className="input" value={form.title} onChange={(e) => setFormProp("title", e.target.value)} placeholder="Form title" style={{ fontSize: 22, fontWeight: 800, padding: "10px 12px" }} />
-            <textarea className="input" value={form.description} onChange={(e) => setFormProp("description", e.target.value)} placeholder="Form description" style={{ minHeight: 74, padding: 10, resize: "vertical" }} />
+          <div style={{ display: "grid", gap: 8 }}>
+            <input className="input" value={form.title} onChange={(e) => setFormProp("title", e.target.value)} placeholder="Form title" style={{ fontSize: 20, fontWeight: 800, padding: "8px 10px" }} />
+            <textarea className="input" value={form.description} onChange={(e) => setFormProp("description", e.target.value)} placeholder="Form description" style={{ minHeight: 68, padding: 8, resize: "vertical" }} />
           </div>
         )}
       </div>
 
       {!readOnly ? (
-        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16, display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>Public response link</div>
               <div className="helper">Anyone with this link can submit without a Bondfire account.</div>
@@ -239,26 +239,26 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
               Enable public submissions
             </label>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button className="btn" type="button" onClick={openEditorUrl} disabled={!standaloneEditorUrl}>Open editor in browser</button>
             <button className="btn" type="button" onClick={openPublicUrl} disabled={!publicUrl}>Open public form</button>
             <button className="btn" type="button" onClick={copyPublicUrl} disabled={!publicUrl}>Copy public link</button>
             <button className="btn" type="button" onClick={regeneratePublicLink} disabled={!form.publicShare.enabled}>Regenerate link</button>
           </div>
-          <input className="input" readOnly value={publicUrl || "Enable public submissions to generate a public share URL."} style={{ padding: "10px 12px" }} />
+          <input className="input" readOnly value={publicUrl || "Enable public submissions to generate a public share URL."} style={{ padding: "8px 10px" }} />
           {copyStatus ? <div className="helper">{copyStatus}</div> : null}
         </div>
       ) : null}
 
       {form.fields.map((field, idx) => (
-        <div key={field.id} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
+        <div key={field.id} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12 }}>
           {readOnly ? (
-            <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gap: 10 }}>
               <div style={{ fontWeight: 700 }}>{idx + 1}. {field.label} {field.required ? <span style={{ color: "#ff9a9a" }}>*</span> : null}</div>
               <FieldPreview field={field} answer={draftAnswers[field.id]} onAnswerChange={(next) => setDraftAnswer(field.id, next)} />
             </div>
           ) : (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <input className="input" value={field.label} onChange={(e) => setField(field.id, { label: e.target.value })} placeholder="Question" style={{ flex: 1, minWidth: 220, padding: "8px 10px" }} />
                 <select className="input" value={field.type} onChange={(e) => setField(field.id, { type: e.target.value, options: e.target.value === "choice" || e.target.value === "checkbox" ? (field.options.length ? field.options : ["Option 1", "Option 2"]) : [] })} style={{ width: 160, padding: "8px 10px" }}>
@@ -288,18 +288,18 @@ export default function FormFileView({ value, onChange, mode = "edit", fileId = 
       ))}
 
       {readOnly ? (
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn" type="button" onClick={submitResponse}>Submit response</button>
           {responseStatus ? <div className="helper">{responseStatus}</div> : null}
         </div>
       ) : null}
 
       {form.responses.length ? (
-        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 12, padding: 16 }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Responses ({form.responses.length})</div>
-          <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 8 }}>
             {form.responses.slice().reverse().map((response) => (
-              <div key={response.id} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
+              <div key={response.id} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.02)" }}>
                 <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>{new Date(response.submittedAt).toLocaleString()} · {response.source === "public" ? "public" : "internal"}</div>
                 <div style={{ display: "grid", gap: 6 }}>
                   {form.fields.map((field) => (

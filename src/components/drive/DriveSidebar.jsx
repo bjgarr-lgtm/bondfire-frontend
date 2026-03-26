@@ -32,11 +32,11 @@ function PopMenu({ trigger, items, align = "right" }) {
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <button className="btn" type="button" onClick={() => setOpen((v) => !v)} style={{ padding: "6px 9px", minWidth: 34 }}>
+      <button className="btn" type="button" onClick={() => setOpen((v) => !v)} style={{ padding: "5px 8px", minWidth: 30, borderRadius: 10 }}>
         {trigger}
       </button>
       {open ? (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", ...(align === "left" ? { left: 0 } : { right: 0 }), minWidth: 190, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 6, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 120, display: "grid", gap: 4 }}>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", ...(align === "left" ? { left: 0 } : { right: 0 }), minWidth: 190, background: "rgba(16,16,20,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 4, boxShadow: "0 14px 32px rgba(0,0,0,0.42)", zIndex: 120, display: "grid", gap: 4 }}>
           {items.map((item, idx) => (
             <MenuButton key={`${item.label}-${idx}`} label={item.label} danger={item.danger} onClick={() => { item.onClick?.(); setOpen(false); }} />
           ))}
@@ -48,7 +48,7 @@ function PopMenu({ trigger, items, align = "right" }) {
 
 function TreeRow({ depth = 0, active = false, icon, label, hint, onClick, menuItems }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", marginTop: 4 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4, alignItems: "center", marginTop: 3 }}>
       <button
         type="button"
         onClick={onClick}
@@ -56,20 +56,20 @@ function TreeRow({ depth = 0, active = false, icon, label, hint, onClick, menuIt
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
+          gap: 6,
           width: "100%",
           minWidth: 0,
-          padding: "7px 9px",
-          paddingLeft: 9 + depth * 12,
+          padding: "6px 8px",
+          paddingLeft: 8 + depth * 12,
           background: active ? "rgba(255,255,255,0.08)" : "transparent",
           color: "#fff",
           border: "1px solid rgba(255,255,255,0.07)",
-          borderRadius: 12,
+          borderRadius: 10,
           cursor: "pointer",
           textAlign: "left",
         }}
       >
-        <span style={{ opacity: 0.9, width: 14, textAlign: "center", flex: "0 0 14px" }}>{icon}</span>
+        <span style={{ opacity: 0.9, width: 12, textAlign: "center", flex: "0 0 12px" }}>{icon}</span>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: active ? 700 : 500 }}>{label}</span>
         {hint ? <span className="helper" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{hint}</span> : null}
       </button>
@@ -244,7 +244,7 @@ export default function DriveSidebar({
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr)", height: "100%", position: "relative", zIndex: 0 }}>
-      <div style={{ borderRight: "1px solid #1b1b1b", padding: 8, display: "grid", alignContent: "start", gap: 8, position: "relative", zIndex: 1 }}>
+      <div style={{ borderRight: "1px solid #1b1b1b", padding: 8, display: "grid", alignContent: "start", gap: 6, position: "relative", zIndex: 1 }}>
         <button className="btn" type="button" title="Explorer" onClick={() => setActivePane("explorer")} style={{ padding: "8px 0", fontWeight: activePane === "explorer" ? 800 : 500 }}>⌂</button>
         <button className="btn" type="button" title="Templates" onClick={() => setActivePane("templates")} style={{ padding: "8px 0", fontWeight: activePane === "templates" ? 800 : 500 }}>T</button>
       </div>
@@ -269,7 +269,7 @@ export default function DriveSidebar({
 
         {activePane === "explorer" ? (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
               <div className="helper" style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}>Explorer</div>
               <button className="btn" type="button" onClick={() => onSelectFolder?.(null)} style={{ padding: "5px 8px", fontSize: 12 }}>Root</button>
             </div>
