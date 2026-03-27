@@ -654,6 +654,7 @@ export default function Studio() {
 	const studioPendingRemoteRef = React.useRef(null);
 	const studioLastLocalEditRef = React.useRef(0);
 	const studioLastRemoteApplyRef = React.useRef(0);
+	const studioLastSharedSaveRef = React.useRef(0);
 	const studioStreamRef = React.useRef(null);
 	const studioFastPollUntilRef = React.useRef(0);
 	const studioNeedsRemoteHydrationRef = React.useRef(false);
@@ -687,6 +688,7 @@ export default function Studio() {
 		setStudioKeyNotice(null);
 		studioLastLocalEditRef.current = 0;
 		studioLastRemoteApplyRef.current = 0;
+		studioLastSharedSaveRef.current = 0;
 		studioRemoteSigRef.current = "";
 		studioPendingRemoteRef.current = null;
 		studioNeedsRemoteHydrationRef.current = false;
@@ -815,7 +817,9 @@ React.useEffect(() => {
 				});
 			}
 			await saveStudioStateToServer(orgId, { docs: encDocs, blocks: encBlocks });
+			studioLastSharedSaveRef.current = Date.now();
 			studioFastPollUntilRef.current = Date.now() + 12000;
+			setStudioRemoteNotice(null);
 			setStudioSyncMsg("Studio synced to shared encrypted storage.");
 		} catch (err) {
 			setStudioSyncMsg(String(err?.message || err || "Studio encrypted sync failed."));
@@ -920,7 +924,7 @@ React.useEffect(() => {
 	const pending = studioPendingRemoteRef.current;
 		if (!pending) return;
 		if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
-		if (studioLastLocalEditRef.current > studioLastRemoteApplyRef.current) return;
+		if (studioLastLocalEditRef.current > studioLastSharedSaveRef.current) return;
 		const id = window.setTimeout(() => {
 			studioRemoteSigRef.current = pending.sig;
 			setDocs(pending.remoteState.docs);
@@ -988,7 +992,7 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 		return false;
 	}
 	const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
-	const hasRecentLocalEdits = studioLastLocalEditRef.current > studioLastRemoteApplyRef.current;
+	const hasUnsyncedLocalEdits = studioLastLocalEditRef.current > studioLastSharedSaveRef.current;
 	const hasLocalDocs = Array.isArray(docs) && docs.length > 0;
 	const hasLocalBlocks = Array.isArray(savedBlocks) && savedBlocks.length > 0;
 	const needsAuthoritativeRemoteHydration = hasRemoteRows && (
@@ -997,13 +1001,13 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 		studioNeedsRemoteHydrationRef.current ||
 		(!hasLocalDocs && !hasLocalBlocks)
 	);
-	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || hasRecentLocalEdits)) {
+	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || hasUnsyncedLocalEdits)) {
 		studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
 		setStudioRemoteNotice({
 			kind: "queued",
-			text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "New Studio changes are available from another device.",
+			text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "Remote changes are waiting because this device still has unsynced local edits.",
 		});
-		setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes available.");
+		setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes are waiting for local edits to finish syncing.");
 		return false;
 	}
 	studioRemoteSigRef.current = sig;
@@ -1014,6 +1018,7 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	saveBlocks(orgId, remoteBlocks);
 	setCurrentId((prev) => remoteDocs.some((doc) => doc.id === prev) ? prev : (remoteDocs[0]?.id || null));
 	studioLastRemoteApplyRef.current = Date.now();
+	studioLastSharedSaveRef.current = studioLastRemoteApplyRef.current;
 	studioHasAppliedRemoteRef.current = true;
 	studioNeedsRemoteHydrationRef.current = false;
 	setStudioKeyNotice(null);
