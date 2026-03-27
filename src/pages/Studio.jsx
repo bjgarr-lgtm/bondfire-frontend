@@ -647,6 +647,7 @@ export default function Studio() {
 	const [savedBlocks, setSavedBlocks] = React.useState(() => readBlocks(orgId));
 	const [studioSyncMsg, setStudioSyncMsg] = React.useState("");
 	const [studioRemoteNotice, setStudioRemoteNotice] = React.useState(null);
+	const [studioKeyNotice, setStudioKeyNotice] = React.useState(null);
 	const studioLoadedRef = React.useRef(false);
 	const studioSyncTimerRef = React.useRef(null);
 	const studioRemoteSigRef = React.useRef("");
@@ -657,6 +658,7 @@ export default function Studio() {
 	const studioFastPollUntilRef = React.useRef(0);
 	const studioNeedsRemoteHydrationRef = React.useRef(false);
 	const studioHasAppliedRemoteRef = React.useRef(false);
+	const studioInitialHydrationTimerRef = React.useRef(null);
 	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
@@ -665,6 +667,10 @@ export default function Studio() {
 		if (studioSyncTimerRef.current) {
 			clearTimeout(studioSyncTimerRef.current);
 			studioSyncTimerRef.current = null;
+		}
+		if (studioInitialHydrationTimerRef.current) {
+			clearTimeout(studioInitialHydrationTimerRef.current);
+			studioInitialHydrationTimerRef.current = null;
 		}
 		const cachedDocs = normalizeDocs(readDocs(orgId));
 		const cachedBlocks = readBlocks(orgId);
@@ -678,6 +684,7 @@ export default function Studio() {
 		setFuture([]);
 		setStudioSyncMsg("");
 		setStudioRemoteNotice(null);
+		setStudioKeyNotice(null);
 		studioLastLocalEditRef.current = 0;
 		studioLastRemoteApplyRef.current = 0;
 		studioRemoteSigRef.current = "";
@@ -700,6 +707,40 @@ try {
 		})();
 		return () => { cancelled = true; };
 	}, [orgId]);
+
+	React.useEffect(() => {
+		if (!studioLoadedRef.current || !orgId) return;
+		if (studioHasAppliedRemoteRef.current) return;
+		let cancelled = false;
+		let tries = 0;
+
+		const tryHydrate = async () => {
+			if (cancelled) return;
+			tries += 1;
+			try {
+				await fetchAndApplyRemoteStudioState({ queueIfBusy: false, forceApply: true, reason: "rehydrate" });
+			} catch {}
+			if (cancelled) return;
+			if (studioHasAppliedRemoteRef.current) {
+				if (studioInitialHydrationTimerRef.current) {
+					clearTimeout(studioInitialHydrationTimerRef.current);
+					studioInitialHydrationTimerRef.current = null;
+				}
+				return;
+			}
+			if (tries >= 20 && !studioNeedsRemoteHydrationRef.current) return;
+			studioInitialHydrationTimerRef.current = setTimeout(tryHydrate, studioNeedsRemoteHydrationRef.current ? 1200 : 1800);
+		};
+
+		tryHydrate();
+		return () => {
+			cancelled = true;
+			if (studioInitialHydrationTimerRef.current) {
+				clearTimeout(studioInitialHydrationTimerRef.current);
+				studioInitialHydrationTimerRef.current = null;
+			}
+		};
+	}, [orgId, studioLoadedRef.current, studioSyncMsg]);
 
 	const bindings = React.useMemo(() => getOrgBindings(orgId), [orgId]);
 	const brandKit = React.useMemo(() => getBrandKit(orgId), [orgId]);
@@ -867,18 +908,34 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	try { orgKey = getCachedOrgKey(orgId); } catch {}
 	if (!orgKey) {
 		studioNeedsRemoteHydrationRef.current = hasRemoteRows;
-		if (hasRemoteRows) setStudioSyncMsg("Studio found synced docs but this device is still waiting for the org key.");
+		if (hasRemoteRows) {
+			setStudioKeyNotice({
+				kind: "missing_key",
+				text: "Studio found shared encrypted docs for this org, but this device cannot read them yet because the org key is missing. Restore the org key on this device to load the same Studio docs as your other devices.",
+			});
+			setStudioSyncMsg("Studio found synced docs but this device is still waiting for the org key.");
+		}
 		return false;
 	}
 	const remoteState = await decryptStudioStatePayload(orgId, resp);
 	if (!remoteState) {
 		studioNeedsRemoteHydrationRef.current = hasRemoteRows;
+		if (hasRemoteRows) {
+			setStudioKeyNotice({
+				kind: "decrypt_wait",
+				text: "Studio can see shared encrypted docs on the server, but this device cannot decrypt them yet. If they do not appear in a moment, restore or unlock the org key for this device.",
+			});
+		}
 		return false;
 	}
 	const remoteDocs = remoteState.docs || [];
 	const remoteBlocks = remoteState.blocks || [];
 	if (hasRemoteRows && !remoteDocs.length && !remoteBlocks.length) {
 		studioNeedsRemoteHydrationRef.current = true;
+		setStudioKeyNotice({
+			kind: "decrypt_empty",
+			text: "Studio found shared encrypted docs, but this device still cannot decrypt them into usable files. This usually means the org key needs to be restored or unlocked here.",
+		});
 		setStudioSyncMsg("Studio found remote state but this device could not decrypt it yet.");
 		return false;
 	}
@@ -886,6 +943,7 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 		if (remoteDocs.length || remoteBlocks.length) {
 			studioHasAppliedRemoteRef.current = true;
 			studioNeedsRemoteHydrationRef.current = false;
+			setStudioKeyNotice(null);
 		}
 		return false;
 	}
@@ -918,8 +976,9 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	studioLastRemoteApplyRef.current = Date.now();
 	studioHasAppliedRemoteRef.current = true;
 	studioNeedsRemoteHydrationRef.current = false;
+	setStudioKeyNotice(null);
 	setStudioRemoteNotice(null);
-	setStudioSyncMsg(reason === "initial" || needsAuthoritativeRemoteHydration ? "Studio loaded shared encrypted docs from the server." : "Remote Studio changes applied.");
+	setStudioSyncMsg(reason === "initial" || reason === "rehydrate" || needsAuthoritativeRemoteHydration ? "Studio loaded shared encrypted docs from the server." : "Remote Studio changes applied.");
 	return true;
 }
 
@@ -2113,6 +2172,15 @@ React.useEffect(() => {
 		setStudioRemoteNotice({ kind: "dismissed", text: "Remote Studio changes are still available and will reappear on the next poll." });
 	}, []);
 
+	const retryStudioRemoteHydration = React.useCallback(async () => {
+		try {
+			setStudioKeyNotice(null);
+			await fetchAndApplyRemoteStudioState({ queueIfBusy: false, forceApply: true, reason: "rehydrate" });
+		} catch (err) {
+			setStudioSyncMsg(String(err?.message || err || "Studio rehydrate failed."));
+		}
+	}, [orgId, studioSyncMsg, docs.length, savedBlocks.length, textEditId, dragState, resizeState, marquee, panState, guideDrag]);
+
 	const activePageLayout = React.useMemo(() => {
 		if (!pageLayouts.length) return null;
 		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
@@ -2203,6 +2271,12 @@ React.useEffect(() => {
 				</div>
 			</div>
 
+			{studioKeyNotice ? (
+				<div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 14, background: "rgba(127,29,29,0.22)", border: "1px solid rgba(248,113,113,0.45)" }}>
+					<div style={{ fontSize: 13, lineHeight: 1.4, flex: 1, minWidth: 220 }}>{studioKeyNotice.text}</div>
+					<button onClick={retryStudioRemoteHydration} style={{ padding: "8px 10px", borderRadius: 10 }}>Retry now</button>
+				</div>
+			) : null}
 			{studioRemoteNotice ? (
 				<div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 14, background: "rgba(17,24,39,0.92)", border: "1px solid rgba(255,255,255,0.12)" }}>
 					<div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, minWidth: 220 }}>{studioRemoteNotice.text}</div>
