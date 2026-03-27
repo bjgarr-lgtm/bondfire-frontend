@@ -792,6 +792,46 @@ try {
 
 React.useEffect(() => {
 	if (!studioLoadedRef.current || !orgId) return;
+	let orgKey = null;
+	try { orgKey = getCachedOrgKey(orgId); } catch {}
+	if (!orgKey) return;
+	if (studioSyncTimerRef.current) clearTimeout(studioSyncTimerRef.current);
+	studioSyncTimerRef.current = setTimeout(async () => {
+		try {
+			const encDocs = [];
+			for (const doc of normalizeDocs(docs)) {
+				encDocs.push({
+					id: String(doc.id || ""),
+					name: "__encrypted__",
+					encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(normalizeDoc(doc))),
+				});
+			}
+			const encBlocks = [];
+			for (const block of Array.isArray(savedBlocks) ? savedBlocks : []) {
+				encBlocks.push({
+					id: String(block.id || ""),
+					name: "__encrypted__",
+					encrypted_blob: await encryptWithOrgKey(orgKey, JSON.stringify(block)),
+				});
+			}
+			await saveStudioStateToServer(orgId, { docs: encDocs, blocks: encBlocks });
+			studioFastPollUntilRef.current = Date.now() + 12000;
+			setStudioSyncMsg("Studio synced to shared encrypted storage.");
+		} catch (err) {
+			setStudioSyncMsg(String(err?.message || err || "Studio encrypted sync failed."));
+		}
+	}, 700);
+	return () => {
+		if (studioSyncTimerRef.current) {
+			clearTimeout(studioSyncTimerRef.current);
+			studioSyncTimerRef.current = null;
+		}
+	};
+}, [orgId, docs, savedBlocks]);
+
+
+React.useEffect(() => {
+	if (!studioLoadedRef.current || !orgId) return;
 	let cancelled = false;
 	let intervalId = null;
 
