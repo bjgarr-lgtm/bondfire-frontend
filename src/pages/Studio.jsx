@@ -820,7 +820,8 @@ React.useEffect(() => {
 			studioLastSharedSaveRef.current = Date.now();
 			studioFastPollUntilRef.current = Date.now() + 12000;
 			setStudioRemoteNotice(null);
-			setStudioSyncMsg("Studio synced to shared encrypted storage.");
+			setStudioSyncMsg("");
+			
 		} catch (err) {
 			setStudioSyncMsg(String(err?.message || err || "Studio encrypted sync failed."));
 		}
@@ -888,7 +889,7 @@ React.useEffect(() => {
 		const sig = String(payload?.sig || "");
 		if (!sig || sig === studioRemoteSigRef.current) return;
 		studioFastPollUntilRef.current = Date.now() + 12000;
-		setStudioSyncMsg("Studio update signal received. Refreshing…");
+		
 		try {
 			await fetchAndApplyRemoteStudioState({ queueIfBusy: true, forceApply: false, reason: "push" });
 		} catch {}
@@ -937,7 +938,7 @@ React.useEffect(() => {
 			studioHasAppliedRemoteRef.current = true;
 			studioNeedsRemoteHydrationRef.current = false;
 			setStudioRemoteNotice(null);
-			setStudioSyncMsg("Queued Studio changes applied.");
+			
 		}, 750);
 		return () => window.clearTimeout(id);
 	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
@@ -1007,7 +1008,7 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 			kind: "queued",
 			text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "Remote changes are waiting because this device still has unsynced local edits.",
 		});
-		setStudioSyncMsg(hasActiveInteraction ? "Remote Studio changes detected. Applying when editing pauses." : "Remote Studio changes are waiting for local edits to finish syncing.");
+		
 		return false;
 	}
 	studioRemoteSigRef.current = sig;
@@ -1023,7 +1024,8 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	studioNeedsRemoteHydrationRef.current = false;
 	setStudioKeyNotice(null);
 	setStudioRemoteNotice(null);
-	setStudioSyncMsg(reason === "initial" || reason === "rehydrate" || needsAuthoritativeRemoteHydration ? "Studio loaded shared encrypted docs from the server." : "Remote Studio changes applied.");
+	setStudioSyncMsg("");
+	
 	return true;
 }
 
@@ -2427,7 +2429,7 @@ React.useEffect(() => {
 									<button style={{ ...panelButtonStyle(tool === "hand"), textAlign: "center" }} onClick={() => setTool("hand")}>Hand</button>
 								</div>
 								<div style={{ fontSize: 12, opacity: 0.65 }}>{savedAt ? `Saved locally ${formatSavedAt(savedAt)}` : ""}</div>
-								{studioSyncMsg ? <div style={{ fontSize: 12, lineHeight: 1.35, opacity: 0.78 }}>{studioSyncMsg}</div> : null}
+								
 							</div>
 						) : null}
 
