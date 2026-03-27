@@ -2256,6 +2256,43 @@ React.useEffect(() => {
 	return (
 
 		<div style={{ padding: 8, display: "grid", gap: 8 }}>
+			<style>{`
+				.bfStudioOpacitySlider {
+					-webkit-appearance: none;
+					appearance: none;
+					background: transparent;
+					height: 18px;
+				}
+				.bfStudioOpacitySlider::-webkit-slider-runnable-track {
+					height: 8px;
+					border-radius: 999px;
+					background: rgba(59,130,246,0.9);
+				}
+				.bfStudioOpacitySlider::-webkit-slider-thumb {
+					-webkit-appearance: none;
+					appearance: none;
+					width: 18px;
+					height: 18px;
+					border-radius: 999px;
+					background: white;
+					border: 2px solid rgba(17,24,39,0.95);
+					margin-top: -5px;
+					box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+				}
+				.bfStudioOpacitySlider::-moz-range-track {
+					height: 8px;
+					border-radius: 999px;
+					background: rgba(59,130,246,0.9);
+				}
+				.bfStudioOpacitySlider::-moz-range-thumb {
+					width: 18px;
+					height: 18px;
+					border-radius: 999px;
+					background: white;
+					border: 2px solid rgba(17,24,39,0.95);
+					box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+				}
+			`}</style>
 			<input ref={fileInputRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
 			<input ref={fontUploadRef} type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf,application/font-woff,application/x-font-ttf,application/x-font-otf" onChange={onUploadFont} style={{ display: "none" }} />
 
