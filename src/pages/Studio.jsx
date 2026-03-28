@@ -877,7 +877,7 @@ React.useEffect(() => {
 		window.removeEventListener("visibilitychange", onVisible);
 		window.removeEventListener("focus", onFocus);
 	};
-}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
+}, [orgId]);
 
 React.useEffect(() => {
 	if (!studioLoadedRef.current || !orgId) return;
@@ -901,7 +901,7 @@ React.useEffect(() => {
 			studioStreamRef.current = null;
 		}
 	};
-}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
+}, [orgId]);
 
 React.useEffect(() => {
 	if (!studioLoadedRef.current || !orgId) return;
@@ -923,25 +923,28 @@ React.useEffect(() => {
 
 React.useEffect(() => {
 	const pending = studioPendingRemoteRef.current;
-		if (!pending) return;
-		if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
-		if (studioLastLocalEditRef.current > studioLastSharedSaveRef.current) return;
-		const id = window.setTimeout(() => {
-			studioRemoteSigRef.current = pending.sig;
-			setDocs(pending.remoteState.docs);
-			setSavedBlocks(pending.remoteState.blocks);
-			saveDocs(orgId, pending.remoteState.docs);
-			saveBlocks(orgId, pending.remoteState.blocks);
-			setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
-			studioPendingRemoteRef.current = null;
-			studioLastRemoteApplyRef.current = Date.now();
-			studioHasAppliedRemoteRef.current = true;
-			studioNeedsRemoteHydrationRef.current = false;
-			setStudioRemoteNotice(null);
-			
-		}, 750);
-		return () => window.clearTimeout(id);
-	}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
+	if (!pending) return;
+	if (dragState || resizeState || marquee || panState || guideDrag || textEditId) return;
+	const debounceWindowMs = 900;
+	const localEditAgeMs = Date.now() - Number(studioLastLocalEditRef.current || 0);
+	if (studioLastLocalEditRef.current > studioLastSharedSaveRef.current) {
+		if (localEditAgeMs <= debounceWindowMs) return;
+	}
+	const id = window.setTimeout(() => {
+		studioRemoteSigRef.current = pending.sig;
+		setDocs(pending.remoteState.docs);
+		setSavedBlocks(pending.remoteState.blocks);
+		saveDocs(orgId, pending.remoteState.docs);
+		saveBlocks(orgId, pending.remoteState.blocks);
+		setCurrentId((prev) => pending.remoteState.docs.some((doc) => doc.id === prev) ? prev : (pending.remoteState.docs[0]?.id || null));
+		studioPendingRemoteRef.current = null;
+		studioLastRemoteApplyRef.current = Date.now();
+		studioHasAppliedRemoteRef.current = true;
+		studioNeedsRemoteHydrationRef.current = false;
+		setStudioRemoteNotice(null);
+	}, 750);
+	return () => window.clearTimeout(id);
+}, [orgId, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs]);
 
 
 async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply = false, reason = "poll" } = {}) {
@@ -1002,13 +1005,18 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 		studioNeedsRemoteHydrationRef.current ||
 		(!hasLocalDocs && !hasLocalBlocks)
 	);
-	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || hasUnsyncedLocalEdits)) {
+	const debounceWindowMs = 900;
+	const localEditAgeMs = Date.now() - Number(studioLastLocalEditRef.current || 0);
+	const shouldTreatAsRealOverwriteRisk = hasUnsyncedLocalEdits && localEditAgeMs > debounceWindowMs;
+	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || shouldTreatAsRealOverwriteRisk)) {
 		studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
-		if (hasUnsyncedLocalEdits) {
+		if (shouldTreatAsRealOverwriteRisk) {
 			setStudioRemoteNotice({
 				kind: "queued",
 				text: "Remote changes are waiting because this device still has unsynced local edits.",
 			});
+		} else {
+			setStudioRemoteNotice(null);
 		}
 		return false;
 	}
@@ -2217,7 +2225,7 @@ React.useEffect(() => {
 
 	const dismissQueuedRemoteChanges = React.useCallback(() => {
 		if (!studioPendingRemoteRef.current) return;
-		setStudioRemoteNotice({ kind: "dismissed", text: "Remote Studio changes are still available and will reappear on the next poll." });
+		setStudioRemoteNotice(null);
 	}, []);
 
 	const retryStudioRemoteHydration = React.useCallback(async () => {
@@ -2237,7 +2245,10 @@ React.useEffect(() => {
 		}
 		const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
 		const hasUnsyncedLocalEdits = studioLastLocalEditRef.current > studioLastSharedSaveRef.current;
-		if (hasActiveInteraction && !hasUnsyncedLocalEdits) {
+		const debounceWindowMs = 900;
+		const localEditAgeMs = Date.now() - Number(studioLastLocalEditRef.current || 0);
+		const shouldKeepBanner = hasUnsyncedLocalEdits && !hasActiveInteraction && localEditAgeMs > debounceWindowMs;
+		if (!shouldKeepBanner) {
 			setStudioRemoteNotice(null);
 		}
 	}, [studioRemoteNotice, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
