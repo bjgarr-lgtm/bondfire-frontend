@@ -1004,11 +1004,12 @@ async function fetchAndApplyRemoteStudioState({ queueIfBusy = true, forceApply =
 	);
 	if (!needsAuthoritativeRemoteHydration && !forceApply && queueIfBusy && (hasActiveInteraction || hasUnsyncedLocalEdits)) {
 		studioPendingRemoteRef.current = { sig, remoteState, receivedAt: Date.now() };
-		setStudioRemoteNotice({
-			kind: "queued",
-			text: hasActiveInteraction ? "Changes from another device are ready and will apply when you pause editing." : "Remote changes are waiting because this device still has unsynced local edits.",
-		});
-		
+		if (hasUnsyncedLocalEdits) {
+			setStudioRemoteNotice({
+				kind: "queued",
+				text: "Remote changes are waiting because this device still has unsynced local edits.",
+			});
+		}
 		return false;
 	}
 	studioRemoteSigRef.current = sig;
@@ -2227,6 +2228,19 @@ React.useEffect(() => {
 			setStudioSyncMsg(String(err?.message || err || "Studio rehydrate failed."));
 		}
 	}, [orgId, studioSyncMsg, docs.length, savedBlocks.length, textEditId, dragState, resizeState, marquee, panState, guideDrag]);
+
+	React.useEffect(() => {
+		if (!studioRemoteNotice) return;
+		if (!studioPendingRemoteRef.current) {
+			setStudioRemoteNotice(null);
+			return;
+		}
+		const hasActiveInteraction = !!(dragState || resizeState || marquee || panState || guideDrag || textEditId);
+		const hasUnsyncedLocalEdits = studioLastLocalEditRef.current > studioLastSharedSaveRef.current;
+		if (hasActiveInteraction && !hasUnsyncedLocalEdits) {
+			setStudioRemoteNotice(null);
+		}
+	}, [studioRemoteNotice, dragState, resizeState, marquee, panState, guideDrag, textEditId, docs.length, savedBlocks.length]);
 
 	const activePageLayout = React.useMemo(() => {
 		if (!pageLayouts.length) return null;
