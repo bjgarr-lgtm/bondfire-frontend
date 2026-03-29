@@ -663,6 +663,21 @@ export default function Studio() {
 	const pinchStateRef = React.useRef(null);
 
 	React.useEffect(() => {
+	const preventPinch = (e) => {
+		if (e.scale !== 1) e.preventDefault();
+	};
+
+	document.addEventListener("gesturestart", preventPinch);
+	document.addEventListener("gesturechange", preventPinch);
+
+	return () => {
+		document.removeEventListener("gesturestart", preventPinch);
+		document.removeEventListener("gesturechange", preventPinch);
+	};
+	}, []);
+
+
+	React.useEffect(() => {
 		let cancelled = false;
 		studioLoadedRef.current = false;
 		if (studioSyncTimerRef.current) {
@@ -2927,18 +2942,3 @@ React.useEffect(() => {
 	);
 
 }
-
-
-React.useEffect(() => {
-  const preventPinch = (e) => {
-    if (e.scale !== 1) e.preventDefault();
-  };
-
-  document.addEventListener("gesturestart", preventPinch);
-  document.addEventListener("gesturechange", preventPinch);
-
-  return () => {
-    document.removeEventListener("gesturestart", preventPinch);
-    document.removeEventListener("gesturechange", preventPinch);
-  };
-}, []);
