@@ -84,21 +84,6 @@ const GUIDE_COLORS = {
 	horizontal: "rgba(96,165,250,0.85)",
 };
 
-const STUDIO_SELECTION_COLOR = "#8b5cf6";
-const STUDIO_SELECTION_BORDER = "rgba(139,92,246,0.95)";
-const STUDIO_SELECTION_FILL = "rgba(139,92,246,0.22)";
-
-function getSelectionHandleMetrics(isMobileViewport) {
-	return {
-		cornerSize: isMobileViewport ? 24 : 16,
-		cornerOffset: isMobileViewport ? 12 : 8,
-		barThickness: isMobileViewport ? 12 : 10,
-		barLength: isMobileViewport ? 44 : 34,
-		barOffset: isMobileViewport ? 6 : 5,
-		outlineOffset: 0,
-	};
-}
-
 function storageKey(orgId) {
 	return `bf_studio_docs_${orgId}`;
 }
@@ -676,21 +661,6 @@ export default function Studio() {
 	const studioHasAppliedRemoteRef = React.useRef(false);
 	const studioInitialHydrationTimerRef = React.useRef(null);
 	const pinchStateRef = React.useRef(null);
-
-	React.useEffect(() => {
-	const preventPinch = (e) => {
-		if (e.scale !== 1) e.preventDefault();
-	};
-
-	document.addEventListener("gesturestart", preventPinch);
-	document.addEventListener("gesturechange", preventPinch);
-
-	return () => {
-		document.removeEventListener("gesturestart", preventPinch);
-		document.removeEventListener("gesturechange", preventPinch);
-	};
-	}, []);
-
 
 	React.useEffect(() => {
 		let cancelled = false;
@@ -2288,6 +2258,34 @@ React.useEffect(() => {
 		return pageLayouts[Math.max(0, Math.min(activePageIndex, pageLayouts.length - 1))] || pageLayouts[0] || null;
 	}, [pageLayouts, activePageIndex]);
 
+	const selectionAccent = "#8b5cf6";
+	const inverseZoom = 1 / Math.max(zoom || 1, 0.001);
+	const cornerHandleSize = (isMobileViewport ? 30 : 18) * inverseZoom;
+	const cornerHandleOffset = cornerHandleSize / 2;
+	const sideBarThickness = (isMobileViewport ? 16 : 12) * inverseZoom;
+	const sideBarLength = (isMobileViewport ? 52 : 36) * inverseZoom;
+	const selectionBoxShadow = isMobileViewport ? "0 0 0 8px rgba(139,92,246,0.18)" : "0 1px 6px rgba(0,0,0,0.18)";
+	const selectionCornerHandles = React.useMemo(() => {
+		if (!selected || selected.locked) return [];
+		return [
+			{ key: "nw", left: Number(selected.x || 0) - cornerHandleOffset, top: Number(selected.y || 0) - cornerHandleOffset, cursor: "nwse-resize" },
+			{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - cornerHandleOffset, top: Number(selected.y || 0) - cornerHandleOffset, cursor: "nesw-resize" },
+			{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - cornerHandleOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - cornerHandleOffset, cursor: "nwse-resize" },
+			{ key: "sw", left: Number(selected.x || 0) - cornerHandleOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - cornerHandleOffset, cursor: "nesw-resize" },
+		];
+	}, [selected, cornerHandleOffset]);
+
+	const selectionSideCropBars = React.useMemo(() => {
+		if (!selected || selected.locked || selected.type !== "image") return [];
+		return [
+			{ key: "n", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - sideBarLength / 2, top: Number(selected.y || 0) - sideBarThickness / 2, width: sideBarLength, height: sideBarThickness, cursor: "ns-resize" },
+			{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - sideBarThickness / 2, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - sideBarLength / 2, width: sideBarThickness, height: sideBarLength, cursor: "ew-resize" },
+			{ key: "s", left: Number(selected.x || 0) + Number(selected.width || 0) / 2 - sideBarLength / 2, top: Number(selected.y || 0) + Number(selected.height || 0) - sideBarThickness / 2, width: sideBarLength, height: sideBarThickness, cursor: "ns-resize" },
+			{ key: "w", left: Number(selected.x || 0) - sideBarThickness / 2, top: Number(selected.y || 0) + Number(selected.height || 0) / 2 - sideBarLength / 2, width: sideBarThickness, height: sideBarLength, cursor: "ew-resize" },
+		];
+	}, [selected, sideBarLength, sideBarThickness]);
+
+
 	function commitToActivePage(doc, pageUpdater) {
 		const pages = Array.isArray(doc.pages) && doc.pages.length ? doc.pages.slice() : [makePage(doc.preset || "flyer", {
 			width: doc.width,
@@ -2764,7 +2762,7 @@ React.useEffect(() => {
 															if (el.hidden) return null;
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
-															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? `1px solid ${STUDIO_SELECTION_BORDER}` : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto", touchAction: "none" };
+															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? `1.5px solid ${selectionAccent}` : "none", outlineOffset: 1, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto", touchAction: "none" };
 															if (el.type === "text") return <div
 															key={el.id}
 															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }} onTouchStart={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
@@ -2779,78 +2777,56 @@ React.useEffect(() => {
 															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
-														{selectionBounds ? (() => {
-															const metrics = getSelectionHandleMetrics(isMobileViewport);
-															return (
-																<>
-																	<div
-																		style={{
-																			position: "absolute",
-																			left: selectionBounds.left,
-																			top: selectionBounds.top,
-																			width: selectionBounds.width,
-																			height: selectionBounds.height,
-																			border: `1.5px solid ${STUDIO_SELECTION_BORDER}`,
-																			pointerEvents: "none",
-																			zIndex: 8,
-																		}}
-																	/>
-																	{selected && !selected.locked ? [
-																		{ key: "nw", left: Number(selected.x || 0) - metrics.cornerOffset, top: Number(selected.y || 0) - metrics.cornerOffset, cursor: "nwse-resize" },
-																		{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.cornerOffset, top: Number(selected.y || 0) - metrics.cornerOffset, cursor: "nesw-resize" },
-																		{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.cornerOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.cornerOffset, cursor: "nwse-resize" },
-																		{ key: "sw", left: Number(selected.x || 0) - metrics.cornerOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.cornerOffset, cursor: "nesw-resize" },
-																	].map((handle) => (
-																		<div
-																			key={handle.key}
-																			onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
-																			onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
-																			style={{
-																				position: "absolute",
-																				left: handle.left,
-																				top: handle.top,
-																				width: metrics.cornerSize,
-																				height: metrics.cornerSize,
-																				borderRadius: 999,
-																				background: STUDIO_SELECTION_COLOR,
-																				border: "2px solid white",
-																				cursor: handle.cursor,
-																				zIndex: 12,
-																				touchAction: "none",
-																				boxShadow: `0 0 0 ${isMobileViewport ? 7 : 4}px ${STUDIO_SELECTION_FILL}`,
-																			}}
-																		/>
-																	)) : null}
-																	{selected?.type === "image" && !selected.locked ? [
-																		{ key: "n", left: Number(selected.x || 0) + (Number(selected.width || 0) - metrics.barLength) / 2, top: Number(selected.y || 0) - metrics.barOffset, width: metrics.barLength, height: metrics.barThickness, cursor: "ns-resize", borderRadius: 999 },
-																		{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.barOffset, top: Number(selected.y || 0) + (Number(selected.height || 0) - metrics.barLength) / 2, width: metrics.barThickness, height: metrics.barLength, cursor: "ew-resize", borderRadius: 999 },
-																		{ key: "s", left: Number(selected.x || 0) + (Number(selected.width || 0) - metrics.barLength) / 2, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.barOffset, width: metrics.barLength, height: metrics.barThickness, cursor: "ns-resize", borderRadius: 999 },
-																		{ key: "w", left: Number(selected.x || 0) - metrics.barOffset, top: Number(selected.y || 0) + (Number(selected.height || 0) - metrics.barLength) / 2, width: metrics.barThickness, height: metrics.barLength, cursor: "ew-resize", borderRadius: 999 },
-																	].map((handle) => (
-																		<div
-																			key={handle.key}
-																			onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
-																			onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
-																			style={{
-																				position: "absolute",
-																				left: handle.left,
-																				top: handle.top,
-																				width: handle.width,
-																				height: handle.height,
-																				borderRadius: handle.borderRadius,
-																				background: STUDIO_SELECTION_COLOR,
-																				border: "2px solid white",
-																				cursor: handle.cursor,
-																				zIndex: 11,
-																				touchAction: "none",
-																				boxShadow: `0 0 0 ${isMobileViewport ? 6 : 3}px ${STUDIO_SELECTION_FILL}`,
-																			}}
-																		/>
-																	)) : null}
-																</>
-															);
-														})() : null}
-														{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
+														{selectionBounds ? <div style={{ position: "absolute", left: selectionBounds.left, top: selectionBounds.top, width: selectionBounds.width, height: selectionBounds.height, border: `1.5px solid ${selectionAccent}`, borderRadius: 2, boxShadow: "0 0 0 1px rgba(255,255,255,0.22)", pointerEvents: "none", zIndex: 8 }} /> : null}
+														{selected && !selected.locked ? selectionSideCropBars.map((bar) => (
+									<div
+										key={`bar_${bar.key}`}
+										onPointerDown={(e) => startResize(e, bar.key)}
+										onMouseDownCapture={(e) => startResize(e, bar.key)}
+										onTouchStartCapture={(e) => startResize(e, bar.key)}
+										style={{
+											position: "absolute",
+											left: bar.left,
+											top: bar.top,
+											width: bar.width,
+											height: bar.height,
+											borderRadius: 999,
+											background: selectionAccent,
+											border: "2px solid white",
+											cursor: bar.cursor,
+											zIndex: 11,
+											touchAction: "none",
+											pointerEvents: "auto",
+											boxShadow: selectionBoxShadow,
+											WebkitTapHighlightColor: "transparent",
+										}}
+									/>
+								)) : null}
+								{selected && !selected.locked ? selectionCornerHandles.map((handle) => (
+									<div
+										key={handle.key}
+										onPointerDown={(e) => startResize(e, handle.key)}
+										onMouseDownCapture={(e) => startResize(e, handle.key)}
+										onTouchStartCapture={(e) => startResize(e, handle.key)}
+										style={{
+											position: "absolute",
+											left: handle.left,
+											top: handle.top,
+											width: cornerHandleSize,
+											height: cornerHandleSize,
+											borderRadius: 999,
+											background: selectionAccent,
+											border: "2px solid white",
+											cursor: handle.cursor,
+											zIndex: 12,
+											touchAction: "none",
+											pointerEvents: "auto",
+											boxShadow: selectionBoxShadow,
+											WebkitTapHighlightColor: "transparent",
+										}}
+									/>
+								)) : null}
+								{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 													</>
 												) : (
 													(page.elements || []).map((el) => {
@@ -3017,3 +2993,18 @@ React.useEffect(() => {
 	);
 
 }
+
+
+React.useEffect(() => {
+  const preventPinch = (e) => {
+    if (e.scale !== 1) e.preventDefault();
+  };
+
+  document.addEventListener("gesturestart", preventPinch);
+  document.addEventListener("gesturechange", preventPinch);
+
+  return () => {
+    document.removeEventListener("gesturestart", preventPinch);
+    document.removeEventListener("gesturechange", preventPinch);
+  };
+}, []);
