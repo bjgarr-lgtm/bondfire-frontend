@@ -2927,3 +2927,18 @@ React.useEffect(() => {
 	);
 
 }
+
+
+React.useEffect(() => {
+  const preventPinch = (e) => {
+    if (e.scale !== 1) e.preventDefault();
+  };
+
+  document.addEventListener("gesturestart", preventPinch);
+  document.addEventListener("gesturechange", preventPinch);
+
+  return () => {
+    document.removeEventListener("gesturestart", preventPinch);
+    document.removeEventListener("gesturechange", preventPinch);
+  };
+}, []);
