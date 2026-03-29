@@ -84,6 +84,21 @@ const GUIDE_COLORS = {
 	horizontal: "rgba(96,165,250,0.85)",
 };
 
+const STUDIO_SELECTION_COLOR = "#8b5cf6";
+const STUDIO_SELECTION_BORDER = "rgba(139,92,246,0.95)";
+const STUDIO_SELECTION_FILL = "rgba(139,92,246,0.22)";
+
+function getSelectionHandleMetrics(isMobileViewport) {
+	return {
+		cornerSize: isMobileViewport ? 24 : 16,
+		cornerOffset: isMobileViewport ? 12 : 8,
+		barThickness: isMobileViewport ? 12 : 10,
+		barLength: isMobileViewport ? 44 : 34,
+		barOffset: isMobileViewport ? 6 : 5,
+		outlineOffset: 0,
+	};
+}
+
 function storageKey(orgId) {
 	return `bf_studio_docs_${orgId}`;
 }
@@ -2749,7 +2764,7 @@ React.useEffect(() => {
 															if (el.hidden) return null;
 															const isSelected = selectedIds.includes(el.id);
 															const isCanvasBackground = el.type === "shape" && Number(el.x || 0) <= 0 && Number(el.y || 0) <= 0 && Number(el.width || 0) >= (currentPage?.width || currentDoc.width) && Number(el.height || 0) >= (currentPage?.height || currentDoc.height);
-															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto", touchAction: "none" };
+															const common = { position: "absolute", left: el.x, top: el.y, width: el.width, height: el.height, opacity: el.opacity ?? 1, transform: getElementTransform(el), boxSizing: "border-box", outline: isSelected ? `1px solid ${STUDIO_SELECTION_BORDER}` : "none", outlineOffset: 2, userSelect: "none", cursor: el.locked ? "not-allowed" : (tool === "hand" ? "grab" : "move"), pointerEvents: isCanvasBackground ? "none" : "auto", touchAction: "none" };
 															if (el.type === "text") return <div
 															key={el.id}
 															onMouseDown={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }} onTouchStart={(e) => { if (textEditId === el.id) { e.stopPropagation(); return; } startElementDrag(e, el); }}
@@ -2764,112 +2779,77 @@ React.useEffect(() => {
 															if (el.type === "svg") return <img key={el.id} alt="" src={svgMarkupToDataUrl(el.svg, el.fill || "#111111")} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common }} draggable={false} />;
 															return <img key={el.id} alt="" src={el.src} onMouseDown={(e) => startElementDrag(e, el)} onTouchStart={(e) => startElementDrag(e, el)} onClick={(e) => { e.stopPropagation(); if (!(e.shiftKey || e.ctrlKey || e.metaKey)) selectElement(el, false); closeMenus(); }} onContextMenu={(e) => openContextMenu(e, el)} style={{ ...common, objectFit: el.fit || "cover", borderRadius: 12 }} draggable={false} />;
 														})}
-														{selectionBounds ? (
-														<div
-															style={{
-																position: "absolute",
-																left: selectionBounds.left,
-																top: selectionBounds.top,
-																width: selectionBounds.width,
-																height: selectionBounds.height,
-																border: "2px solid #8b5cf6",
-																boxShadow: "0 0 0 1px rgba(255,255,255,0.9)",
-																pointerEvents: "none",
-																zIndex: 8,
-															}}
-														/>
-														) : null}
-														{selected && !selected.locked ? (
-															<>
-																{[
-																	{ key: "nw", left: Number(selected.x || 0), top: Number(selected.y || 0), cursor: "nwse-resize" },
-																	{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0), top: Number(selected.y || 0), cursor: "nesw-resize" },
-																	{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0), top: Number(selected.y || 0) + Number(selected.height || 0), cursor: "nwse-resize" },
-																	{ key: "sw", left: Number(selected.x || 0), top: Number(selected.y || 0) + Number(selected.height || 0), cursor: "nesw-resize" },
-																].map((handle) => {
-																	const size = isMobileViewport ? 24 : 18;
-																	return (
+														{selectionBounds ? (() => {
+															const metrics = getSelectionHandleMetrics(isMobileViewport);
+															return (
+																<>
+																	<div
+																		style={{
+																			position: "absolute",
+																			left: selectionBounds.left,
+																			top: selectionBounds.top,
+																			width: selectionBounds.width,
+																			height: selectionBounds.height,
+																			border: `1.5px solid ${STUDIO_SELECTION_BORDER}`,
+																			pointerEvents: "none",
+																			zIndex: 8,
+																		}}
+																	/>
+																	{selected && !selected.locked ? [
+																		{ key: "nw", left: Number(selected.x || 0) - metrics.cornerOffset, top: Number(selected.y || 0) - metrics.cornerOffset, cursor: "nwse-resize" },
+																		{ key: "ne", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.cornerOffset, top: Number(selected.y || 0) - metrics.cornerOffset, cursor: "nesw-resize" },
+																		{ key: "se", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.cornerOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.cornerOffset, cursor: "nwse-resize" },
+																		{ key: "sw", left: Number(selected.x || 0) - metrics.cornerOffset, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.cornerOffset, cursor: "nesw-resize" },
+																	].map((handle) => (
 																		<div
 																			key={handle.key}
-																			onMouseDown={(e) => startResize(e, handle.key)}
-																			onTouchStart={(e) => startResize(e, handle.key)}
+																			onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
+																			onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
 																			style={{
 																				position: "absolute",
-																				left: handle.left - size / 2,
-																				top: handle.top - size / 2,
-																				width: size,
-																				height: size,
+																				left: handle.left,
+																				top: handle.top,
+																				width: metrics.cornerSize,
+																				height: metrics.cornerSize,
 																				borderRadius: 999,
-																				background: "#8b5cf6",
+																				background: STUDIO_SELECTION_COLOR,
+																				border: "2px solid white",
+																				cursor: handle.cursor,
+																				zIndex: 12,
+																				touchAction: "none",
+																				boxShadow: `0 0 0 ${isMobileViewport ? 7 : 4}px ${STUDIO_SELECTION_FILL}`,
+																			}}
+																		/>
+																	)) : null}
+																	{selected?.type === "image" && !selected.locked ? [
+																		{ key: "n", left: Number(selected.x || 0) + (Number(selected.width || 0) - metrics.barLength) / 2, top: Number(selected.y || 0) - metrics.barOffset, width: metrics.barLength, height: metrics.barThickness, cursor: "ns-resize", borderRadius: 999 },
+																		{ key: "e", left: Number(selected.x || 0) + Number(selected.width || 0) - metrics.barOffset, top: Number(selected.y || 0) + (Number(selected.height || 0) - metrics.barLength) / 2, width: metrics.barThickness, height: metrics.barLength, cursor: "ew-resize", borderRadius: 999 },
+																		{ key: "s", left: Number(selected.x || 0) + (Number(selected.width || 0) - metrics.barLength) / 2, top: Number(selected.y || 0) + Number(selected.height || 0) - metrics.barOffset, width: metrics.barLength, height: metrics.barThickness, cursor: "ns-resize", borderRadius: 999 },
+																		{ key: "w", left: Number(selected.x || 0) - metrics.barOffset, top: Number(selected.y || 0) + (Number(selected.height || 0) - metrics.barLength) / 2, width: metrics.barThickness, height: metrics.barLength, cursor: "ew-resize", borderRadius: 999 },
+																	].map((handle) => (
+																		<div
+																			key={handle.key}
+																			onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
+																			onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); startResize(e, handle.key); }}
+																			style={{
+																				position: "absolute",
+																				left: handle.left,
+																				top: handle.top,
+																				width: handle.width,
+																				height: handle.height,
+																				borderRadius: handle.borderRadius,
+																				background: STUDIO_SELECTION_COLOR,
 																				border: "2px solid white",
 																				cursor: handle.cursor,
 																				zIndex: 11,
 																				touchAction: "none",
-																				boxShadow: "0 0 0 2px rgba(139,92,246,0.18)",
+																				boxShadow: `0 0 0 ${isMobileViewport ? 6 : 3}px ${STUDIO_SELECTION_FILL}`,
 																			}}
 																		/>
-																	);
-																})}
-																{selected.type === "image" ? [
-																	{
-																		key: "n",
-																		left: Number(selected.x || 0) + 12,
-																		top: Number(selected.y || 0) - (isMobileViewport ? 8 : 7),
-																		width: Math.max(36, Number(selected.width || 0) - 24),
-																		height: isMobileViewport ? 16 : 14,
-																		cursor: "ns-resize",
-																		borderRadius: 999,
-																	},
-																	{
-																		key: "s",
-																		left: Number(selected.x || 0) + 12,
-																		top: Number(selected.y || 0) + Number(selected.height || 0) - (isMobileViewport ? 8 : 7),
-																		width: Math.max(36, Number(selected.width || 0) - 24),
-																		height: isMobileViewport ? 16 : 14,
-																		cursor: "ns-resize",
-																		borderRadius: 999,
-																	},
-																	{
-																		key: "w",
-																		left: Number(selected.x || 0) - (isMobileViewport ? 8 : 7),
-																		top: Number(selected.y || 0) + 12,
-																		width: isMobileViewport ? 16 : 14,
-																		height: Math.max(36, Number(selected.height || 0) - 24),
-																		cursor: "ew-resize",
-																		borderRadius: 999,
-																	},
-																	{
-																		key: "e",
-																		left: Number(selected.x || 0) + Number(selected.width || 0) - (isMobileViewport ? 8 : 7),
-																		top: Number(selected.y || 0) + 12,
-																		width: isMobileViewport ? 16 : 14,
-																		height: Math.max(36, Number(selected.height || 0) - 24),
-																		cursor: "ew-resize",
-																		borderRadius: 999,
-																	},
-																].map((handle) => (
-																	<div
-																		key={handle.key}
-																		onMouseDown={(e) => startResize(e, handle.key)}
-																		onTouchStart={(e) => startResize(e, handle.key)}
-																		style={{
-																			position: "absolute",
-																			left: handle.left,
-																			top: handle.top,
-																			width: handle.width,
-																			height: handle.height,
-																			background: "rgba(139,92,246,0.92)",
-																			border: "2px solid white",
-																			cursor: handle.cursor,
-																			zIndex: 10,
-																			touchAction: "none",
-																			borderRadius: handle.borderRadius,
-																			boxShadow: "0 0 0 2px rgba(139,92,246,0.18)",
-																		}}
-																	/>
-																)) : null}
-															</>
-														) : null}
+																	)) : null}
+																</>
+															);
+														})() : null}
 														{marquee ? <div style={{ position: "absolute", left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height, border: "1px dashed rgba(255,255,255,0.8)", background: "rgba(239,68,68,0.12)", pointerEvents: "none", zIndex: 12 }} /> : null}
 													</>
 												) : (
