@@ -24,15 +24,40 @@
     <div id="root"></div>
     <script>
       // Keep global keyboard handlers from eating normal typing inside inline editors.
-      // This is intentionally capture-phase and narrow: only active for editor inputs.
+      // Space is inserted manually because some app/page listener is swallowing it later.
       window.addEventListener('keydown', function (event) {
         var target = event.target;
         if (!target || !target.closest) return;
         if (!target.closest('.rh-inline-editor, .rh-editor-toolbar input, .rh-editor-toolbar select, .rh-editor-toolbar textarea')) return;
+
+        var tag = String(target.tagName || '').toLowerCase();
+        var isTextField = tag === 'input' || tag === 'textarea';
+        var isSpace = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space';
+
+        if (isSpace && isTextField && !target.readOnly && !target.disabled) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+
+          var start = typeof target.selectionStart === 'number' ? target.selectionStart : String(target.value || '').length;
+          var end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
+          var value = String(target.value || '');
+          var next = value.slice(0, start) + ' ' + value.slice(end);
+
+          target.value = next;
+          try {
+            target.setSelectionRange(start + 1, start + 1);
+          } catch (e) {}
+
+          target.dispatchEvent(new InputEvent('input', {
+            inputType: 'insertText',
+            data: ' ',
+            bubbles: true,
+            cancelable: true,
+          }));
+          return;
+        }
+
         if (
-          event.key === ' ' ||
-          event.key === 'Spacebar' ||
-          event.code === 'Space' ||
           event.key === 'Enter' ||
           event.key === 'Backspace' ||
           event.key === 'Delete' ||
@@ -41,7 +66,7 @@
           event.key === 'ArrowUp' ||
           event.key === 'ArrowDown'
         ) {
-          event.stopPropagation();
+          event.stopImmediatePropagation();
         }
       }, true);
     </script>
