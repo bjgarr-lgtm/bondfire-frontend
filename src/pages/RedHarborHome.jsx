@@ -213,6 +213,13 @@ function cleanStringArray(arr, limit = 12) {
     .slice(0, limit)
 }
 
+function cleanStringArrayForSave(arr, limit = 12) {
+  return (Array.isArray(arr) ? arr : [])
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean)
+    .slice(0, limit)
+}
+
 function cleanJoinCards(arr) {
   const items = Array.isArray(arr) ? arr : []
   const cleaned = items
@@ -1206,10 +1213,10 @@ export default function RedHarborHome() {
         hero_image_url: src.hero_image_url,
         font_family: src.font_family,
         accent_color: src.accent_color,
-        what_we_do: src.what_we_do,
-        site_purpose_items: src.site_purpose_items,
+        what_we_do: cleanStringArrayForSave(src.what_we_do, 12),
+        site_purpose_items: cleanStringArrayForSave(src.site_purpose_items, 8),
         join_cards: src.join_cards,
-        events_items: src.events_items,
+        events_items: cleanStringArrayForSave(src.events_items, 8),
         contact_card_title: src.contact_card_title,
         contact_card_body: src.contact_card_body,
         member_access_title: src.member_access_title,
@@ -1219,9 +1226,9 @@ export default function RedHarborHome() {
         membership_details_title: src.membership_details_title,
         membership_details_body: src.membership_details_body,
         membership_includes_title: src.membership_includes_title,
-        membership_includes_items: src.membership_includes_items,
+        membership_includes_items: cleanStringArrayForSave(src.membership_includes_items, 12),
         membership_dues_title: src.membership_dues_title,
-        membership_dues_items: src.membership_dues_items,
+        membership_dues_items: cleanStringArrayForSave(src.membership_dues_items, 12),
         membership_cta_title: src.membership_cta_title,
         membership_cta_body: src.membership_cta_body,
         membership_poster_url: src.membership_poster_url,
