@@ -24,51 +24,75 @@
     <div id="root"></div>
     <script>
       // Keep global keyboard handlers from eating normal typing inside inline editors.
-      // Space is inserted manually because some app/page listener is swallowing it later.
-      window.addEventListener('keydown', function (event) {
-        var target = event.target;
-        if (!target || !target.closest) return;
-        if (!target.closest('.rh-inline-editor, .rh-editor-toolbar input, .rh-editor-toolbar select, .rh-editor-toolbar textarea')) return;
+      // Space is inserted with native setters so React-controlled fields keep it.
+      (function () {
+        function isEditorTextField(target) {
+          if (!target || !target.closest) return false;
+          if (!target.closest('.rh-inline-editor, .rh-editor-toolbar input, .rh-editor-toolbar select, .rh-editor-toolbar textarea')) return false;
+          var tag = String(target.tagName || '').toLowerCase();
+          return tag === 'input' || tag === 'textarea';
+        }
 
-        var tag = String(target.tagName || '').toLowerCase();
-        var isTextField = tag === 'input' || tag === 'textarea';
-        var isSpace = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space';
+        function setNativeValue(target, value) {
+          var tag = String(target.tagName || '').toLowerCase();
+          var proto = tag === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+          var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (descriptor && descriptor.set) {
+            descriptor.set.call(target, value);
+          } else {
+            target.value = value;
+          }
+        }
 
-        if (isSpace && isTextField && !target.readOnly && !target.disabled) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-
+        function insertText(target, text) {
           var start = typeof target.selectionStart === 'number' ? target.selectionStart : String(target.value || '').length;
           var end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
           var value = String(target.value || '');
-          var next = value.slice(0, start) + ' ' + value.slice(end);
+          var next = value.slice(0, start) + text + value.slice(end);
 
-          target.value = next;
+          setNativeValue(target, next);
           try {
-            target.setSelectionRange(start + 1, start + 1);
+            target.setSelectionRange(start + text.length, start + text.length);
           } catch (e) {}
 
-          target.dispatchEvent(new InputEvent('input', {
-            inputType: 'insertText',
-            data: ' ',
-            bubbles: true,
-            cancelable: true,
-          }));
-          return;
+          target.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
-        if (
-          event.key === 'Enter' ||
-          event.key === 'Backspace' ||
-          event.key === 'Delete' ||
-          event.key === 'ArrowLeft' ||
-          event.key === 'ArrowRight' ||
-          event.key === 'ArrowUp' ||
-          event.key === 'ArrowDown'
-        ) {
-          event.stopImmediatePropagation();
-        }
-      }, true);
+        window.addEventListener('keydown', function (event) {
+          var target = event.target;
+          var isSpace = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space';
+
+          if (isSpace && isEditorTextField(target) && !target.readOnly && !target.disabled) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            insertText(target, ' ');
+            return;
+          }
+
+          if (
+            isEditorTextField(target) &&
+            (
+              event.key === 'Enter' ||
+              event.key === 'Backspace' ||
+              event.key === 'Delete' ||
+              event.key === 'ArrowLeft' ||
+              event.key === 'ArrowRight' ||
+              event.key === 'ArrowUp' ||
+              event.key === 'ArrowDown'
+            )
+          ) {
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('beforeinput', function (event) {
+          var target = event.target;
+          if (!isEditorTextField(target)) return;
+          if (event.inputType === 'insertText' && event.data === ' ') {
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
