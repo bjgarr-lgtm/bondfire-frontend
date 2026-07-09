@@ -23,9 +23,38 @@
   <body>
     <div id="root"></div>
     <script>
-      // Keep global keyboard handlers from eating normal typing inside inline editors.
-      // Space is inserted with native setters so React-controlled fields keep it.
+      // Inline editor guard.
+      // The homepage normalizer trims list values on every React change, which makes
+      // trailing spaces and blank "Add item" rows vanish while editing. Humanity survives.
       (function () {
+        var originalTrim = String.prototype.trim;
+        var preserveEditorSpacesUntil = 0;
+        var forceEmptyListItemUntil = 0;
+
+        function now() {
+          return Date.now ? Date.now() : new Date().getTime();
+        }
+
+        function editorActive() {
+          var el = document.activeElement;
+          return !!(el && el.closest && el.closest('.rh-inline-editor, .rh-editor-toolbar input, .rh-editor-toolbar select, .rh-editor-toolbar textarea'));
+        }
+
+        String.prototype.trim = function () {
+          var raw = String(this);
+          var t = now();
+
+          if (editorActive() && t < forceEmptyListItemUntil && raw === '') {
+            return 'New item';
+          }
+
+          if (editorActive() && t < preserveEditorSpacesUntil) {
+            return raw;
+          }
+
+          return originalTrim.call(this);
+        };
+
         function isEditorTextField(target) {
           if (!target || !target.closest) return false;
           if (!target.closest('.rh-inline-editor, .rh-editor-toolbar input, .rh-editor-toolbar select, .rh-editor-toolbar textarea')) return false;
@@ -50,6 +79,7 @@
           var value = String(target.value || '');
           var next = value.slice(0, start) + text + value.slice(end);
 
+          preserveEditorSpacesUntil = now() + 750;
           setNativeValue(target, next);
           try {
             target.setSelectionRange(start + text.length, start + text.length);
@@ -69,28 +99,26 @@
             return;
           }
 
-          if (
-            isEditorTextField(target) &&
-            (
-              event.key === 'Enter' ||
-              event.key === 'Backspace' ||
-              event.key === 'Delete' ||
-              event.key === 'ArrowLeft' ||
-              event.key === 'ArrowRight' ||
-              event.key === 'ArrowUp' ||
-              event.key === 'ArrowDown'
-            )
-          ) {
-            event.stopImmediatePropagation();
+          if (isEditorTextField(target)) {
+            preserveEditorSpacesUntil = now() + 750;
           }
         }, true);
 
-        window.addEventListener('beforeinput', function (event) {
-          var target = event.target;
-          if (!isEditorTextField(target)) return;
-          if (event.inputType === 'insertText' && event.data === ' ') {
-            event.stopImmediatePropagation();
+        window.addEventListener('input', function (event) {
+          if (isEditorTextField(event.target)) {
+            preserveEditorSpacesUntil = now() + 750;
           }
+        }, true);
+
+        window.addEventListener('click', function (event) {
+          var target = event.target;
+          if (!target || !target.closest) return;
+          var button = target.closest('button');
+          if (!button) return;
+          if (String(button.textContent || '').trim() !== 'Add item') return;
+          if (!button.closest('.rh-inline-group')) return;
+          forceEmptyListItemUntil = now() + 750;
+          preserveEditorSpacesUntil = now() + 750;
         }, true);
       })();
     </script>
