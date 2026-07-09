@@ -393,6 +393,29 @@ function readCurrentOrgId() {
 }
 
 
+function handleControlledSpaceKey(e, value, onChange) {
+  if (!(e.key === " " || e.key === "Spacebar" || e.code === "Space")) return false
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  const target = e.currentTarget
+  const raw = String(value ?? "")
+  const start = typeof target.selectionStart === "number" ? target.selectionStart : raw.length
+  const end = typeof target.selectionEnd === "number" ? target.selectionEnd : start
+  const next = raw.slice(0, start) + " " + raw.slice(end)
+
+  onChange(next)
+
+  requestAnimationFrame(() => {
+    try {
+      target.setSelectionRange(start + 1, start + 1)
+    } catch {}
+  })
+
+  return true
+}
+
 async function fileToOptimizedDataUrl(file) {
   if (!file) return ""
   if (!file.type || !file.type.startsWith("image/")) {
@@ -454,6 +477,7 @@ function InlineTextEdit({
       <textarea
         className={`rh-inline-editor rh-inline-editor-textarea ${className}`.trim()}
         value={value}
+        onKeyDown={(e) => handleControlledSpaceKey(e, value, onChange)}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
@@ -466,6 +490,7 @@ function InlineTextEdit({
       <input
         className={`rh-inline-editor rh-inline-editor-h1 ${className}`.trim()}
         value={value}
+        onKeyDown={(e) => handleControlledSpaceKey(e, value, onChange)}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
       />
@@ -477,6 +502,7 @@ function InlineTextEdit({
       <input
         className={`rh-inline-editor rh-inline-editor-h2 ${className}`.trim()}
         value={value}
+        onKeyDown={(e) => handleControlledSpaceKey(e, value, onChange)}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
       />
@@ -564,6 +590,13 @@ function InlineReorderableStringListEditor({
             <input
               className="rh-inline-editor"
               value={item || ""}
+              onKeyDown={(e) => {
+                handleControlledSpaceKey(e, item || "", (nextValue) => {
+                  const next = safe.slice()
+                  next[index] = nextValue
+                  onChange(next)
+                })
+              }}
               onChange={(e) => {
                 const next = safe.slice()
                 next[index] = e.target.value
@@ -639,12 +672,14 @@ function InlineCardBlockEditor({
       <input
         className="rh-inline-editor"
         value={cardTitle}
+        onKeyDown={(e) => handleControlledSpaceKey(e, cardTitle, onTitleChange)}
         onChange={(e) => onTitleChange(e.target.value)}
         placeholder="Card title"
       />
       <textarea
         className="rh-inline-editor rh-inline-editor-textarea"
         value={cardBody}
+        onKeyDown={(e) => handleControlledSpaceKey(e, cardBody, onBodyChange)}
         onChange={(e) => onBodyChange(e.target.value)}
         placeholder="Card body"
         rows={4}
@@ -704,6 +739,12 @@ function InlineActionListEditor({
             <input
               className="rh-inline-editor"
               value={item.label || ""}
+              onKeyDown={(e) => {
+                handleControlledSpaceKey(e, item.label || "", (nextValue) => {
+                  const next = safe.map((x, i) => i === index ? { ...x, label: nextValue } : x)
+                  onChange(next)
+                })
+              }}
               onChange={(e) => {
                 const next = safe.map((x, i) => i === index ? { ...x, label: e.target.value } : x)
                 onChange(next)
@@ -713,6 +754,12 @@ function InlineActionListEditor({
             <input
               className="rh-inline-editor"
               value={item.url || ""}
+              onKeyDown={(e) => {
+                handleControlledSpaceKey(e, item.url || "", (nextValue) => {
+                  const next = safe.map((x, i) => i === index ? { ...x, url: nextValue } : x)
+                  onChange(next)
+                })
+              }}
               onChange={(e) => {
                 const next = safe.map((x, i) => i === index ? { ...x, url: e.target.value } : x)
                 onChange(next)
@@ -1274,29 +1321,6 @@ export default function RedHarborHome() {
       setIsDirty(false)
       setSaveMsg("Saved")
       setEditorMode(false)
-
-      try {
-        console.log("RH SAVE STEP 9 verify fetch start")
-        const verifyRes = await fetch(`/api/public-home/${ORG_ID}?t=${Date.now()}`, {
-          method: "GET",
-          cache: "no-store",
-          headers: {
-            Accept: "application/json",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-          },
-        })
-        console.log("RH SAVE STEP 10 verify fetch returned", verifyRes.status)
-        const verifyData = await verifyRes.json().catch(() => ({}))
-        console.log("RH SAVE STEP 11 verify json", verifyData)
-        if (verifyRes.ok && verifyData?.ok !== false && verifyData?.public) {
-          const verifiedHome = normalizeHome(verifyData.public)
-          console.log("RH SAVE STEP 12 apply verified home", verifiedHome)
-          setHome(verifiedHome)
-        }
-      } catch (verifyErr) {
-        console.warn("public-home verification skipped", verifyErr)
-      }
 
       setTimeout(() => setSaveMsg(""), 1800)
     } catch (err) {
