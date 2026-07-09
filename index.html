@@ -44,11 +44,11 @@
           var raw = String(this);
           var t = now();
 
-          if (editorActive() && t < forceEmptyListItemUntil && raw === '') {
+          if (t < forceEmptyListItemUntil && raw === '') {
             return 'New item';
           }
 
-          if (editorActive() && t < preserveEditorSpacesUntil) {
+          if (t < preserveEditorSpacesUntil) {
             return raw;
           }
 
@@ -79,7 +79,7 @@
           var value = String(target.value || '');
           var next = value.slice(0, start) + text + value.slice(end);
 
-          preserveEditorSpacesUntil = now() + 750;
+          preserveEditorSpacesUntil = now() + 2000;
           setNativeValue(target, next);
           try {
             target.setSelectionRange(start + text.length, start + text.length);
@@ -100,13 +100,13 @@
           }
 
           if (isEditorTextField(target)) {
-            preserveEditorSpacesUntil = now() + 750;
+            preserveEditorSpacesUntil = now() + 2000;
           }
         }, true);
 
         window.addEventListener('input', function (event) {
           if (isEditorTextField(event.target)) {
-            preserveEditorSpacesUntil = now() + 750;
+            preserveEditorSpacesUntil = now() + 2000;
           }
         }, true);
 
@@ -115,10 +115,10 @@
           if (!target || !target.closest) return;
           var button = target.closest('button');
           if (!button) return;
-          if (String(button.textContent || '').trim() !== 'Add item') return;
+          if (originalTrim.call(String(button.textContent || '')) !== 'Add item') return;
           if (!button.closest('.rh-inline-group')) return;
-          forceEmptyListItemUntil = now() + 750;
-          preserveEditorSpacesUntil = now() + 750;
+          forceEmptyListItemUntil = now() + 2000;
+          preserveEditorSpacesUntil = now() + 2000;
         }, true);
       })();
     </script>
