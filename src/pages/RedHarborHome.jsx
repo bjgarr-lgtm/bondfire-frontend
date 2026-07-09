@@ -208,8 +208,8 @@ function cleanLinkArray(arr, limit = 8) {
 
 function cleanStringArray(arr, limit = 12) {
   return (Array.isArray(arr) ? arr : [])
-    .map((item) => String(item || "").trim())
-    .filter(Boolean)
+    .map((item) => String(item ?? ""))
+    .filter((item) => item.trim())
     .slice(0, limit)
 }
 
@@ -515,8 +515,8 @@ function InlineStringListEditor({
           onChange(
             String(e.target.value || "")
               .split("\n")
-              .map((s) => s.trim())
-              .filter(Boolean)
+              .map((s) => s)
+              .filter((s) => s.trim())
           )
         }
         placeholder={`${itemPlaceholder}\n${itemPlaceholder}\n${itemPlaceholder}`}
@@ -600,7 +600,7 @@ function InlineReorderableStringListEditor({
         <button
           type="button"
           className="rh-inline-add-btn"
-          onClick={() => onChange([...safe, ""])}
+          onClick={() => onChange([...safe, itemPlaceholder || "New item"])}
         >
           Add item
         </button>
